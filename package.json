@@ -1,0 +1,39 @@
+{
+  "name": "pi-packages",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Auto-review and OS sandbox security extensions for Pi",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/erichll/pi-packages.git"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "sandbox",
+    "security"
+  ],
+  "packageManager": "npm@11.12.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "pi": {
+    "extensions": [
+      "./packages/pi-auto-review/src/index.ts",
+      "./packages/pi-sandbox/src/index.ts"
+    ]
+  },
+  "scripts": {
+    "check": "npm run check --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^6.0.3"
+  }
+}

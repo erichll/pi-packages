@@ -1,0 +1,12 @@
+pi-sandbox
+Copyright 2026 pi-sandbox contributors
+
+This product depends on Anthropic Sandbox Runtime:
+https://github.com/anthropic-experimental/sandbox-runtime
+
+Anthropic Sandbox Runtime
+Copyright Anthropic PBC
+Licensed under the Apache License, Version 2.0.
+
+The Apache License, Version 2.0 is available at:
+https://www.apache.org/licenses/LICENSE-2.0

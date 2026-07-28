@@ -1,0 +1,13 @@
+{
+  "model": "cliproxyapi/codex-auto-review",
+  "reasoning": "medium",
+  "timeoutMs": 45000,
+  "maxTokens": 1600,
+  "retries": 1,
+  "maxUserTranscriptTokens": 1200,
+  "maxToolTranscriptTokens": 1200,
+  "maxRelevantResultTokens": 800,
+  "failureMode": "deny",
+  "grantTtlMs": 60000,
+  "autoConfirmBoundedAllows": ["external_directory"]
+}

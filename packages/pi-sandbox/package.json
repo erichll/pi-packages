@@ -1,0 +1,65 @@
+{
+  "name": "@erichll/pi-sandbox",
+  "version": "0.3.0",
+  "description": "Sandbox Runtime-backed Linux and macOS sandbox with pi-auto-review approval",
+  "type": "module",
+  "license": "Apache-2.0",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi",
+    "security",
+    "sandbox",
+    "sandbox-runtime"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/erichll/pi-packages.git",
+    "directory": "packages/pi-sandbox"
+  },
+  "homepage": "https://github.com/erichll/pi-packages/tree/main/packages/pi-sandbox",
+  "bugs": {
+    "url": "https://github.com/erichll/pi-packages/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "NOTICE"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./approval": "./src/approval.ts",
+    "./runner": "./src/runner.ts",
+    "./subagent": "./src/subagent.ts",
+    "./traps": "./src/traps.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.67",
+    "@erichll/pi-auto-review": "0.3.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.82.1",
+    "typebox": ">=1.0.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.82.1",
+    "@types/node": "^22.15.3",
+    "pi-subagents": "0.37.2",
+    "typescript": "^6.0.3"
+  }
+}

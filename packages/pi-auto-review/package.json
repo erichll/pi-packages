@@ -1,0 +1,61 @@
+{
+  "name": "@erichll/pi-auto-review",
+  "version": "0.3.0",
+  "description": "Model-backed boundary approval broker for Pi",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi",
+    "security",
+    "sandbox"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/erichll/pi-packages.git",
+    "directory": "packages/pi-auto-review"
+  },
+  "homepage": "https://github.com/erichll/pi-packages/tree/main/packages/pi-auto-review",
+  "bugs": {
+    "url": "https://github.com/erichll/pi-packages/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "src",
+    "config/config.example.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./broker": "./src/broker/index.ts",
+    "./sandbox": "./src/integrations/sandbox.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "node --disable-warning=ExperimentalWarning --experimental-loader ./test/typescript-loader.mjs --test test/*.test.ts"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.82.1",
+    "@earendil-works/pi-coding-agent": ">=0.82.1",
+    "@gotgenes/pi-permission-system": ">=23.0.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.82.1",
+    "@earendil-works/pi-coding-agent": "0.82.1",
+    "@gotgenes/pi-permission-system": "24.0.0",
+    "@types/node": "^22.15.3",
+    "typescript": "^6.0.3"
+  }
+}
