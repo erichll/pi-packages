@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1 - 2026-07-29
+
+- Republish to refresh the npm search index used by the pi.dev package gallery.
+- Depend on `@erichll/pi-auto-review@0.3.2`.
+
 ## 0.4.0 - 2026-07-29
 
 - Add an optional, approval-gated Host-IPC Bash backend for commands that need
