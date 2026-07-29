@@ -34,6 +34,19 @@ import {
   type BoundaryReviewerContext,
 } from "./broker/index.ts";
 import { PermissionUiAutoConfirmer } from "./ui-auto-confirm.ts";
+import {
+  buildUserReviewNotice,
+  buildUserReviewStatus,
+  notifyUserReview,
+  reviewTargetFromRequest,
+  setUserReviewStatus,
+  type UserReviewOutcome,
+} from "./user-feedback.ts";
+
+export {
+  buildUserReviewNotice,
+  buildUserReviewStatus,
+} from "./user-feedback.ts";
 
 export { parseDecision } from "./policy.ts";
 export * from "./broker/index.ts";
@@ -98,13 +111,20 @@ type ReviewResult = {
 const EXTENSION_NAME = "pi-auto-review";
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PROJECT_CONFIG_PATH = join(".pi", "pi-auto-review.json");
+const USER_CONFIG_RELATIVE_PATH = join(
+  ".pi",
+  "agent",
+  "extensions",
+  "pi-auto-review",
+  "config.json",
+);
 const PERMISSIONS_SERVICE_KEY = Symbol.for(
   "@gotgenes/pi-permission-system:service",
 );
 const BOUNDED_SURFACES = new Set(["path", "external_directory"]);
 const DEFAULT_CONFIG: Config = {
-  model: "cliproxyapi/codex-auto-review",
-  reasoning: "medium",
+  model: "codex-auto-review",
+  reasoning: "low",
   timeoutMs: 45_000,
   maxTokens: 1_600,
   retries: 1,
@@ -113,7 +133,7 @@ const DEFAULT_CONFIG: Config = {
   maxRelevantResultTokens: 800,
   failureMode: "deny",
   grantTtlMs: 60_000,
-  autoConfirmBoundedAllows: Object.freeze(["external_directory"]),
+  autoConfirmBoundedAllows: Object.freeze(["external_directory", "path"]),
 };
 
 const REVIEWER_SYSTEM_PROMPT = `You are a fail-closed permission reviewer.
@@ -177,8 +197,15 @@ function validateConfig(value: unknown, source: string): Config {
     );
   }
   const config = { ...DEFAULT_CONFIG, ...raw };
-  if (!/^[^/]+\/[^/]+$/.test(config.model)) {
-    throw new Error(`${EXTENSION_NAME}: model must be provider/model`);
+  if (
+    typeof config.model !== "string" ||
+    !config.model.trim() ||
+    /\s/.test(config.model) ||
+    (config.model.includes("/") && !/^[^/]+\/[^/]+$/.test(config.model))
+  ) {
+    throw new Error(
+      `${EXTENSION_NAME}: model must be a model id or provider/model`,
+    );
   }
   if (
     !["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(
@@ -247,11 +274,17 @@ function validateConfig(value: unknown, source: string): Config {
   };
 }
 
-export function loadConfig(): Config {
-  const path = join(dirname(fileURLToPath(import.meta.url)), "config.json");
-  let value: unknown;
+export function packageConfigPath(): string {
+  return join(dirname(fileURLToPath(import.meta.url)), "config.json");
+}
+
+export function userConfigPath(home = homedir()): string {
+  return join(home, USER_CONFIG_RELATIVE_PATH);
+}
+
+function readJsonConfig(path: string): unknown {
   try {
-    value = JSON.parse(readFileSync(path, "utf8"));
+    return JSON.parse(readFileSync(path, "utf8"));
   } catch (error) {
     throw new Error(
       `${EXTENSION_NAME}: cannot load ${path}: ${
@@ -259,7 +292,70 @@ export function loadConfig(): Config {
       }`,
     );
   }
-  return validateConfig(value, path);
+}
+
+/** Package-shipped defaults from `src/config.json`. */
+export function loadConfig(): Config {
+  const path = packageConfigPath();
+  return validateConfig(readJsonConfig(path), path);
+}
+
+/**
+ * User-global trusted overlay at
+ * `~/.pi/agent/extensions/pi-auto-review/config.json`.
+ * May set any legal config key, including model and autoConfirmBoundedAllows.
+ */
+export function applyUserConfig(
+  packageConfig: Config,
+  value: unknown,
+  source = "user config",
+): Config {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${EXTENSION_NAME}: ${source} must be an object`);
+  }
+  return validateConfig(
+    {
+      ...packageConfig,
+      autoConfirmBoundedAllows: [...packageConfig.autoConfirmBoundedAllows],
+      ...(value as Record<string, unknown>),
+    },
+    source,
+  );
+}
+
+export type LoadTrustedConfigOptions = {
+  packageConfig?: Config;
+  userConfigPath?: string;
+};
+
+/**
+ * Trusted config = package defaults, optionally fully overlaid by the user
+ * global file. Project config is applied later and may only tighten.
+ */
+export function loadTrustedConfig(
+  options: LoadTrustedConfigOptions = {},
+): Config {
+  const packageConfig = options.packageConfig ?? loadConfig();
+  const path = options.userConfigPath ?? userConfigPath();
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return packageConfig;
+    }
+    throw new Error(
+      `${EXTENSION_NAME}: cannot load ${path}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  return applyUserConfig(packageConfig, value, path);
 }
 
 const TIGHTENABLE_NUMBER_KEYS = [
@@ -356,6 +452,7 @@ function protectedWriteHardDeny(
   const protectedDirectories = [
     PACKAGE_ROOT,
     join(agentDir, "logs"),
+    join(agentDir, "extensions", "pi-auto-review"),
   ];
   const protectedFiles = [
     join(request.cwd, ".pi", "settings.json"),
@@ -364,6 +461,7 @@ function protectedWriteHardDeny(
     join(agentDir, "settings.json"),
     join(agentDir, "permissions.json"),
     join(agentDir, "sandbox.json"),
+    userConfigPath(),
   ];
   if (
     protectedDirectories.some((path) => isWithin(path, resolvedTarget)) ||
@@ -538,16 +636,32 @@ ${transcript.text}
 </selected-transcript>`;
 }
 
+function parseModelRef(modelRef: string): {
+  provider?: string;
+  modelId: string;
+} {
+  if (!modelRef.includes("/")) {
+    return { modelId: modelRef };
+  }
+  const [provider, ...idParts] = modelRef.split("/");
+  return { provider, modelId: idParts.join("/") };
+}
+
 async function resolveReviewer(
   ctx: ExtensionContext,
   config: Config,
 ): Promise<ReviewerRuntime> {
-  const [provider, ...idParts] = config.model.split("/");
-  const modelId = idParts.join("/");
-  const registeredModel = ctx.modelRegistry.find(provider, modelId);
-  const providerFallback = ctx.modelRegistry
-    .getAvailable()
-    .find((candidate) => candidate.provider === provider);
+  const { provider, modelId } = parseModelRef(config.model);
+  const available = ctx.modelRegistry.getAvailable();
+  const registeredModel = provider
+    ? ctx.modelRegistry.find(provider, modelId)
+    : available.find(
+        (candidate) =>
+          candidate.id === modelId || candidate.name === modelId,
+      );
+  const providerFallback = provider
+    ? available.find((candidate) => candidate.provider === provider)
+    : undefined;
   const model =
     registeredModel ||
     (providerFallback
@@ -555,7 +669,9 @@ async function resolveReviewer(
       : undefined);
   if (!model) {
     throw new Error(
-      `provider ${provider} is unavailable for custom model ${config.model}`,
+      provider
+        ? `provider ${provider} is unavailable for custom model ${config.model}`
+        : `model ${config.model} is unavailable`,
     );
   }
   const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
@@ -757,7 +873,9 @@ export function createPiAutoReviewExtension(
   options: PiAutoReviewExtensionOptions = {},
 ): (pi: ExtensionAPI) => void {
   const trustedConfig = Object.freeze(
-    validateConfig(options.config ?? loadConfig(), "trusted config"),
+    options.config !== undefined
+      ? validateConfig(options.config, "trusted config")
+      : loadTrustedConfig(),
   );
   const allowUntrustedWorkspace =
     options.allowUntrustedWorkspace === true ||
@@ -897,11 +1015,14 @@ export function createPiAutoReviewExtension(
       context = undefined;
       broker = undefined;
       disposeBrokerService = undefined;
-      console.error(
-        `${EXTENSION_NAME}: session disabled: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
+      const message = `${EXTENSION_NAME}: session disabled: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+      console.error(message);
+      notifyUserReview(ctx, {
+        type: "error",
+        message,
+      });
     }
   });
 
@@ -925,56 +1046,100 @@ export function createPiAutoReviewExtension(
               surface,
               reason,
             });
+            notifyUserReview(
+              context,
+              buildUserReviewNotice({
+                outcome: "unavailable",
+                surface,
+                rationale: reason,
+              }),
+            );
             return { kind: "deny", reason };
           }
 
           const request = boundaryRequest(context, details, query);
-          const decision = await broker.review(request, {
-            sessionId: context.sessionManager.getSessionId(),
-            scopeKey: currentTurnScope(context),
-            issueGrant: false,
-          });
-          const result = reviewResults.get(request.id);
-          reviewResults.delete(request.id);
-          const allowCapped = decision.kind === "allow" && boundedRequest(details);
-          const autoConfirmQueued =
-            allowCapped &&
-            context.mode === "tui" &&
-            context.hasUI &&
-            uiAutoConfirmer.stage(request.id, surface);
-          log.review("pi_auto_review_decision", {
-            requestId: request.id,
-            surface,
-            model: config.model,
-            outcome: allowCapped ? "defer" : decision.kind,
-            reviewerOutcome: decision.review.outcome,
-            riskLevel: decision.review.riskLevel,
-            userAuthorization: decision.review.userAuthorization,
-            rationale: decision.review.rationale,
-            allowCapped,
-            autoConfirmQueued,
-            circuitBreakerTripped:
-              decision.kind === "deny"
-                ? decision.circuitBreakerTripped
-                : false,
-            attempts: result?.attempts ?? 0,
-            retryErrors: result?.retryErrors ?? [],
-            durationMs: result?.durationMs,
-            transcriptUserCharacters: result?.transcript.userCharacters,
-            transcriptToolCharacters: result?.transcript.toolCharacters,
-            transcriptRelevantResultCharacters:
-              result?.transcript.relevantResultCharacters,
-            transcriptTruncated: result?.transcript.truncated,
-          });
+          const target = reviewTargetFromRequest(request);
+          setUserReviewStatus(
+            context,
+            buildUserReviewStatus(surface, target),
+          );
+          try {
+            const decision = await broker.review(request, {
+              sessionId: context.sessionManager.getSessionId(),
+              scopeKey: currentTurnScope(context),
+              issueGrant: false,
+            });
+            const result = reviewResults.get(request.id);
+            reviewResults.delete(request.id);
+            const allowCapped =
+              decision.kind === "allow" && boundedRequest(details);
+            const autoConfirmQueued =
+              allowCapped &&
+              context.mode === "tui" &&
+              context.hasUI &&
+              uiAutoConfirmer.stage(request.id, surface);
 
-          if (allowCapped || decision.kind === "defer") {
-            return { kind: "defer" };
+            let userOutcome: UserReviewOutcome;
+            if (decision.kind === "deny" && decision.circuitBreakerTripped) {
+              userOutcome = "circuit_breaker";
+            } else if (allowCapped && autoConfirmQueued) {
+              userOutcome = "auto_confirm";
+            } else if (allowCapped) {
+              userOutcome = "needs_confirmation";
+            } else if (decision.kind === "allow") {
+              userOutcome = "allow";
+            } else if (decision.kind === "defer") {
+              userOutcome = "defer";
+            } else {
+              userOutcome = "deny";
+            }
+            notifyUserReview(
+              context,
+              buildUserReviewNotice({
+                outcome: userOutcome,
+                surface,
+                target,
+                rationale: decision.review.rationale,
+              }),
+            );
+
+            log.review("pi_auto_review_decision", {
+              requestId: request.id,
+              surface,
+              model: config.model,
+              outcome: allowCapped ? "defer" : decision.kind,
+              reviewerOutcome: decision.review.outcome,
+              riskLevel: decision.review.riskLevel,
+              userAuthorization: decision.review.userAuthorization,
+              rationale: decision.review.rationale,
+              allowCapped,
+              autoConfirmQueued,
+              userOutcome,
+              circuitBreakerTripped:
+                decision.kind === "deny"
+                  ? decision.circuitBreakerTripped
+                  : false,
+              attempts: result?.attempts ?? 0,
+              retryErrors: result?.retryErrors ?? [],
+              durationMs: result?.durationMs,
+              transcriptUserCharacters: result?.transcript.userCharacters,
+              transcriptToolCharacters: result?.transcript.toolCharacters,
+              transcriptRelevantResultCharacters:
+                result?.transcript.relevantResultCharacters,
+              transcriptTruncated: result?.transcript.truncated,
+            });
+
+            if (allowCapped || decision.kind === "defer") {
+              return { kind: "defer" };
+            }
+            if (decision.kind === "allow") return { kind: "allow" };
+            return {
+              kind: "deny",
+              reason: `${decision.review.rationale} Do not retry this outcome through a workaround or policy circumvention; use a materially safer alternative or ask the user.`,
+            };
+          } finally {
+            setUserReviewStatus(context, undefined);
           }
-          if (decision.kind === "allow") return { kind: "allow" };
-          return {
-            kind: "deny",
-            reason: `${decision.review.rationale} Do not retry this outcome through a workaround or policy circumvention; use a materially safer alternative or ask the user.`,
-          };
         },
       );
     } catch (error) {
@@ -987,6 +1152,7 @@ export function createPiAutoReviewExtension(
   });
 
   pi.on("session_shutdown", () => {
+    setUserReviewStatus(context, undefined);
     disposeAuthorizer?.();
     disposeAuthorizer = undefined;
     disposeBrokerService?.();

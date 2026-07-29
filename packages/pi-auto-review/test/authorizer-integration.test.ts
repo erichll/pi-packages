@@ -93,7 +93,7 @@ function harness(
   const model = {
     id: "codex-auto-review",
     name: "codex-auto-review",
-    provider: "cliproxyapi",
+    provider: "test-provider",
     api: "test-api",
   };
   const streamSimple = (

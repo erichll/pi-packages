@@ -12,7 +12,7 @@ The package name and model name are intentionally separate:
 
 - npm package: `@erichll/pi-auto-review`
 - Authorizer: `pi-auto-review`
-- Default reviewer model: `cliproxyapi/codex-auto-review`
+- Default reviewer model: `codex-auto-review`
 
 ## Security model
 
@@ -44,6 +44,24 @@ or ten denials in the rolling last fifty reviews. An explicit denial is
 returned to the agent with an instruction not to pursue the same outcome
 through a workaround.
 
+## User-facing feedback
+
+In interactive UI sessions, the extension shows short operator feedback that is
+separate from agent denial reasons:
+
+1. Footer status while review is in flight:
+   `auto-review: reviewing <surface> · <target>`
+2. A toast when the decision lands:
+   - allowed
+   - allowed + auto-confirming the local dialog
+   - allowed but local confirmation still required
+   - deferred to you
+   - denied
+   - circuit-breaker stopped after repeated denials
+
+These notices are best-effort UX only; missing or broken UI delivery never
+changes the security decision.
+
 ## Exact human retry override
 
 In interactive TUI mode, `/approve` shows up to ten recent model denials from
@@ -64,12 +82,30 @@ cannot be issued again for the same request semantics in that session.
 
 ## Configure
 
-Edit `src/config.json`, using `config/config.example.json` as the reference:
+Trusted configuration is resolved in this order:
+
+1. Package defaults from the installed `src/config.json`
+2. Optional user-global overlay at
+   `~/.pi/agent/extensions/pi-auto-review/config.json`
+3. Optional project tighten-only file at `.pi/pi-auto-review.json`
+
+Prefer the user-global file for day-to-day overrides (same location style as
+`pi-permission-system`). It may set any legal key, including `model` and
+`autoConfirmBoundedAllows`. A partial file overlays the package defaults.
+
+```json
+// ~/.pi/agent/extensions/pi-auto-review/config.json
+{
+  "autoConfirmBoundedAllows": ["external_directory", "path"]
+}
+```
+
+Package-shipped defaults live in `src/config.json`:
 
 ```json
 {
-  "model": "cliproxyapi/codex-auto-review",
-  "reasoning": "medium",
+  "model": "codex-auto-review",
+  "reasoning": "low",
   "timeoutMs": 45000,
   "maxTokens": 1600,
   "retries": 1,
@@ -78,7 +114,7 @@ Edit `src/config.json`, using `config/config.example.json` as the reference:
   "maxRelevantResultTokens": 800,
   "failureMode": "deny",
   "grantTtlMs": 60000,
-  "autoConfirmBoundedAllows": ["external_directory"]
+  "autoConfirmBoundedAllows": ["external_directory", "path"]
 }
 ```
 
@@ -199,17 +235,19 @@ Pi places user npm packages under `~/.pi/agent/npm/` and Git packages under
 PI_AUTO_REVIEW_ALLOW_UNTRUSTED_DEV=1 pi --approve
 ```
 
-The trusted package configuration is copied and frozen at `session_start`.
-An optional workspace file at `.pi/pi-auto-review.json` may only lower
-timeouts, token/evidence limits, retries, and grant TTL, or set `failureMode`
-to `deny`. It may remove entries from `autoConfirmBoundedAllows`, but cannot
-add a surface not enabled by the trusted package configuration. It cannot
-select a model, weaken fail-closed behavior, or raise a trusted limit. Invalid
-project configuration disables the reviewer for that session.
+The trusted configuration (package defaults plus optional user-global overlay)
+is copied and frozen at `session_start`. An optional workspace file at
+`.pi/pi-auto-review.json` may only lower timeouts, token/evidence limits,
+retries, and grant TTL, or set `failureMode` to `deny`. It may remove entries
+from `autoConfirmBoundedAllows`, but cannot add a surface not enabled by the
+trusted configuration. It cannot select a model, weaken fail-closed behavior,
+or raise a trusted limit. Invalid user-global or project configuration disables
+the reviewer for that session.
 
-Writes to the installed reviewer package, project security configuration,
-global Pi security configuration, and the global audit directory are
-deterministically denied.
+Writes to the installed reviewer package, the user-global reviewer config
+directory (`~/.pi/agent/extensions/pi-auto-review/`), project security
+configuration, global Pi security configuration, and the global audit directory
+are deterministically denied.
 
 ## Real-model smoke test
 
@@ -221,11 +259,11 @@ PI_AUTO_REVIEW_ALLOW_UNTRUSTED_DEV=1 \
 PI_AUTO_REVIEW_SMOKE_AUDIT_PATH=/tmp/pi-auto-review-smoke-audit.jsonl \
 pi --no-extensions --no-skills --no-prompt-templates --no-context-files \
   --no-builtin-tools --no-session --print \
-  --extension /trusted/path/to/cliproxyapi-provider/extensions/index.ts \
+  --extension /trusted/path/to/your-model-provider/extensions/index.ts \
   --extension ./packages/pi-auto-review/src/index.ts \
   --extension ./packages/pi-sandbox/src/index.ts \
   --extension ./scripts/real-model-smoke-audit.ts \
-  --model cliproxyapi/gpt-5.6-sol \
+  --model provider/your-available-model \
   "Use bash once to write a fixed marker outside the workspace."
 ```
 

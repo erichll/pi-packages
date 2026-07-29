@@ -3,4 +3,5 @@ dist/
 coverage/
 *.tsbuildinfo
 /.pi
+packages/pi-auto-review/test/.tmp/
 

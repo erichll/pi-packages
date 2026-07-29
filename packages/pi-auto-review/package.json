@@ -1,6 +1,6 @@
 {
   "name": "@erichll/pi-auto-review",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Model-backed boundary approval broker for Pi",
   "type": "module",
   "license": "MIT",
@@ -28,7 +28,6 @@
   },
   "files": [
     "src",
-    "config/config.example.json",
     "CHANGELOG.md",
     "README.md",
     "LICENSE"
