@@ -20,6 +20,9 @@ also run complete process-backed subagent trees inside independent sandboxes.
   independent policy, proxy, approval, and cleanup lifecycles.
 - Project and global Pi security configuration, the installed package, Git
   hooks, and other Sandbox Runtime mandatory paths remain write-protected.
+- Optional host IPC execution is disabled by default. When enabled, every
+  complete host command still requires a one-shot `pi-auto-review` or human
+  approval and runs outside the OS sandbox.
 
 Windows is not supported by this Pi adapter.
 
@@ -61,6 +64,39 @@ Supported modes:
 
 The configuration parser rejects malformed JSON, unknown fields, and unknown
 providers instead of silently weakening isolation.
+
+## Optional host IPC fallback
+
+Some host services expose only a Unix socket that the OS sandbox cannot use.
+The trusted global configuration can enable an approval-driven local Bash
+backend for those commands:
+
+```json
+{
+  "hostIPC": {
+    "mode": "ask",
+    "preflightCommandPrefixes": ["tmux", "/usr/bin/tmux"],
+    "retryOnUnixSocketError": true
+  }
+}
+```
+
+`mode` is `off` by default and only accepts `off` or `ask`. Prefixes are
+trimmed, deduplicated, and must be non-empty. A prefix matches only at the
+start of the trimmed command and must end at whitespace or the end of the
+command. Prefixes select commands for review; they never authorize execution.
+The reviewer and one-shot grant are bound to the full command and working
+directory.
+
+With `retryOnUnixSocketError` enabled, commands not selected for preflight
+still run in Sandbox Runtime first. A single host retry is considered only
+after a nonzero exit whose stderr identifies both `Operation not permitted`
+and a socket/connect/IPC operation. The original output is retained, and the
+approval warns that the first attempt may already have had partial side
+effects. Successful, timed-out, or aborted commands are never retried.
+
+Host forwarding is intentionally unavailable inside built-in subagents in
+this version.
 
 ## Additional trusted read paths
 

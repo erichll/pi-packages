@@ -7,6 +7,7 @@ import type {
 import { BoundaryApprovalBroker } from "@erichll/pi-auto-review/broker";
 import {
   approveDomainEndpoint,
+  approveHostIPCExecution,
   approveSandboxTrap,
 } from "../src/approval.ts";
 import type {
@@ -71,6 +72,53 @@ const context = {
   sessionId: "session-1",
   scopeKey: "session-1:turn:3",
 };
+
+test("host-IPC approval carries the exact command, cwd, and trigger evidence", async () => {
+  let request:
+    | Parameters<BoundaryApprovalBrokerService["review"]>[0]
+    | undefined;
+  const fake = brokerFor({
+    kind: "deny",
+    review: { ...review, outcome: "deny" },
+    circuitBreakerTripped: false,
+  });
+  const broker: BoundaryApprovalBrokerService = {
+    async review(value, reviewContext) {
+      request = value;
+      return fake.broker.review(value, reviewContext);
+    },
+    consumeGrant: fake.broker.consumeGrant.bind(fake.broker),
+  };
+
+  const result = await approveHostIPCExecution(
+    { reason: "preflight-prefix", rule: "tmux" },
+    { ...context, broker },
+  );
+
+  assert.equal(result.action, "deny");
+  assert.equal(request?.source, "sandbox-runtime");
+  assert.equal(request?.surface, "host-ipc");
+  assert.equal(request?.operation, "execute-host");
+  assert.equal(request?.command, "cat secret");
+  assert.equal(request?.cwd, "/repo");
+  assert.equal(request?.matchedPolicy?.rule, "preflight-prefix:tmux");
+});
+
+test("host-IPC fallback warns that the first attempt may have side effects", async () => {
+  let preview = "";
+  const result = await approveHostIPCExecution(
+    { reason: "unix-socket-eperm", rule: "unix-socket-eperm" },
+    {
+      ...context,
+      humanApproval: async (request) => {
+        preview = request.toolInputPreview ?? "";
+        return "deny";
+      },
+    },
+  );
+  assert.equal(result.action, "deny");
+  assert.match(preview, /partial side effects/);
+});
 
 test("domain approval consumes a grant bound to the exact hostname and port", async () => {
   let reviewedDestination = "";

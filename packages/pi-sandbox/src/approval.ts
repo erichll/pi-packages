@@ -4,6 +4,7 @@ import type {
 } from "@erichll/pi-auto-review/broker";
 import { sandboxTrapToBoundaryRequest } from "@erichll/pi-auto-review/sandbox";
 import type { SandboxApprovalTrap } from "./traps.ts";
+import type { HostIPCTrigger } from "./host-ipc.ts";
 import { randomUUID } from "node:crypto";
 export type NetworkEndpoint = {
   hostname: string;
@@ -51,6 +52,33 @@ export async function approveDomainEndpoint(
     cwd: context.cwd,
     command: context.command,
     destination: `${endpoint.hostname}:${endpoint.port}`,
+    agentName: context.agentName,
+  };
+  return approveBoundaryRequest(request, context);
+}
+
+export async function approveHostIPCExecution(
+  trigger: HostIPCTrigger,
+  context: TrapApprovalContext,
+): Promise<TrapApprovalResult> {
+  const request: BoundaryRequest = {
+    id: `sandbox-runtime-host-ipc-${randomUUID()}`,
+    source: "sandbox-runtime",
+    surface: "host-ipc",
+    operation: "execute-host",
+    cwd: context.cwd,
+    command: context.command,
+    matchedPolicy: {
+      decision: "ask",
+      rule:
+        trigger.reason === "preflight-prefix"
+          ? `preflight-prefix:${trigger.rule}`
+          : "unix-socket-eperm",
+    },
+    toolInputPreview:
+      trigger.reason === "unix-socket-eperm"
+        ? "The sandboxed attempt failed and may already have had partial side effects."
+        : "A configured prefix requested approval before sandbox execution.",
     agentName: context.agentName,
   };
   return approveBoundaryRequest(request, context);

@@ -10,6 +10,15 @@ export const SUBAGENT_PROVIDERS = [
 
 export type SubagentProvider = (typeof SUBAGENT_PROVIDERS)[number];
 
+export const HOST_IPC_MODES = ["off", "ask"] as const;
+export type HostIPCMode = (typeof HOST_IPC_MODES)[number];
+
+export type HostIPCConfig = {
+  mode: HostIPCMode;
+  preflightCommandPrefixes: readonly string[];
+  retryOnUnixSocketError: boolean;
+};
+
 export type PiSandboxConfig = {
   subagents: {
     provider: SubagentProvider;
@@ -17,6 +26,7 @@ export type PiSandboxConfig = {
   filesystem: {
     additionalAllowRead: readonly string[];
   };
+  hostIPC: HostIPCConfig;
 };
 
 export type LoadPiSandboxConfigOptions = {
@@ -30,6 +40,11 @@ export const DEFAULT_PI_SANDBOX_CONFIG: Readonly<PiSandboxConfig> = Object.freez
     }),
     filesystem: Object.freeze({
       additionalAllowRead: Object.freeze([]),
+    }),
+    hostIPC: Object.freeze({
+      mode: "off",
+      preflightCommandPrefixes: Object.freeze([]),
+      retryOnUnixSocketError: false,
     }),
   },
 );
@@ -59,7 +74,7 @@ export function parsePiSandboxConfig(value: unknown): PiSandboxConfig {
   if (!isRecord(value)) {
     throw new Error("invalid pi-sandbox configuration: root must be an object");
   }
-  rejectUnknownKeys(value, ["subagents", "filesystem"], "root");
+  rejectUnknownKeys(value, ["subagents", "filesystem", "hostIPC"], "root");
 
   if (value.subagents !== undefined && !isRecord(value.subagents)) {
     throw new Error(
@@ -108,12 +123,61 @@ export function parsePiSandboxConfig(value: unknown): PiSandboxConfig {
     );
   }
 
+  if (value.hostIPC !== undefined && !isRecord(value.hostIPC)) {
+    throw new Error(
+      "invalid pi-sandbox configuration: hostIPC must be an object",
+    );
+  }
+  const hostIPC = value.hostIPC ?? {};
+  rejectUnknownKeys(
+    hostIPC,
+    ["mode", "preflightCommandPrefixes", "retryOnUnixSocketError"],
+    "hostIPC",
+  );
+  const hostIPCMode = hostIPC.mode ?? DEFAULT_PI_SANDBOX_CONFIG.hostIPC.mode;
+  if (
+    typeof hostIPCMode !== "string" ||
+    !HOST_IPC_MODES.includes(hostIPCMode as HostIPCMode)
+  ) {
+    throw new Error(
+      `invalid pi-sandbox configuration: hostIPC.mode must be one of ${HOST_IPC_MODES.join(", ")}`,
+    );
+  }
+  const preflightCommandPrefixes =
+    hostIPC.preflightCommandPrefixes ??
+    DEFAULT_PI_SANDBOX_CONFIG.hostIPC.preflightCommandPrefixes;
+  if (
+    !Array.isArray(preflightCommandPrefixes) ||
+    preflightCommandPrefixes.some(
+      (prefix) => typeof prefix !== "string" || prefix.trim() === "",
+    )
+  ) {
+    throw new Error(
+      "invalid pi-sandbox configuration: hostIPC.preflightCommandPrefixes must be an array of non-empty strings",
+    );
+  }
+  const retryOnUnixSocketError =
+    hostIPC.retryOnUnixSocketError ??
+    DEFAULT_PI_SANDBOX_CONFIG.hostIPC.retryOnUnixSocketError;
+  if (typeof retryOnUnixSocketError !== "boolean") {
+    throw new Error(
+      "invalid pi-sandbox configuration: hostIPC.retryOnUnixSocketError must be a boolean",
+    );
+  }
+
   return {
     subagents: {
       provider: provider as SubagentProvider,
     },
     filesystem: {
       additionalAllowRead: [...new Set(additionalAllowRead)],
+    },
+    hostIPC: {
+      mode: hostIPCMode as HostIPCMode,
+      preflightCommandPrefixes: [
+        ...new Set(preflightCommandPrefixes.map((prefix) => prefix.trim())),
+      ],
+      retryOnUnixSocketError,
     },
   };
 }
@@ -138,6 +202,14 @@ export function loadPiSandboxConfig(
           additionalAllowRead: [
             ...DEFAULT_PI_SANDBOX_CONFIG.filesystem.additionalAllowRead,
           ],
+        },
+        hostIPC: {
+          mode: DEFAULT_PI_SANDBOX_CONFIG.hostIPC.mode,
+          preflightCommandPrefixes: [
+            ...DEFAULT_PI_SANDBOX_CONFIG.hostIPC.preflightCommandPrefixes,
+          ],
+          retryOnUnixSocketError:
+            DEFAULT_PI_SANDBOX_CONFIG.hostIPC.retryOnUnixSocketError,
         },
       };
     }

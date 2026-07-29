@@ -68,6 +68,39 @@ test("grant cannot authorize a materially different request", async () => {
   );
 });
 
+test("grant binds host-IPC trigger evidence", async () => {
+  const hostRequest: BoundaryRequest = {
+    ...request,
+    surface: "host-ipc",
+    operation: "execute-host",
+    matchedPolicy: { decision: "ask", rule: "preflight-prefix:tmux" },
+  };
+  const broker = new BoundaryApprovalBroker({
+    reviewer: async () => allowReview,
+  });
+  const decision = await broker.review(hostRequest, {
+    sessionId: "session-1",
+    scopeKey: "turn-1",
+    issueGrant: true,
+  });
+  assert.ok(decision.kind === "allow" && decision.grant);
+  if (decision.kind !== "allow" || !decision.grant) return;
+  assert.equal(
+    broker.consumeGrant(
+      {
+        ...hostRequest,
+        matchedPolicy: {
+          decision: "ask",
+          rule: "unix-socket-eperm",
+        },
+      },
+      "session-1",
+      decision.grant.token,
+    ),
+    false,
+  );
+});
+
 test("grant binds both requested and symlink-resolved paths", async () => {
   const symlinkRequest: BoundaryRequest = {
     ...request,

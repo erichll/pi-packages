@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import type {
   ExtensionAPI,
@@ -65,6 +66,85 @@ linuxTest("registers and executes the sandboxed main Bash tool", async () => {
       /extension-ok/,
     );
   } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+const tmuxTest =
+  process.platform === "linux" &&
+  spawnSync("tmux", ["-V"], { encoding: "utf8" }).status === 0
+    ? test
+    : test.skip;
+
+tmuxTest("preflight host backend reaches an isolated tmux socket", async () => {
+  let bashTool: ToolDefinition | undefined;
+  let approvals = 0;
+  const approvalPrompts: string[] = [];
+  const pi = {
+    registerTool(tool: ToolDefinition) {
+      if (tool.name === "bash") bashTool = tool;
+    },
+    on() {},
+    getActiveTools() {
+      return ["bash"];
+    },
+  } as unknown as ExtensionAPI;
+  await registerPiSandbox(pi, {
+    subagentProvider: "off",
+    hostIPC: {
+      mode: "ask",
+      preflightCommandPrefixes: ["tmux"],
+      retryOnUnixSocketError: true,
+    },
+  });
+  assert.ok(bashTool);
+
+  const cwd = mkdtempSync(join(tmpdir(), "pi-sandbox-host-ipc-tmux-"));
+  const socket = `pi-sandbox-smoke-${process.pid}-${Date.now()}`;
+  const ctx = {
+    cwd,
+    hasUI: true,
+    ui: {
+      async select(prompt: string) {
+        approvals += 1;
+        approvalPrompts.push(prompt);
+        return "Allow this exact operation once";
+      },
+      notify() {},
+    },
+    sessionManager: {
+      getSessionId: () => "host-ipc-smoke-session",
+      getSessionFile: () => undefined,
+    },
+  } as unknown as ExtensionContext;
+  const execute = async (command: string): Promise<string> => {
+    const result = await bashTool!.execute(
+      `call-${approvals}`,
+      { command },
+      undefined,
+      undefined,
+      ctx,
+    );
+    return result.content[0]?.type === "text" ? result.content[0].text : "";
+  };
+
+  try {
+    await execute(
+      `tmux -L ${socket} new-session -d -s smoke 'printf host-ipc-ok; sleep 30'`,
+    );
+    assert.match(
+      await execute(`tmux -L ${socket} list-sessions`),
+      /smoke:/,
+    );
+    assert.match(
+      await execute(`tmux -L ${socket} capture-pane -p -t smoke:0.0`),
+      /host-ipc-ok/,
+    );
+    assert.equal(approvals, 3);
+    assert.match(approvalPrompts[1] ?? "", /tmux .* list-sessions/);
+    assert.match(approvalPrompts[2] ?? "", /tmux .* capture-pane/);
+  } finally {
+    spawnSync("tmux", ["-L", socket, "kill-server"]);
     rmSync(cwd, { recursive: true, force: true });
   }
 });

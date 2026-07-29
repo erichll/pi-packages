@@ -9,6 +9,12 @@ import {
   parsePiSandboxConfig,
 } from "../src/config.ts";
 
+const defaultHostIPC = {
+  mode: "off" as const,
+  preflightCommandPrefixes: [] as string[],
+  retryOnUnixSocketError: false,
+};
+
 test("uses the trusted global configuration path", () => {
   assert.equal(
     getPiSandboxConfigPath("/trusted-home"),
@@ -22,6 +28,7 @@ test("defaults to the builtin provider when configuration is absent", () => {
     assert.deepEqual(loadPiSandboxConfig({ path: join(root, "missing.json") }), {
       subagents: { provider: "builtin" },
       filesystem: { additionalAllowRead: [] },
+      hostIPC: defaultHostIPC,
     });
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -35,6 +42,7 @@ test("accepts every supported subagent provider", () => {
       {
         subagents: { provider },
         filesystem: { additionalAllowRead: [] },
+        hostIPC: defaultHostIPC,
       },
     );
   }
@@ -44,14 +52,17 @@ test("defaults omitted sections to their secure defaults", () => {
   assert.deepEqual(parsePiSandboxConfig({}), {
     subagents: { provider: "builtin" },
     filesystem: { additionalAllowRead: [] },
+    hostIPC: defaultHostIPC,
   });
   assert.deepEqual(parsePiSandboxConfig({ subagents: {} }), {
     subagents: { provider: "builtin" },
     filesystem: { additionalAllowRead: [] },
+    hostIPC: defaultHostIPC,
   });
   assert.deepEqual(parsePiSandboxConfig({ filesystem: {} }), {
     subagents: { provider: "builtin" },
     filesystem: { additionalAllowRead: [] },
+    hostIPC: defaultHostIPC,
   });
 });
 
@@ -74,8 +85,52 @@ test("accepts unique absolute additional read paths", () => {
           "/opt/tools/helper",
         ],
       },
+      hostIPC: defaultHostIPC,
     },
   );
+});
+
+test("accepts and normalizes the host-IPC configuration", () => {
+  assert.deepEqual(
+    parsePiSandboxConfig({
+      hostIPC: {
+        mode: "ask",
+        preflightCommandPrefixes: [
+          " tmux ",
+          "tmux",
+          "/usr/bin/tmux",
+        ],
+        retryOnUnixSocketError: true,
+      },
+    }),
+    {
+      subagents: { provider: "builtin" },
+      filesystem: { additionalAllowRead: [] },
+      hostIPC: {
+        mode: "ask",
+        preflightCommandPrefixes: ["tmux", "/usr/bin/tmux"],
+        retryOnUnixSocketError: true,
+      },
+    },
+  );
+});
+
+test("rejects malformed or expansive host-IPC configuration", () => {
+  for (const hostIPC of [
+    [],
+    { mode: "always" },
+    { mode: true },
+    { preflightCommandPrefixes: "tmux" },
+    { preflightCommandPrefixes: [""] },
+    { preflightCommandPrefixes: [42] },
+    { retryOnUnixSocketError: "yes" },
+    { mode: "ask", unknown: true },
+  ]) {
+    assert.throws(
+      () => parsePiSandboxConfig({ hostIPC }),
+      /hostIPC/,
+    );
+  }
 });
 
 test("rejects unsafe additional read path shapes", () => {

@@ -5,18 +5,22 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import {
   createBashToolDefinition,
+  createLocalBashOperations,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { getBoundaryBroker } from "@erichll/pi-auto-review/broker";
 import {
   approveDomainEndpoint,
+  approveHostIPCExecution,
   approveSandboxTrap,
   type HumanApproval,
 } from "./approval.ts";
 import {
   loadPiSandboxConfig,
+  type HostIPCConfig,
   type SubagentProvider,
 } from "./config.ts";
+import { runCommandWithHostIPC } from "./host-ipc.ts";
 import {
   runSandboxedCommand,
   type SandboxCommandOptions,
@@ -36,6 +40,8 @@ export type PiSandboxExtensionOptions = {
   subagentManager?: ProcessBackedSubagentManager;
   createSubagentManager?: () => ProcessBackedSubagentManager;
   sandbox?: Pick<SandboxCommandOptions, "broker" | "platform">;
+  /** Test/embedding override. Normal extension loading uses trusted global config. */
+  hostIPC?: HostIPCConfig;
 };
 
 function sessionId(ctx: ExtensionContext): string {
@@ -82,13 +88,21 @@ function humanApproval(ctx: ExtensionContext): HumanApproval {
   return async (request, reason, signal) => {
     if (!ctx.hasUI) return "deny";
     const target =
-      request.resolvedPath ??
-      request.path ??
-      request.destination ??
-      request.operation;
+      request.surface === "host-ipc"
+        ? request.command ?? request.operation
+        : request.resolvedPath ??
+          request.path ??
+          request.destination ??
+          request.operation;
     const suffix = reason ? `\n${reason}` : "";
+    const hostWarning =
+      request.surface === "host-ipc"
+        ? request.matchedPolicy?.rule === "unix-socket-eperm"
+          ? "\nWarning: the first sandboxed attempt may already have had partial side effects. The retry runs on the host outside the OS sandbox."
+          : "\nWarning: this command will run on the host outside the OS sandbox."
+        : "";
     const selected = await ctx.ui.select(
-      `Sandbox approval required: ${request.operation} ${target}${suffix}`,
+      `Sandbox approval required: ${request.operation} ${target}${hostWarning}${suffix}`,
       ["Allow this exact operation once", "Deny"],
       { signal },
     );
@@ -102,53 +116,81 @@ function sandboxOperations(
   ctx: ExtensionContext,
   turnIndex: () => number,
   additionalAllowRead: readonly string[],
+  hostIPC: HostIPCConfig,
   sandbox?: PiSandboxExtensionOptions["sandbox"],
 ): BashOperations {
   return {
     exec(command, cwd, options) {
       const currentSessionId = sessionId(ctx);
-      return runSandboxedCommand({
+      const shellPath = SettingsManager.create(cwd).getShellPath();
+      const approvalContext = {
+        broker: getBoundaryBroker(),
+        command,
+        cwd,
+        sessionId: currentSessionId,
+        scopeKey: `${currentSessionId}:turn:${turnIndex()}`,
+        signal: options.signal,
+        humanApproval: humanApproval(ctx),
+      };
+      const local = createLocalBashOperations({ shellPath });
+      return runCommandWithHostIPC({
         command,
         cwd,
         env: options.env,
         signal: options.signal,
         timeout: options.timeout,
-        ...sandbox,
         onData: options.onData,
-        shellPath: SettingsManager.create(cwd).getShellPath(),
-        policy: createDefaultPolicy(cwd, { additionalAllowRead }),
-        review: async (trap) => {
-          const result = await approveSandboxTrap(trap, {
-            broker: getBoundaryBroker(),
-            command,
-            cwd,
-            sessionId: currentSessionId,
-            scopeKey: `${currentSessionId}:turn:${turnIndex()}`,
-            signal: options.signal,
-            humanApproval: humanApproval(ctx),
-          });
-          if (result.action === "deny" && result.reason) {
-            if (ctx.hasUI) {
-              ctx.ui.notify(`Sandbox denied: ${result.reason}`, "warning");
-            }
-          }
-          return result.action;
-        },
-        reviewDomain: async (endpoint) => {
-          const result = await approveDomainEndpoint(endpoint, {
-            broker: getBoundaryBroker(),
-            command,
-            cwd,
-            sessionId: currentSessionId,
-            scopeKey: `${currentSessionId}:turn:${turnIndex()}`,
-            signal: options.signal,
-            humanApproval: humanApproval(ctx),
-          });
+        config: hostIPC,
+        approve: async (trigger) => {
+          const result = await approveHostIPCExecution(
+            trigger,
+            approvalContext,
+          );
           if (result.action === "deny" && result.reason && ctx.hasUI) {
-            ctx.ui.notify(`Domain proxy denied: ${result.reason}`, "warning");
+            ctx.ui.notify(`Host-IPC denied: ${result.reason}`, "warning");
           }
-          return result.action;
+          return result;
         },
+        runHost: (timeout) =>
+          local.exec(command, cwd, {
+            ...options,
+            timeout,
+          }),
+        runSandbox: (onStderr) =>
+          runSandboxedCommand({
+            command,
+            cwd,
+            env: options.env,
+            signal: options.signal,
+            timeout: options.timeout,
+            ...sandbox,
+            onData: options.onData,
+            onStderr,
+            shellPath,
+            policy: createDefaultPolicy(cwd, { additionalAllowRead }),
+            review: async (trap) => {
+              const result = await approveSandboxTrap(trap, approvalContext);
+              if (result.action === "deny" && result.reason) {
+                if (ctx.hasUI) {
+                  ctx.ui.notify(`Sandbox denied: ${result.reason}`, "warning");
+                }
+              }
+              return result.action;
+            },
+            reviewDomain: async (endpoint) => {
+              const result = await approveDomainEndpoint(
+                endpoint,
+                approvalContext,
+              );
+              if (result.action === "deny" && result.reason && ctx.hasUI) {
+                ctx.ui.notify(
+                  `Domain proxy denied: ${result.reason}`,
+                  "warning",
+                );
+              }
+              return result.action;
+            },
+          }),
       });
     },
   };
@@ -163,6 +205,7 @@ async function performRegistration(
   const subagentProvider =
     options.subagentProvider ?? config.subagents.provider;
   const additionalAllowRead = config.filesystem.additionalAllowRead;
+  const hostIPC = options.hostIPC ?? config.hostIPC;
   const subagents =
     subagentProvider === "builtin"
       ? (options.subagentManager ??
@@ -185,6 +228,7 @@ async function performRegistration(
           ctx,
           () => currentTurn,
           additionalAllowRead,
+          hostIPC,
           options.sandbox,
         ),
       });
@@ -423,6 +467,7 @@ async function performRegistration(
       ctx,
       () => currentTurn,
       additionalAllowRead,
+      hostIPC,
       options.sandbox,
     ),
   }));

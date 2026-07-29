@@ -27,6 +27,7 @@ export function boundaryRequestHash(request: BoundaryRequest): string {
     skillName: request.skillName,
     toolInputPreview: request.toolInputPreview,
     agentName: request.agentName,
+    matchedPolicy: request.matchedPolicy,
   };
   return createHash("sha256")
     .update(JSON.stringify(stableValue(material)))
