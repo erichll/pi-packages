@@ -1,32 +1,92 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
+  getLegacyPiSandboxConfigPath,
   getPiSandboxConfigPath,
   loadPiSandboxConfig,
   parsePiSandboxConfig,
 } from "../src/config.ts";
 
+const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const defaultHostIPC = {
   mode: "off" as const,
   preflightCommandPrefixes: [] as string[],
   retryOnUnixSocketError: false,
 };
 
-test("uses the trusted global configuration path", () => {
+function makeTempRoot(prefix: string): string {
+  const parent = join(packageRoot, ".tmp");
+  mkdirSync(parent, { recursive: true });
+  return mkdtempSync(join(parent, prefix));
+}
+
+test("uses the trusted extension-local configuration path", () => {
   assert.equal(
     getPiSandboxConfigPath("/trusted-home"),
+    "/trusted-home/.pi/agent/extensions/pi-sandbox/config.json",
+  );
+  assert.equal(
+    getLegacyPiSandboxConfigPath("/trusted-home"),
     "/trusted-home/.pi/agent/pi-sandbox.json",
   );
 });
 
 test("defaults to the builtin provider when configuration is absent", () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-sandbox-config-"));
+  const root = makeTempRoot("pi-sandbox-config-");
   try {
     assert.deepEqual(loadPiSandboxConfig({ path: join(root, "missing.json") }), {
       subagents: { provider: "builtin" },
+      filesystem: { additionalAllowRead: [] },
+      hostIPC: defaultHostIPC,
+    });
+    assert.deepEqual(loadPiSandboxConfig({ home: root }), {
+      subagents: { provider: "builtin" },
+      filesystem: { additionalAllowRead: [] },
+      hostIPC: defaultHostIPC,
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("loads the extension-local config and falls back to the legacy path", () => {
+  const root = makeTempRoot("pi-sandbox-config-load-");
+  try {
+    const modernPath = getPiSandboxConfigPath(root);
+    mkdirSync(dirname(modernPath), { recursive: true });
+    writeFileSync(
+      modernPath,
+      JSON.stringify({
+        subagents: { provider: "off" },
+      }),
+      "utf8",
+    );
+    assert.deepEqual(loadPiSandboxConfig({ home: root }), {
+      subagents: { provider: "off" },
+      filesystem: { additionalAllowRead: [] },
+      hostIPC: defaultHostIPC,
+    });
+
+    rmSync(modernPath, { force: true });
+    const legacyPath = getLegacyPiSandboxConfigPath(root);
+    mkdirSync(dirname(legacyPath), { recursive: true });
+    writeFileSync(
+      legacyPath,
+      JSON.stringify({
+        subagents: { provider: "pi-subagents" },
+      }),
+      "utf8",
+    );
+    assert.deepEqual(loadPiSandboxConfig({ home: root }), {
+      subagents: { provider: "pi-subagents" },
       filesystem: { additionalAllowRead: [] },
       hostIPC: defaultHostIPC,
     });
@@ -192,8 +252,8 @@ test("rejects invalid providers and unknown keys", () => {
 });
 
 test("rejects malformed configuration instead of using defaults", () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-sandbox-config-"));
-  const path = join(root, "pi-sandbox.json");
+  const root = makeTempRoot("pi-sandbox-config-");
+  const path = join(root, "config.json");
   try {
     writeFileSync(path, '{"subagents":', "utf8");
     assert.throws(

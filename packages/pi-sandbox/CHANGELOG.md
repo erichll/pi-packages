@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.2 - 2026-07-30
+
+- Load trusted configuration from
+  `~/.pi/agent/extensions/pi-sandbox/config.json`, with a read fallback to the
+  legacy `~/.pi/agent/pi-sandbox.json` path when the new file is absent.
+- Deny writes to common workspace secrets by default (`.env` variants,
+  `secrets/` / `.secrets/`, and discovered `*.pem` / `*.key` / `*.p12` /
+  `*.pfx`), while leaving template files such as `.env.example` writable.
+- Protect `~/.pi/agent/extensions` (including the extension-local config) from
+  sandboxed writes.
+- On macOS, add git-style secret globs for nested create protection; Linux keeps
+  literal absolute paths only because Sandbox Runtime drops globs there.
+
 ## 0.4.1 - 2026-07-29
 
 - Republish to refresh the npm search index used by the pi.dev package gallery.

@@ -31,6 +31,8 @@ export type PiSandboxConfig = {
 
 export type LoadPiSandboxConfigOptions = {
   path?: string;
+  /** Override home directory when resolving default/legacy trusted paths. */
+  home?: string;
 };
 
 export const DEFAULT_PI_SANDBOX_CONFIG: Readonly<PiSandboxConfig> = Object.freeze(
@@ -50,6 +52,18 @@ export const DEFAULT_PI_SANDBOX_CONFIG: Readonly<PiSandboxConfig> = Object.freez
 );
 
 export function getPiSandboxConfigPath(home = homedir()): string {
+  return join(
+    home,
+    ".pi",
+    "agent",
+    "extensions",
+    "pi-sandbox",
+    "config.json",
+  );
+}
+
+/** Legacy trusted path used before the extension-local config layout. */
+export function getLegacyPiSandboxConfigPath(home = homedir()): string {
   return join(home, ".pi", "agent", "pi-sandbox.json");
 }
 
@@ -182,42 +196,48 @@ export function parsePiSandboxConfig(value: unknown): PiSandboxConfig {
   };
 }
 
-export function loadPiSandboxConfig(
-  options: LoadPiSandboxConfigOptions = {},
-): PiSandboxConfig {
-  const path = options.path ?? getPiSandboxConfigPath();
-  let source: string;
+function defaultPiSandboxConfig(): PiSandboxConfig {
+  return {
+    subagents: { provider: DEFAULT_PI_SANDBOX_CONFIG.subagents.provider },
+    filesystem: {
+      additionalAllowRead: [
+        ...DEFAULT_PI_SANDBOX_CONFIG.filesystem.additionalAllowRead,
+      ],
+    },
+    hostIPC: {
+      mode: DEFAULT_PI_SANDBOX_CONFIG.hostIPC.mode,
+      preflightCommandPrefixes: [
+        ...DEFAULT_PI_SANDBOX_CONFIG.hostIPC.preflightCommandPrefixes,
+      ],
+      retryOnUnixSocketError:
+        DEFAULT_PI_SANDBOX_CONFIG.hostIPC.retryOnUnixSocketError,
+    },
+  };
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
+}
+
+function readPiSandboxConfigFile(path: string): string {
   try {
-    source = readFileSync(path, "utf8");
+    return readFileSync(path, "utf8");
   } catch (error) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      error.code === "ENOENT"
-    ) {
-      return {
-        subagents: { provider: DEFAULT_PI_SANDBOX_CONFIG.subagents.provider },
-        filesystem: {
-          additionalAllowRead: [
-            ...DEFAULT_PI_SANDBOX_CONFIG.filesystem.additionalAllowRead,
-          ],
-        },
-        hostIPC: {
-          mode: DEFAULT_PI_SANDBOX_CONFIG.hostIPC.mode,
-          preflightCommandPrefixes: [
-            ...DEFAULT_PI_SANDBOX_CONFIG.hostIPC.preflightCommandPrefixes,
-          ],
-          retryOnUnixSocketError:
-            DEFAULT_PI_SANDBOX_CONFIG.hostIPC.retryOnUnixSocketError,
-        },
-      };
+    if (isNotFoundError(error)) {
+      throw error;
     }
     throw new Error(`failed to read pi-sandbox configuration at ${path}`, {
       cause: error,
     });
   }
+}
 
+function parsePiSandboxConfigFile(path: string, source: string): PiSandboxConfig {
   let value: unknown;
   try {
     value = JSON.parse(source);
@@ -226,6 +246,35 @@ export function loadPiSandboxConfig(
       cause: error,
     });
   }
-
   return parsePiSandboxConfig(value);
+}
+
+export function loadPiSandboxConfig(
+  options: LoadPiSandboxConfigOptions = {},
+): PiSandboxConfig {
+  const path = options.path ?? getPiSandboxConfigPath(options.home);
+  try {
+    return parsePiSandboxConfigFile(path, readPiSandboxConfigFile(path));
+  } catch (error) {
+    if (!isNotFoundError(error)) {
+      throw error;
+    }
+  }
+
+  // Only fall back to the legacy path when loading the default trusted location.
+  if (options.path === undefined) {
+    const legacyPath = getLegacyPiSandboxConfigPath(options.home);
+    try {
+      return parsePiSandboxConfigFile(
+        legacyPath,
+        readPiSandboxConfigFile(legacyPath),
+      );
+    } catch (error) {
+      if (!isNotFoundError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  return defaultPiSandboxConfig();
 }

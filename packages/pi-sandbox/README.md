@@ -18,8 +18,15 @@ also run complete process-backed subagent trees inside independent sandboxes.
 - Every Bash command and persistent subagent session owns a separate broker
   process and Sandbox Runtime manager. Concurrent workers therefore keep
   independent policy, proxy, approval, and cleanup lifecycles.
-- Project and global Pi security configuration, the installed package, Git
-  hooks, and other Sandbox Runtime mandatory paths remain write-protected.
+- Project and global Pi security configuration, the trusted extensions tree,
+  the installed package, Git hooks, and other Sandbox Runtime mandatory paths
+  remain write-protected.
+- Common workspace secrets are write-denied by default: root-level `.env`
+  variants, `secrets/` / `.secrets/`, plus a shallow scan for nested `.env*`,
+  `*.pem`, `*.key`, `*.p12`, and `*.pfx`. Template files such as
+  `.env.example` stay writable. On macOS, additional globs also block nested
+  creates; Linux Sandbox Runtime only enforces literal paths, so nested creates
+  of new secret files remain a residual risk outside the scanned set.
 - Optional host IPC execution is disabled by default. When enabled, every
   complete host command still requires a one-shot `pi-auto-review` or human
   approval and runs outside the OS sandbox.
@@ -43,7 +50,11 @@ macOS uses built-in Seatbelt support but still requires `ripgrep`.
 ## Subagent provider
 
 The provider is selected only from the trusted global file
-`~/.pi/agent/pi-sandbox.json`:
+`~/.pi/agent/extensions/pi-sandbox/config.json`:
+
+If that file is missing, `pi-sandbox` still loads the legacy path
+`~/.pi/agent/pi-sandbox.json` when present. Prefer the extension-local path for
+new installs.
 
 ```json
 {
