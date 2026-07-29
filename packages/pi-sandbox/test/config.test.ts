@@ -21,6 +21,7 @@ test("defaults to the builtin provider when configuration is absent", () => {
   try {
     assert.deepEqual(loadPiSandboxConfig({ path: join(root, "missing.json") }), {
       subagents: { provider: "builtin" },
+      filesystem: { additionalAllowRead: [] },
     });
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -31,18 +32,90 @@ test("accepts every supported subagent provider", () => {
   for (const provider of ["builtin", "pi-subagents", "off"] as const) {
     assert.deepEqual(
       parsePiSandboxConfig({ subagents: { provider } }),
-      { subagents: { provider } },
+      {
+        subagents: { provider },
+        filesystem: { additionalAllowRead: [] },
+      },
     );
   }
 });
 
-test("defaults an omitted provider to builtin", () => {
+test("defaults omitted sections to their secure defaults", () => {
   assert.deepEqual(parsePiSandboxConfig({}), {
     subagents: { provider: "builtin" },
+    filesystem: { additionalAllowRead: [] },
   });
   assert.deepEqual(parsePiSandboxConfig({ subagents: {} }), {
     subagents: { provider: "builtin" },
+    filesystem: { additionalAllowRead: [] },
   });
+  assert.deepEqual(parsePiSandboxConfig({ filesystem: {} }), {
+    subagents: { provider: "builtin" },
+    filesystem: { additionalAllowRead: [] },
+  });
+});
+
+test("accepts unique absolute additional read paths", () => {
+  assert.deepEqual(
+    parsePiSandboxConfig({
+      filesystem: {
+        additionalAllowRead: [
+          "/home/user/.local/bin/rtk",
+          "/home/user/.local/bin/rtk",
+          "/opt/tools/helper",
+        ],
+      },
+    }),
+    {
+      subagents: { provider: "builtin" },
+      filesystem: {
+        additionalAllowRead: [
+          "/home/user/.local/bin/rtk",
+          "/opt/tools/helper",
+        ],
+      },
+    },
+  );
+});
+
+test("rejects unsafe additional read path shapes", () => {
+  for (const additionalAllowRead of [
+    "not-an-array",
+    ["relative/path"],
+    [""],
+    [42],
+  ]) {
+    assert.throws(
+      () =>
+        parsePiSandboxConfig({
+          filesystem: { additionalAllowRead },
+        }),
+      /filesystem\.additionalAllowRead must be an array of absolute paths/,
+    );
+  }
+  assert.throws(
+    () =>
+      parsePiSandboxConfig({
+        filesystem: { additionalAllowRead: [], allowWrite: ["/tmp"] },
+      }),
+    /unknown filesystem key: allowWrite/,
+  );
+  assert.throws(
+    () => parsePiSandboxConfig({ filesystem: [] }),
+    /filesystem must be an object/,
+  );
+  assert.throws(
+    () => parsePiSandboxConfig({ subagents: [] }),
+    /subagents must be an object/,
+  );
+  assert.throws(
+    () => parsePiSandboxConfig({ filesystem: null }),
+    /filesystem must be an object/,
+  );
+  assert.throws(
+    () => parsePiSandboxConfig({ subagents: null }),
+    /subagents must be an object/,
+  );
 });
 
 test("rejects invalid providers and unknown keys", () => {

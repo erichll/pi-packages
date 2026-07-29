@@ -44,3 +44,19 @@ test("the default policy limits writes and protects sandbox configuration", () =
   assert.equal(runtime.filesystem.allowGitConfig, true);
   assert.deepEqual(runtime.network.allowedDomains, []);
 });
+
+test("additional read paths extend rather than replace the default allowlist", () => {
+  const policy = createDefaultPolicy("/workspace/project", {
+    additionalAllowRead: [
+      "/home/user/.local/bin/rtk",
+      "/opt/tools/helper",
+    ],
+  });
+
+  assert.ok(policy.filesystem.allowRead.includes("/workspace/project"));
+  assert.ok(policy.filesystem.allowRead.includes("/dev/null"));
+  assert.ok(
+    policy.filesystem.allowRead.includes("/home/user/.local/bin/rtk"),
+  );
+  assert.ok(policy.filesystem.allowRead.includes("/opt/tools/helper"));
+});

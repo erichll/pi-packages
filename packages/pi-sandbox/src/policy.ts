@@ -35,7 +35,14 @@ export type SandboxPolicy = {
   };
 };
 
-export function createDefaultPolicy(cwd: string): SandboxPolicy {
+export type CreateDefaultPolicyOptions = {
+  additionalAllowRead?: readonly string[];
+};
+
+export function createDefaultPolicy(
+  cwd: string,
+  options: CreateDefaultPolicyOptions = {},
+): SandboxPolicy {
   const workspace = resolve(cwd);
   const home = resolve(homedir());
   const denyRead = home === parse(home).root ? [] : [home];
@@ -53,6 +60,7 @@ export function createDefaultPolicy(cwd: string): SandboxPolicy {
         join(home, ".gitconfig"),
         join(home, ".config", "git", "config"),
         "/dev/null",
+        ...(options.additionalAllowRead ?? []),
       ],
       allowWrite: [workspace, "/dev/null"],
       denyWrite: [

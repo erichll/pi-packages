@@ -1,6 +1,6 @@
 {
   "name": "@erichll/pi-sandbox",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Sandbox Runtime-backed Linux and macOS sandbox with pi-auto-review approval",
   "type": "module",
   "license": "Apache-2.0",

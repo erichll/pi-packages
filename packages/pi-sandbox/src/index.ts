@@ -21,6 +21,7 @@ import {
   runSandboxedCommand,
   type SandboxCommandOptions,
 } from "./runner.ts";
+import { createDefaultPolicy } from "./policy.ts";
 import type {
   ProcessBackedSubagentManager,
   ProcessBackedSubagentSession,
@@ -100,6 +101,7 @@ function humanApproval(ctx: ExtensionContext): HumanApproval {
 function sandboxOperations(
   ctx: ExtensionContext,
   turnIndex: () => number,
+  additionalAllowRead: readonly string[],
   sandbox?: PiSandboxExtensionOptions["sandbox"],
 ): BashOperations {
   return {
@@ -114,6 +116,7 @@ function sandboxOperations(
         ...sandbox,
         onData: options.onData,
         shellPath: SettingsManager.create(cwd).getShellPath(),
+        policy: createDefaultPolicy(cwd, { additionalAllowRead }),
         review: async (trap) => {
           const result = await approveSandboxTrap(trap, {
             broker: getBoundaryBroker(),
@@ -156,8 +159,10 @@ async function performRegistration(
   options: PiSandboxExtensionOptions,
 ): Promise<void> {
   let currentTurn = 0;
+  const config = loadPiSandboxConfig();
   const subagentProvider =
-    options.subagentProvider ?? loadPiSandboxConfig().subagents.provider;
+    options.subagentProvider ?? config.subagents.provider;
+  const additionalAllowRead = config.filesystem.additionalAllowRead;
   const subagents =
     subagentProvider === "builtin"
       ? (options.subagentManager ??
@@ -176,7 +181,12 @@ async function performRegistration(
     async execute(id, params, signal, onUpdate, ctx) {
       if (!ctx) throw new Error(`${EXTENSION_NAME}: missing extension context`);
       const tool = createBashToolDefinition(ctx.cwd, {
-        operations: sandboxOperations(ctx, () => currentTurn, options.sandbox),
+        operations: sandboxOperations(
+          ctx,
+          () => currentTurn,
+          additionalAllowRead,
+          options.sandbox,
+        ),
       });
       return tool.execute(id, params, signal, onUpdate, ctx);
     },
@@ -262,6 +272,7 @@ async function performRegistration(
           cwd: ctx.cwd,
           model: params.model,
           tools: pi.getActiveTools().filter((name) => name !== "subagent"),
+          policy: createDefaultPolicy(ctx.cwd, { additionalAllowRead }),
           sandbox: options.sandbox,
           review: async (trap: Parameters<typeof approveSandboxTrap>[0]) =>
             (await approveSandboxTrap(trap, approvalContext)).action,
@@ -408,7 +419,12 @@ async function performRegistration(
     });
 
   pi.on("user_bash", (_event, ctx) => ({
-    operations: sandboxOperations(ctx, () => currentTurn, options.sandbox),
+    operations: sandboxOperations(
+      ctx,
+      () => currentTurn,
+      additionalAllowRead,
+      options.sandbox,
+    ),
   }));
 
   pi.on("turn_start", (event) => {

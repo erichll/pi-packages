@@ -62,6 +62,30 @@ Supported modes:
 The configuration parser rejects malformed JSON, unknown fields, and unknown
 providers instead of silently weakening isolation.
 
+## Additional trusted read paths
+
+The trusted global configuration may append absolute paths to the sandbox's
+default read allowlist. This is useful for executables installed below the
+otherwise-denied home directory:
+
+```json
+{
+  "subagents": {
+    "provider": "builtin"
+  },
+  "filesystem": {
+    "additionalAllowRead": [
+      "/home/user/.local/bin/rtk"
+    ]
+  }
+}
+```
+
+`filesystem.additionalAllowRead` must be an array of absolute paths. These
+paths extend the defaults; they do not replace the workspace, Node.js, or
+Sandbox Runtime read permissions. Keep entries as narrow as possible and
+prefer an exact executable path over allowing an entire bin directory.
+
 Persistent built-in sessions support `start`, `follow_up`, `wait`, `status`,
 `stop`, and nested `handoff` operations. At most four sessions are live at
 once, and nesting depth is capped at three.
