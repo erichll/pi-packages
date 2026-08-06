@@ -78,8 +78,21 @@ test("user config can fully overlay package trusted settings", () => {
   assert.equal(bareModel.model, "codex-auto-review");
 
   assert.throws(() => applyUserConfig(packageConfig, { model: "" }));
+  // Multi-segment model ids (provider/group/model) are valid and resolve like
+  // parseModelRef: first segment is the provider, the rest is the model id.
+  const nestedModel = applyUserConfig(packageConfig, {
+    model: "acme/exam-group/example-flash",
+  });
+  assert.equal(nestedModel.model, "acme/exam-group/example-flash");
+  // Malformed ids with empty segments are rejected.
   assert.throws(() =>
-    applyUserConfig(packageConfig, { model: "provider/model/extra" }),
+    applyUserConfig(packageConfig, { model: "provider/" }),
+  );
+  assert.throws(() =>
+    applyUserConfig(packageConfig, { model: "/provider/model" }),
+  );
+  assert.throws(() =>
+    applyUserConfig(packageConfig, { model: "a//b" }),
   );
   assert.throws(() =>
     applyUserConfig(packageConfig, { model: "has space" }),

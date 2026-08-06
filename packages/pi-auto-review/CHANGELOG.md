@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.3 - 2026-08-06
+
+- Fix config validation rejecting multi-segment model ids (`provider/group/model`).
+  `validateConfig` no longer restricts a model to exactly one `/`; it only rejects
+  ids with empty segments. Segments are resolved as before: the first segment is
+  the provider and the rest is the model id.
+
 ## 0.3.2 - 2026-07-29
 
 - Load an optional user-global trusted config from

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3 - 2026-08-06
+
+- Move the `pi-auto-review` dependency to `0.3.3`, which allows multi-segment
+  model ids (`provider/group/model`) in the reviewer config.
+- Bump `pi-subagents` dev dependency to `0.41.0` (build/test tooling only).
+
 ## 0.4.2 - 2026-07-30
 
 - Load trusted configuration from

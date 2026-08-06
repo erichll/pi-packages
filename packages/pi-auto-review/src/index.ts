@@ -201,7 +201,7 @@ function validateConfig(value: unknown, source: string): Config {
     typeof config.model !== "string" ||
     !config.model.trim() ||
     /\s/.test(config.model) ||
-    (config.model.includes("/") && !/^[^/]+\/[^/]+$/.test(config.model))
+    config.model.split("/").some((segment) => !segment.trim())
   ) {
     throw new Error(
       `${EXTENSION_NAME}: model must be a model id or provider/model`,
