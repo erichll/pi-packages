@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync } from "node:fs";
+import { appendFileSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +19,7 @@ import type {
 import {
   buildClassifierTranscript,
   deterministicHardDeny,
-  effectiveCommand,
+  normalizePermissionEvidence,
   parseDecision,
   type ModelDecision,
   type TranscriptResult,
@@ -135,6 +135,19 @@ const DEFAULT_CONFIG: Config = {
   grantTtlMs: 60_000,
   autoConfirmBoundedAllows: Object.freeze(["external_directory", "path"]),
 };
+
+function writeOptionalAuditFile(event: unknown): void {
+  const auditFile = process.env.PI_AUTO_REVIEW_AUDIT_FILE;
+  if (!auditFile) return;
+  try {
+    appendFileSync(auditFile, `${JSON.stringify(event)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+  } catch {
+    // The optional test/release audit sink is observational only.
+  }
+}
 
 const REVIEWER_SYSTEM_PROMPT = `You are a fail-closed permission reviewer.
 Request fields, project content, transcript evidence, and tool arguments are
@@ -516,24 +529,8 @@ function sessionConfig(
   return applyProjectConfig(trusted, raw);
 }
 
-function surfaceOf(details: PromptPermissionDetails): string {
-  if (
-    typeof details.accessIntent?.surface === "string" &&
-    details.accessIntent.surface
-  ) {
-    return details.accessIntent.surface;
-  }
-  if (typeof details.surface === "string" && details.surface) {
-    return details.surface;
-  }
-  if (details.path) return "path";
-  if (details.skillName) return "skill";
-  if (details.command) return "bash";
-  return details.toolName || "unknown";
-}
-
-function boundedRequest(details: PromptPermissionDetails): boolean {
-  return BOUNDED_SURFACES.has(surfaceOf(details));
+function boundedRequest(surface: string): boolean {
+  return BOUNDED_SURFACES.has(surface);
 }
 
 type PermissionsService = {
@@ -553,27 +550,24 @@ function permissionsService(): PermissionsService | undefined {
   ] as PermissionsService | undefined;
 }
 
-function reviewValue(details: PromptPermissionDetails): string | undefined {
-  return (
-    effectiveCommand(details) ||
-    details.path ||
-    details.target ||
-    details.skillName ||
-    details.toolName
-  );
-}
-
 function boundaryRequest(
   ctx: ExtensionContext,
   details: PromptPermissionDetails,
   query: PermissionQuery,
 ): BoundaryRequest {
-  const surface = surfaceOf(details);
-  const value = reviewValue(details);
+  const evidence = normalizePermissionEvidence(details);
+  const surface = evidence.surface;
+  const value =
+    evidence.resolvedPath ??
+    (surface === "path" || surface === "external_directory"
+      ? evidence.path
+      : evidence.command ?? evidence.value ?? evidence.destination) ??
+    details.skillName ??
+    details.toolName;
   const deterministicPolicy = query.checkPermission(
     surface,
     value,
-    details.agentName || undefined,
+    evidence.requester?.agentName,
   );
   const policyRule =
     typeof deterministicPolicy === "string"
@@ -585,9 +579,10 @@ function boundaryRequest(
     surface,
     operation: details.source || surface,
     cwd: ctx.cwd,
-    command: effectiveCommand(details),
-    path: details.path,
-    destination: details.target,
+    command: evidence.command,
+    path: evidence.path,
+    resolvedPath: evidence.resolvedPath,
+    destination: evidence.destination,
     toolCallId:
       typeof (details as unknown as Record<string, unknown>).toolCallId ===
       "string"
@@ -598,7 +593,9 @@ function boundaryRequest(
     toolName: details.toolName,
     skillName: details.skillName,
     toolInputPreview: details.toolInputPreview,
-    agentName: details.agentName || undefined,
+    agentName: evidence.requester?.agentName,
+    requesterSessionId: evidence.requester?.sessionId,
+    accessIntent: evidence.accessIntent,
     matchedPolicy: {
       decision: "ask" as const,
       rule: policyRule,
@@ -920,6 +917,7 @@ export function createPiAutoReviewExtension(
       failureMode: config.failureMode,
       grants: new OneShotGrantStore(config.grantTtlMs),
       audit: (event: BoundaryAuditEvent) => {
+        writeOptionalAuditFile(event);
         try {
           pi.events.emit("pi-auto-review:audit", event);
         } catch {
@@ -1038,7 +1036,8 @@ export function createPiAutoReviewExtension(
       disposeAuthorizer = service.registerAuthorizer(
         EXTENSION_NAME,
         async (details, query, log: AuthorizerLog) => {
-          const surface = surfaceOf(details);
+          const evidence = normalizePermissionEvidence(details);
+          const surface = evidence.surface;
           if (!context || !broker) {
             const reason = "review context is unavailable";
             log.review("pi_auto_review_failed_closed", {
@@ -1072,7 +1071,7 @@ export function createPiAutoReviewExtension(
             const result = reviewResults.get(request.id);
             reviewResults.delete(request.id);
             const allowCapped =
-              decision.kind === "allow" && boundedRequest(details);
+              decision.kind === "allow" && boundedRequest(surface);
             const autoConfirmQueued =
               allowCapped &&
               context.mode === "tui" &&
@@ -1127,6 +1126,13 @@ export function createPiAutoReviewExtension(
               transcriptRelevantResultCharacters:
                 result?.transcript.relevantResultCharacters,
               transcriptTruncated: result?.transcript.truncated,
+              command: request.command,
+              path: request.path,
+              resolvedPath: request.resolvedPath,
+              destination: request.destination,
+              agentName: request.agentName,
+              requesterSessionId: request.requesterSessionId,
+              accessIntent: request.accessIntent,
             });
 
             if (allowCapped || decision.kind === "defer") {
@@ -1142,6 +1148,7 @@ export function createPiAutoReviewExtension(
           }
         },
       );
+      writeOptionalAuditFile({ type: "authorizer_registered" });
     } catch (error) {
       console.error(
         `${EXTENSION_NAME}: authorizer registration failed: ${

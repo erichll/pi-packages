@@ -3,6 +3,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { fileURLToPath } from "node:url";
 import {
   createBashToolDefinition,
   createLocalBashOperations,
@@ -31,6 +32,10 @@ import type {
   ProcessBackedSubagentSession,
 } from "./subagent.ts";
 import { Type } from "typebox";
+import {
+  createExternalWorkerSupervisor,
+  type ExternalWorkerSupervisor,
+} from "./external-supervisor.ts";
 
 const EXTENSION_NAME = "pi-sandbox";
 const registrations = new WeakMap<ExtensionAPI, Promise<void>>();
@@ -81,6 +86,50 @@ function externalSubagentDiagnostic(pi: ExtensionAPI): {
     message:
       "pi-subagents orchestration active; pi-sandbox protects Bash execution. External workers are not yet wrapped in an outer Sandbox Runtime sandbox.",
     level: "info",
+  };
+}
+
+const EXTERNAL_WORKER_LAUNCHER = fileURLToPath(
+  new URL("./external-worker-launcher.mjs", import.meta.url),
+);
+
+type ExternalWorkerIsolation = {
+  restore(): void;
+};
+
+function enableExternalWorkerIsolation(
+  supervisor: ExternalWorkerSupervisor,
+): ExternalWorkerIsolation {
+  if (process.platform !== "linux" && process.platform !== "darwin") {
+    throw new Error(`external worker isolation is unavailable on ${process.platform}`);
+  }
+  if (process.env.PI_SUBAGENT_PI_BINARY) {
+    throw new Error(
+      "external worker isolation refuses to replace an existing PI_SUBAGENT_PI_BINARY wrapper",
+    );
+  }
+  const entry = process.argv[1];
+  if (!entry) {
+    throw new Error("external worker isolation cannot determine the real Pi CLI entrypoint");
+  }
+  const injected = {
+    PI_SUBAGENT_PI_BINARY: EXTERNAL_WORKER_LAUNCHER,
+    PI_SANDBOX_EXTERNAL_REAL_PI_BINARY: process.execPath,
+    PI_SANDBOX_EXTERNAL_REAL_PI_PREFIX: JSON.stringify([entry]),
+    PI_SANDBOX_EXTERNAL_ALLOW_READ: [
+      process.cwd(),
+      process.env.PI_CODING_AGENT_DIR,
+    ].filter((value): value is string => Boolean(value)).join(":"),
+    PI_SANDBOX_EXTERNAL_SUPERVISOR_SOCKET: supervisor.socketPath,
+    PI_SANDBOX_EXTERNAL_SUPERVISOR_CAPABILITY: supervisor.capability,
+  };
+  Object.assign(process.env, injected);
+  return {
+    restore() {
+      for (const [key, value] of Object.entries(injected)) {
+        if (process.env[key] === value) delete process.env[key];
+      }
+    },
   };
 }
 
@@ -204,6 +253,7 @@ async function performRegistration(
   const config = loadPiSandboxConfig();
   const subagentProvider =
     options.subagentProvider ?? config.subagents.provider;
+  const externalWorkerIsolation = config.subagents.externalWorkerIsolation;
   const additionalAllowRead = config.filesystem.additionalAllowRead;
   const hostIPC = options.hostIPC ?? config.hostIPC;
   const subagents =
@@ -216,6 +266,9 @@ async function performRegistration(
         }))
       : undefined;
   const cwd = process.cwd();
+  let isolation: ExternalWorkerIsolation | undefined;
+  let supervisor: ExternalWorkerSupervisor | undefined;
+  let externalIsolationFailure: string | undefined;
   const localBash = createBashToolDefinition(cwd);
 
   pi.registerTool({
@@ -476,11 +529,65 @@ async function performRegistration(
     currentTurn = event.turnIndex;
   });
 
-  pi.on("session_start", (_event, ctx) => {
+  // pi-subagents owns the public tool, so a failed wrapper bootstrap cannot
+  // be fixed by replacing that tool. Block at Pi's pre-execution boundary:
+  // enforce must never degrade into a host worker launch.
+  pi.on("tool_call", (event) => {
+    if (
+      event.toolName === "subagent" &&
+      subagentProvider === "pi-subagents" &&
+      externalWorkerIsolation === "enforce" &&
+      !isolation
+    ) {
+      return {
+        block: true,
+        reason: `${EXTENSION_NAME}: external worker isolation is unavailable; refusing host worker launch${externalIsolationFailure ? `: ${externalIsolationFailure}` : ""}`,
+      };
+    }
+    return undefined;
+  });
+
+  pi.on("session_start", async (_event, ctx) => {
+    if (
+      subagentProvider === "pi-subagents" &&
+      externalWorkerIsolation === "enforce"
+    ) {
+      try {
+        isolation?.restore();
+        await supervisor?.close();
+        supervisor = await createExternalWorkerSupervisor((worker) => ({
+          broker: getBoundaryBroker(),
+          command: "external pi-subagents worker network request",
+          cwd: worker.cwd,
+          sessionId: sessionId(ctx),
+          scopeKey: `${sessionId(ctx)}:turn:${currentTurn}`,
+          agentName: `pi-subagents-worker:${worker.id}`,
+          humanApproval: humanApproval(ctx),
+        }));
+        isolation = enableExternalWorkerIsolation(supervisor);
+        externalIsolationFailure = undefined;
+      } catch (error) {
+        const message = `${EXTENSION_NAME}: external worker isolation unavailable; child launches will fail closed: ${error instanceof Error ? error.message : String(error)}`;
+        externalIsolationFailure = message;
+        isolation?.restore();
+        isolation = undefined;
+        await supervisor?.close();
+        supervisor = undefined;
+        console.error(message);
+        if (ctx.hasUI) ctx.ui.notify(message, "warning");
+      }
+    }
     if (ctx.hasUI) {
       if (subagentProvider === "pi-subagents") {
         const diagnostic = externalSubagentDiagnostic(pi);
-        ctx.ui.notify(diagnostic.message, diagnostic.level);
+        ctx.ui.notify(
+          externalWorkerIsolation === "enforce" && isolation
+            ? "pi-subagents orchestration active; external worker process trees require outer Sandbox Runtime isolation."
+            : diagnostic.message,
+          externalWorkerIsolation === "enforce" && isolation
+            ? "info"
+            : diagnostic.level,
+        );
       } else if (subagentProvider === "builtin") {
         ctx.ui.notify(
           "pi-sandbox subagent provider: builtin; worker process trees use the outer Sandbox Runtime sandbox",
@@ -513,6 +620,10 @@ async function performRegistration(
   });
 
   pi.on("session_shutdown", async () => {
+    isolation?.restore();
+    isolation = undefined;
+    await supervisor?.close();
+    supervisor = undefined;
     await subagents?.shutdown();
   });
 }

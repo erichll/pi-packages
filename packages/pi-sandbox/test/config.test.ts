@@ -43,12 +43,12 @@ test("defaults to the builtin provider when configuration is absent", () => {
   const root = makeTempRoot("pi-sandbox-config-");
   try {
     assert.deepEqual(loadPiSandboxConfig({ path: join(root, "missing.json") }), {
-      subagents: { provider: "builtin" },
+      subagents: { provider: "builtin", externalWorkerIsolation: "off" },
       filesystem: { additionalAllowRead: [] },
       hostIPC: defaultHostIPC,
     });
     assert.deepEqual(loadPiSandboxConfig({ home: root }), {
-      subagents: { provider: "builtin" },
+      subagents: { provider: "builtin", externalWorkerIsolation: "off" },
       filesystem: { additionalAllowRead: [] },
       hostIPC: defaultHostIPC,
     });
@@ -70,7 +70,7 @@ test("loads the extension-local config and falls back to the legacy path", () =>
       "utf8",
     );
     assert.deepEqual(loadPiSandboxConfig({ home: root }), {
-      subagents: { provider: "off" },
+      subagents: { provider: "off", externalWorkerIsolation: "off" },
       filesystem: { additionalAllowRead: [] },
       hostIPC: defaultHostIPC,
     });
@@ -86,7 +86,7 @@ test("loads the extension-local config and falls back to the legacy path", () =>
       "utf8",
     );
     assert.deepEqual(loadPiSandboxConfig({ home: root }), {
-      subagents: { provider: "pi-subagents" },
+      subagents: { provider: "pi-subagents", externalWorkerIsolation: "off" },
       filesystem: { additionalAllowRead: [] },
       hostIPC: defaultHostIPC,
     });
@@ -100,7 +100,7 @@ test("accepts every supported subagent provider", () => {
     assert.deepEqual(
       parsePiSandboxConfig({ subagents: { provider } }),
       {
-        subagents: { provider },
+        subagents: { provider, externalWorkerIsolation: "off" },
         filesystem: { additionalAllowRead: [] },
         hostIPC: defaultHostIPC,
       },
@@ -108,19 +108,32 @@ test("accepts every supported subagent provider", () => {
   }
 });
 
+test("external worker isolation is explicit and defaults off", () => {
+  assert.equal(
+    parsePiSandboxConfig({
+      subagents: { provider: "pi-subagents", externalWorkerIsolation: "enforce" },
+    }).subagents.externalWorkerIsolation,
+    "enforce",
+  );
+  assert.throws(
+    () => parsePiSandboxConfig({ subagents: { externalWorkerIsolation: "always" } }),
+    /externalWorkerIsolation must be off or enforce/,
+  );
+});
+
 test("defaults omitted sections to their secure defaults", () => {
   assert.deepEqual(parsePiSandboxConfig({}), {
-    subagents: { provider: "builtin" },
+    subagents: { provider: "builtin", externalWorkerIsolation: "off" },
     filesystem: { additionalAllowRead: [] },
     hostIPC: defaultHostIPC,
   });
   assert.deepEqual(parsePiSandboxConfig({ subagents: {} }), {
-    subagents: { provider: "builtin" },
+    subagents: { provider: "builtin", externalWorkerIsolation: "off" },
     filesystem: { additionalAllowRead: [] },
     hostIPC: defaultHostIPC,
   });
   assert.deepEqual(parsePiSandboxConfig({ filesystem: {} }), {
-    subagents: { provider: "builtin" },
+    subagents: { provider: "builtin", externalWorkerIsolation: "off" },
     filesystem: { additionalAllowRead: [] },
     hostIPC: defaultHostIPC,
   });
@@ -138,7 +151,7 @@ test("accepts unique absolute additional read paths", () => {
       },
     }),
     {
-      subagents: { provider: "builtin" },
+      subagents: { provider: "builtin", externalWorkerIsolation: "off" },
       filesystem: {
         additionalAllowRead: [
           "/home/user/.local/bin/rtk",
@@ -164,7 +177,7 @@ test("accepts and normalizes the host-IPC configuration", () => {
       },
     }),
     {
-      subagents: { provider: "builtin" },
+      subagents: { provider: "builtin", externalWorkerIsolation: "off" },
       filesystem: { additionalAllowRead: [] },
       hostIPC: {
         mode: "ask",

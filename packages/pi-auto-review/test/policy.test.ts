@@ -4,6 +4,7 @@ import {
   buildClassifierTranscript,
   deterministicHardDeny,
   effectiveCommand,
+  normalizePermissionEvidence,
   parseDecision,
 } from "../src/policy.ts";
 
@@ -60,6 +61,87 @@ test("bash_escalated recovers only a complete structured command preview", () =>
       surface: "bash_escalated",
       toolInputPreview: 'input {"command":"unterminated',
     }),
+    undefined,
+  );
+});
+
+test("normalizes forwarded permission evidence without guessing ambiguous values", () => {
+  assert.deepEqual(
+    normalizePermissionEvidence({
+      surface: "tool",
+      value: "rm -rf $HOME",
+      accessIntent: {
+        surface: "bash_escalated",
+        matchValues: ["rm -rf $HOME"],
+      },
+      forwarding: {
+        requesterAgentName: "cleanup",
+        requesterSessionId: "child-1",
+      },
+    }),
+    {
+      surface: "bash_escalated",
+      value: "rm -rf $HOME",
+      command: "rm -rf $HOME",
+      path: undefined,
+      resolvedPath: undefined,
+      destination: undefined,
+      accessIntent: {
+        surface: "bash_escalated",
+        matchValues: ["rm -rf $HOME"],
+        boundaryValue: undefined,
+      },
+      requester: { agentName: "cleanup", sessionId: "child-1" },
+    },
+  );
+  assert.equal(
+    normalizePermissionEvidence({
+      accessIntent: {
+        surface: "bash_escalated",
+        matchValues: ["one", "two"],
+      },
+    }).command,
+    undefined,
+  );
+  assert.deepEqual(
+    normalizePermissionEvidence({
+      value: "/child/project/file.txt",
+      accessIntent: {
+        surface: "path",
+        matchValues: ["/child/project/file.txt", "/child/project"],
+        boundaryValue: "/canonical/child/project",
+      },
+    }),
+    {
+      surface: "path",
+      value: "/child/project/file.txt",
+      command: undefined,
+      path: "/child/project/file.txt",
+      resolvedPath: "/canonical/child/project",
+      destination: undefined,
+      accessIntent: {
+        surface: "path",
+        matchValues: ["/child/project/file.txt", "/child/project"],
+        boundaryValue: "/canonical/child/project",
+      },
+      requester: undefined,
+    },
+  );
+  assert.deepEqual(
+    normalizePermissionEvidence({
+      command: "printf direct",
+      value: "rm -rf $HOME",
+      agentName: "direct-agent",
+      accessIntent: { surface: "bash_escalated", matchValues: ["rm -rf $HOME"] },
+      forwarding: { requesterAgentName: "forwarded-agent" },
+    }).command,
+    "printf direct",
+  );
+  assert.equal(
+    normalizePermissionEvidence({
+      accessIntent: { surface: "bash_escalated", matchValues: ["ok", 3] },
+      forwarding: [],
+    }).accessIntent,
     undefined,
   );
 });

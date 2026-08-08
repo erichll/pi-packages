@@ -68,6 +68,11 @@ async function loadExternal(
 }
 
 const piSubagentsPath = fileURLToPath(import.meta.resolve("pi-subagents"));
+const piSubagentsPackage = JSON.parse(
+  await import("node:fs/promises").then((fs) =>
+    fs.readFile(new URL("../../../node_modules/pi-subagents/package.json", import.meta.url), "utf8"),
+  ),
+) as { version?: unknown };
 
 test(
   "real pi-subagents owns subagent in either extension load order",
@@ -76,6 +81,7 @@ test(
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
     process.env.PI_CODING_AGENT_DIR = agentDir;
     try {
+      assert.equal(piSubagentsPackage.version, "0.42.1");
       for (const order of [
         ["pi-sandbox", "pi-subagents"],
         ["pi-subagents", "pi-sandbox"],
@@ -103,7 +109,12 @@ test(
           subagentTools[0]!.sourceInfo.path,
           /(?:^|[/\\])pi-subagents(?:[/\\]|$)/,
         );
-        assert.ok(tools.some((tool) => tool.name === "bash"));
+        const bashTool = tools.find((tool) => tool.name === "bash");
+        assert.ok(bashTool);
+        assert.match(
+          bashTool.sourceInfo.path,
+          /(?:^|[/\\])pi-sandbox(?:[/\\]|$)/,
+        );
         assert.equal(local.tools.has("subagent"), false);
 
         const notifications: Array<{ message: string; level: string }> = [];

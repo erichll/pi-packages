@@ -27,6 +27,8 @@ export function boundaryRequestHash(request: BoundaryRequest): string {
     skillName: request.skillName,
     toolInputPreview: request.toolInputPreview,
     agentName: request.agentName,
+    requesterSessionId: request.requesterSessionId,
+    accessIntent: request.accessIntent,
     matchedPolicy: request.matchedPolicy,
   };
   return createHash("sha256")

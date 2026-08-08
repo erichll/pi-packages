@@ -209,7 +209,7 @@ export class BoundaryApprovalBroker {
       type,
       requestId: request.id,
       surface: request.surface,
-      details,
+      details: { ...details, requestEvidence: request },
     });
   }
 }

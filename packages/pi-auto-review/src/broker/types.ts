@@ -27,6 +27,12 @@ export type BoundaryRequest = {
   skillName?: string;
   toolInputPreview?: string;
   agentName?: string;
+  requesterSessionId?: string;
+  accessIntent?: {
+    surface: string;
+    matchValues: readonly string[];
+    boundaryValue?: string;
+  };
   matchedPolicy?: {
     decision: "ask";
     rule?: string;

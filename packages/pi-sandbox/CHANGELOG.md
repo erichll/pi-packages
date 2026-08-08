@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0 - 2026-08-08
+
+- Pin the development compatibility target to `pi-subagents 0.42.1` and add
+  coexistence assertions for its package identity and tool ownership.
+- Add `npm run gate:pi-subagents`, an opt-in real-Pi compatibility gate. It
+  uses an isolated agent directory and reports `SKIP` unless a dedicated gate
+  model and credentials are supplied. The gate now waits for returned child
+  results and uses configurable provider-latency timeouts.
+- Add the opt-in `subagents.externalWorkerIsolation: "enforce"` bootstrap for
+  external `pi-subagents` workers. It uses a tarball-shipped launcher and
+  fails closed if its outer Sandbox Runtime broker cannot start, protects
+  first-time security configuration creation, and cleans up only unchanged
+  temporary bind placeholders.
+
 ## 0.4.3 - 2026-08-06
 
 - Move the `pi-auto-review` dependency to `0.3.3`, which allows multi-segment

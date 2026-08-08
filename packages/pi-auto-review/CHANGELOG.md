@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.4 - 2026-08-08
+
+- Normalize direct and permission-system v24 forwarded evidence before policy
+  checks, model review, grant hashing, and audit logging. Forwarded Bash
+  commands, canonical path boundaries, agent names, and requester session IDs
+  now remain bound to the exact reviewed request.
+- Add an opt-in `PI_AUTO_REVIEW_AUDIT_FILE` JSONL sink for isolated release
+  verification without changing the normal event-based audit surface.
+
 ## 0.3.3 - 2026-08-06
 
 - Fix config validation rejecting multi-segment model ids (`provider/group/model`).

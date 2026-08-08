@@ -227,6 +227,7 @@ test("repeated registration does not duplicate managers, tools, or event handler
     {
       user_bash: 1,
       turn_start: 1,
+      tool_call: 1,
       session_start: 1,
       session_shutdown: 1,
     },

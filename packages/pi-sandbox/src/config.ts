@@ -22,6 +22,7 @@ export type HostIPCConfig = {
 export type PiSandboxConfig = {
   subagents: {
     provider: SubagentProvider;
+    externalWorkerIsolation: "off" | "enforce";
   };
   filesystem: {
     additionalAllowRead: readonly string[];
@@ -39,6 +40,7 @@ export const DEFAULT_PI_SANDBOX_CONFIG: Readonly<PiSandboxConfig> = Object.freez
   {
     subagents: Object.freeze({
       provider: "builtin",
+      externalWorkerIsolation: "off",
     }),
     filesystem: Object.freeze({
       additionalAllowRead: Object.freeze([]),
@@ -96,7 +98,11 @@ export function parsePiSandboxConfig(value: unknown): PiSandboxConfig {
     );
   }
   const subagents = value.subagents ?? {};
-  rejectUnknownKeys(subagents, ["provider"], "subagents");
+  rejectUnknownKeys(
+    subagents,
+    ["provider", "externalWorkerIsolation"],
+    "subagents",
+  );
 
   const provider =
     subagents.provider ?? DEFAULT_PI_SANDBOX_CONFIG.subagents.provider;
@@ -106,6 +112,17 @@ export function parsePiSandboxConfig(value: unknown): PiSandboxConfig {
   ) {
     throw new Error(
       `invalid pi-sandbox configuration: subagents.provider must be one of ${SUBAGENT_PROVIDERS.join(", ")}`,
+    );
+  }
+  const externalWorkerIsolation =
+    subagents.externalWorkerIsolation ??
+    DEFAULT_PI_SANDBOX_CONFIG.subagents.externalWorkerIsolation;
+  if (
+    externalWorkerIsolation !== "off" &&
+    externalWorkerIsolation !== "enforce"
+  ) {
+    throw new Error(
+      "invalid pi-sandbox configuration: subagents.externalWorkerIsolation must be off or enforce",
     );
   }
 
@@ -182,6 +199,7 @@ export function parsePiSandboxConfig(value: unknown): PiSandboxConfig {
   return {
     subagents: {
       provider: provider as SubagentProvider,
+      externalWorkerIsolation,
     },
     filesystem: {
       additionalAllowRead: [...new Set(additionalAllowRead)],
@@ -198,7 +216,11 @@ export function parsePiSandboxConfig(value: unknown): PiSandboxConfig {
 
 function defaultPiSandboxConfig(): PiSandboxConfig {
   return {
-    subagents: { provider: DEFAULT_PI_SANDBOX_CONFIG.subagents.provider },
+    subagents: {
+      provider: DEFAULT_PI_SANDBOX_CONFIG.subagents.provider,
+      externalWorkerIsolation:
+        DEFAULT_PI_SANDBOX_CONFIG.subagents.externalWorkerIsolation,
+    },
     filesystem: {
       additionalAllowRead: [
         ...DEFAULT_PI_SANDBOX_CONFIG.filesystem.additionalAllowRead,

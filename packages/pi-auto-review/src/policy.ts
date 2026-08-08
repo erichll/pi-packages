@@ -9,11 +9,34 @@ export type ModelDecision = {
 
 export type PermissionDetailsLike = {
   surface?: string | null;
+  value?: unknown;
   toolName?: string;
+  skillName?: string;
+  command?: unknown;
+  path?: unknown;
+  target?: unknown;
+  agentName?: unknown;
+  toolInputPreview?: unknown;
+  accessIntent?: unknown;
+  forwarding?: unknown;
+};
+
+export type NormalizedPermissionEvidence = {
+  surface: string;
+  value?: string;
   command?: string;
   path?: string;
-  target?: string;
-  toolInputPreview?: string;
+  resolvedPath?: string;
+  destination?: string;
+  accessIntent?: {
+    surface: string;
+    matchValues: readonly string[];
+    boundaryValue?: string;
+  };
+  requester?: {
+    agentName?: string;
+    sessionId?: string;
+  };
 };
 
 export type TranscriptConfig = {
@@ -139,40 +162,88 @@ export function parseDecision(text: string): ModelDecision {
   return decision;
 }
 
-function surfaceOf(details: PermissionDetailsLike): string {
-  if (typeof details.surface === "string" && details.surface) {
-    return details.surface;
-  }
-  if (details.path) return "path";
-  if (details.command) return "bash";
-  return details.toolName || "unknown";
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
 }
 
-export function effectiveCommand(
-  details: PermissionDetailsLike,
-): string | undefined {
-  if (details.command?.trim()) return details.command;
-  if (
-    surfaceOf(details) !== "bash_escalated" ||
-    !details.toolInputPreview?.trim()
-  ) {
-    return undefined;
-  }
-  const preview = details.toolInputPreview.trim().replace(/^input\s+/, "");
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function parsedPreviewCommand(value: unknown): string | undefined {
+  const preview = nonEmptyString(value);
+  if (!preview) return undefined;
   try {
-    const value = JSON.parse(preview) as unknown;
-    if (
-      value &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      typeof (value as Record<string, unknown>).command === "string"
-    ) {
-      return String((value as Record<string, unknown>).command);
-    }
+    const parsed = JSON.parse(preview.trim().replace(/^input\s+/, ""));
+    return nonEmptyString(record(parsed)?.command);
   } catch {
     // A bounded/truncated preview is deliberately not guessed.
+    return undefined;
   }
-  return undefined;
+}
+
+/** Normalize direct and forwarded permission-system evidence without trusting it. */
+export function normalizePermissionEvidence(
+  details: PermissionDetailsLike,
+): NormalizedPermissionEvidence {
+  const rawIntent = record(details.accessIntent);
+  const intentSurface = nonEmptyString(rawIntent?.surface);
+  const rawMatchValues = rawIntent?.matchValues;
+  const matchValues =
+    Array.isArray(rawMatchValues) &&
+    rawMatchValues.every((item) => Boolean(nonEmptyString(item)))
+      ? rawMatchValues as string[]
+      : undefined;
+  const accessIntent = intentSurface && matchValues
+    ? {
+        surface: intentSurface,
+        matchValues: Object.freeze([...matchValues]),
+        boundaryValue: nonEmptyString(rawIntent?.boundaryValue),
+      }
+    : undefined;
+  const surface =
+    accessIntent?.surface ??
+    nonEmptyString(details.surface) ??
+    (nonEmptyString(details.path) ? "path" : undefined) ??
+    nonEmptyString(details.skillName) ??
+    (nonEmptyString(details.command) ? "bash" : undefined) ??
+    nonEmptyString(details.toolName) ??
+    "unknown";
+  const value = nonEmptyString(details.value);
+  const isBash = surface === "bash" || surface === "bash_escalated";
+  const isPath = surface === "path" || surface === "external_directory";
+  const command =
+    nonEmptyString(details.command) ??
+    parsedPreviewCommand(details.toolInputPreview) ??
+    (isBash ? value : undefined) ??
+    (isBash && accessIntent?.matchValues.length === 1
+      ? accessIntent.matchValues[0]
+      : undefined);
+  const path = nonEmptyString(details.path) ?? (isPath ? value : undefined);
+  const destination =
+    nonEmptyString(details.target) ?? (!isBash && !isPath ? value : undefined);
+  const forwarding = record(details.forwarding);
+  const agentName =
+    nonEmptyString(details.agentName) ??
+    nonEmptyString(forwarding?.requesterAgentName);
+  const sessionId = nonEmptyString(forwarding?.requesterSessionId);
+  return {
+    surface,
+    value,
+    command,
+    path,
+    resolvedPath: accessIntent?.boundaryValue,
+    destination,
+    accessIntent,
+    requester:
+      agentName || sessionId ? { agentName, sessionId } : undefined,
+  };
+}
+
+export function effectiveCommand(details: PermissionDetailsLike): string | undefined {
+  return normalizePermissionEvidence(details).command;
 }
 
 export type HardDeny = {

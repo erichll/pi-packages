@@ -59,7 +59,8 @@ new installs.
 ```json
 {
   "subagents": {
-    "provider": "builtin"
+    "provider": "builtin",
+    "externalWorkerIsolation": "off"
   }
 }
 ```
@@ -70,11 +71,52 @@ Supported modes:
   each complete worker process tree.
 - `pi-subagents`: let the external extension own orchestration. Main-agent and
   inherited Bash execution remains sandboxed, but the external worker process
-  itself is not wrapped.
+  itself is not wrapped while `externalWorkerIsolation` is `off`.
 - `off`: protect Bash only.
+
+### `pi-subagents` 0.42.1 capability boundary
+
+`pi-sandbox` verifies the following combination in its test suite and release
+gate:
+
+| Capability | `builtin` | `pi-subagents` 0.42.1 |
+| --- | --- | --- |
+| Outer worker sandbox | Yes | Opt-in (`externalWorkerIsolation: "enforce"`) |
+| Bash sandbox | Yes | Yes |
+| Persistent follow-up | Yes | Yes |
+| `workflowScript`, missions, schedules | No | Yes |
+| permission-system parent forwarding | Not required | Verified by compatibility gate |
+
+For the external provider, `off` leaves the worker process outside the outer
+Sandbox Runtime boundary. Do not treat inherited Bash sandboxing as complete
+worker isolation unless the trusted global configuration explicitly enables
+`enforce`.
 
 The configuration parser rejects malformed JSON, unknown fields, and unknown
 providers instead of silently weakening isolation.
+
+To opt in to outer worker isolation for the external provider, use:
+
+```json
+{
+  "subagents": {
+    "provider": "pi-subagents",
+    "externalWorkerIsolation": "enforce"
+  }
+}
+```
+
+`enforce` installs a session-scoped `PI_SUBAGENT_PI_BINARY` wrapper which
+starts the real Pi worker under a dedicated Sandbox Runtime broker. Bootstrap
+failure is terminal for that worker; it never falls back to host execution.
+The wrapper is preserved for nested child launches. This is opt-in while the
+permission-forwarding supervisor and managed-worktree gate continue to mature.
+
+Managed worktrees receive their own writable checkout plus the smallest known
+Git metadata paths as read-only access so `git status` works. The main
+repository `.git` is never made writable by this policy; Git mutation from an
+outer-sandboxed external worker is therefore intentionally unsupported for
+now.
 
 ## Optional host IPC fallback
 
@@ -157,7 +199,20 @@ From the monorepo root:
 npm install
 npm run check
 npm test
+npm run gate:pi-subagents
 ```
+
+`gate:pi-subagents` is a release/manual integration check, not a default CI
+test. Set `PI_SUBAGENTS_GATE_MODEL` to a configured test model and provide its
+normal Pi credential environment. The command creates a dedicated temporary
+agent directory, never reads or updates your production Pi config, and prints
+`SKIP` when those prerequisites are absent.
+
+It allows 10 minutes for the direct-child phase and 15 minutes for the
+multi-stage workflow, and exits only after the parent reports returned child
+results. Override those bounds with positive millisecond values in
+`PI_SUBAGENTS_GATE_DIRECT_TIMEOUT_MS` and
+`PI_SUBAGENTS_GATE_WORKFLOW_TIMEOUT_MS` when needed for a dedicated provider.
 
 The test suite covers real Linux Sandbox Runtime enforcement when its native
 dependencies are installed, plus deterministic broker, network approval,

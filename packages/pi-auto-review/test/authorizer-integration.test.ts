@@ -11,6 +11,7 @@ import {
   type Config,
 } from "../src/index.ts";
 import { getBoundaryBroker } from "../src/broker/index.ts";
+import { boundaryRequestHash } from "../src/broker/grants.ts";
 import { approveSandboxTrap } from "../../pi-sandbox/src/approval.ts";
 
 const PERMISSIONS_SERVICE_KEY = Symbol.for(
@@ -187,7 +188,10 @@ function harness(
   };
 
   return {
-    async authorize(surface: string) {
+    async authorize(
+      surface: string,
+      overrides: Record<string, unknown> = {},
+    ) {
       const registered = registry.get("pi-auto-review");
       assert.ok(registered, "pi-auto-review registered through the service");
       let terminalCalls = 0;
@@ -237,6 +241,7 @@ function harness(
               boundaryValue: "/tmp/reviewed",
             }
           : undefined,
+        ...overrides,
       });
       return { decision, terminalCalls };
     },
@@ -261,6 +266,23 @@ const deny =
 const defer =
   '{"outcome":"defer","risk_level":"medium","user_authorization":"unknown","rationale":"Human confirmation is required."}';
 
+test("request hashes bind forwarded requester sessions", () => {
+  const request = {
+    id: "request",
+    source: "permission-system" as const,
+    surface: "bash_escalated",
+    operation: "tool",
+    cwd: "/parent-cwd",
+    command: "printf exact",
+    agentName: "worker",
+    requesterSessionId: "child-a",
+  };
+  assert.notEqual(
+    boundaryRequestHash(request),
+    boundaryRequestHash({ ...request, requesterSessionId: "child-b" }),
+  );
+});
+
 test("real permission-system authorizer chain integration", async (t) => {
   await t.test("ask is decided as allow, deny, or terminal defer", async () => {
     for (const [output, approved, terminalCalls] of [
@@ -276,6 +298,82 @@ test("real permission-system authorizer chain integration", async (t) => {
       } finally {
         instance.dispose();
       }
+    }
+  });
+
+  await t.test("forwarded v24 evidence reaches reviewer and audit records", async () => {
+    const instance = harness(allow);
+    try {
+      const result = await instance.authorize("tool", {
+        requestId: "forwarded-bash",
+        surface: "tool",
+        value: "printf forwarded",
+        accessIntent: {
+          surface: "bash_escalated",
+          matchValues: ["printf forwarded"],
+        },
+        forwarding: {
+          requesterAgentName: "worker-a",
+          requesterSessionId: "child-session-a",
+        },
+      });
+      assert.equal(result.decision.approved, true);
+      const rendered = JSON.stringify(instance.modelContexts.at(-1));
+      assert.match(rendered, /printf forwarded/);
+      assert.match(rendered, /worker-a/);
+      assert.match(rendered, /child-session-a/);
+      const audit = instance.reviews.at(-1)?.data;
+      assert.equal(audit?.command, "printf forwarded");
+      assert.equal(audit?.agentName, "worker-a");
+      assert.equal(audit?.requesterSessionId, "child-session-a");
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  await t.test("forwarded dangerous Bash is denied before the model", async () => {
+    const instance = harness(allow);
+    try {
+      const result = await instance.authorize("tool", {
+        requestId: "forwarded-danger",
+        surface: "tool",
+        value: "rm -rf $HOME",
+        accessIntent: {
+          surface: "bash_escalated",
+          matchValues: ["rm -rf $HOME"],
+        },
+        forwarding: { requesterAgentName: "worker-a", requesterSessionId: "child-a" },
+      });
+      assert.equal(result.decision.approved, false);
+      assert.equal(instance.modelContexts.length, 0);
+      assert.equal(instance.reviews.at(-1)?.data.command, "rm -rf $HOME");
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  await t.test("forwarded path preserves child canonical boundary and remains capped", async () => {
+    const instance = harness(allow);
+    try {
+      const result = await instance.authorize("tool", {
+        requestId: "forwarded-path",
+        surface: "tool",
+        value: "/worktree/src/file.ts",
+        accessIntent: {
+          surface: "path",
+          matchValues: ["/worktree/src/file.ts", "/worktree/src"],
+          boundaryValue: "/canonical/worktree/src",
+        },
+        forwarding: { requesterAgentName: "worker-a", requesterSessionId: "child-a" },
+      });
+      assert.equal(result.decision.approved, false);
+      assert.equal(result.terminalCalls, 1);
+      const rendered = JSON.stringify(instance.modelContexts.at(-1));
+      assert.match(rendered, /canonical\/worktree\/src/);
+      assert.match(rendered, /worktree\/src\/file.ts/);
+      assert.equal(instance.reviews.at(-1)?.data.allowCapped, true);
+    } finally {
+      instance.dispose();
     }
   });
 
