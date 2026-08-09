@@ -74,12 +74,12 @@ Supported modes:
   itself is not wrapped while `externalWorkerIsolation` is `off`.
 - `off`: protect Bash only.
 
-### `pi-subagents` 0.42.1 capability boundary
+### `pi-subagents` 0.44.0 capability boundary
 
 `pi-sandbox` verifies the following combination in its test suite and release
 gate:
 
-| Capability | `builtin` | `pi-subagents` 0.42.1 |
+| Capability | `builtin` | `pi-subagents` 0.44.0 |
 | --- | --- | --- |
 | Outer worker sandbox | Yes | Opt-in (`externalWorkerIsolation: "enforce"`) |
 | Bash sandbox | Yes | Yes |
@@ -91,6 +91,12 @@ For the external provider, `off` leaves the worker process outside the outer
 Sandbox Runtime boundary. Do not treat inherited Bash sandboxing as complete
 worker isolation unless the trusted global configuration explicitly enables
 `enforce`.
+
+Note on the external provider's public execution surface: pi-subagents 0.43.0
+removed top-level `agent`/`task` direct execution. Every public `subagent`
+launch — including a minimal single child — is expressed as a `workflowScript`
+such as `return runs.run('main', { agent, task })`. The compatibility gate's
+"direct single child" probe uses that single-run form.
 
 The configuration parser rejects malformed JSON, unknown fields, and unknown
 providers instead of silently weakening isolation.

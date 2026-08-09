@@ -81,7 +81,7 @@ test(
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
     process.env.PI_CODING_AGENT_DIR = agentDir;
     try {
-      assert.equal(piSubagentsPackage.version, "0.42.1");
+      assert.equal(piSubagentsPackage.version, "0.44.0");
       for (const order of [
         ["pi-sandbox", "pi-subagents"],
         ["pi-subagents", "pi-sandbox"],

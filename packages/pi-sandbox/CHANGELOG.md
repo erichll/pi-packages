@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.0 - 2026-08-09
+
+- Retarget the development compatibility target from `pi-subagents 0.42.1` to
+  `pi-subagents 0.44.0` and update the coexistence assertions, capability
+  boundary, and compatibility gate. The 0.44.0 line lands internal
+  workflow/mission/schedule fixes that do not change pi-sandbox's contract
+  (tool-ownership detection, `PI_SUBAGENT_PI_BINARY` worker bootstrap).
+- Adapt the compatibility gate's "direct child" probe to the `workflowScript`
+  single-run form: pi-subagents 0.43.0 removed public top-level `agent`/`task`
+  direct execution, so the external provider's direct single-child launch is
+  now `subagent({ workflowScript: "return runs.run('main', { agent, task })" })`.
+  This unblocks the `subagents.externalWorkerIsolation: "enforce"` gate, which
+  previously timed out when the isolated worker could not reconcile the removed
+  direct signature with the newer `workflowScript`-only contract.
+
 ## 0.5.0 - 2026-08-08
 
 - Pin the development compatibility target to `pi-subagents 0.42.1` and add

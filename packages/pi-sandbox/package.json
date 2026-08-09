@@ -1,6 +1,6 @@
 {
   "name": "@erichll/pi-sandbox",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Sandbox Runtime-backed Linux and macOS sandbox with pi-auto-review approval",
   "type": "module",
   "license": "Apache-2.0",
@@ -60,7 +60,7 @@
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.83.0",
     "@types/node": "^22.15.3",
-    "pi-subagents": "0.42.1",
+    "pi-subagents": "0.44.0",
     "typescript": "^6.0.3"
   }
 }

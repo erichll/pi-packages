@@ -397,16 +397,26 @@ async function main(): Promise<void> {
       "logs",
       "pi-permission-system-permission-review.jsonl",
     );
-    console.log(externalIsolationGate ? "gate: outer-isolated direct child" : "gate: direct child");
+    console.log(externalIsolationGate ? "gate: outer-isolated single-run workflowScript child" : "gate: single-run workflowScript child");
     const providerNetworkAuthorization = externalIsolationGate
       ? providerNetworkEndpoint
         ? ` This compatibility gate explicitly authorizes every child connection to the configured model-provider endpoint ${providerNetworkEndpoint}, only for this gate run; do not access any other network destination.`
         : " This compatibility gate explicitly authorizes every TLS connection that each child needs to its already-configured model provider, only for this gate run; do not access any other network destination."
       : "";
     const directCompletionMarker = `PI_SUBAGENTS_GATE_DIRECT_COMPLETE_${process.pid}`;
+    // Public direct execution (top-level agent + async:false) was removed in
+    // pi-subagents 0.43.0: workflowScript is now the only public execution
+    // surface, including single-child runs. The "direct" probe therefore runs
+    // the minimal single-run workflowScript form.
+    const directScript = [
+      "return runs.run(\"single\", {",
+      "  agent: \"delegate\",",
+      `  task: ${JSON.stringify(`Run Bash \`pwd\` first, then return its output.${providerNetworkAuthorization}`)},`,
+      "});",
+    ].join("\n");
     const direct = await runPi([
       ...common,
-      `Without listing agents first, call the subagent tool now with agent exactly "delegate", async:false, and a task that requires its Bash tool to run exactly \`pwd\` before replying.${providerNetworkAuthorization} Do not answer until that child result is returned. Report its run id and output, then end the response with exactly ${directCompletionMarker}.`,
+      `Make exactly one subagent tool call that runs a single child. Set async:false and workflowScript to the exact JavaScript below; do not list agents, launch a background workflow, call status, or create replacement runs.${providerNetworkAuthorization}\n\n${directScript}\n\nWait for that foreground tool call to return. Report the run id and output, then end the response with exactly ${directCompletionMarker}.`,
     ], env, directTimeoutMs, workspaceDir, forwardingLog, 1, sessionDir, directCompletionMarker);
     console.log("gate: workflowScript");
     const workflowCompletionMarker = `PI_SUBAGENTS_GATE_WORKFLOW_COMPLETE_${process.pid}`;
@@ -446,7 +456,7 @@ async function main(): Promise<void> {
     passed = true;
     console.log(JSON.stringify({
       status: "PASS",
-      piSubagents: "0.42.1",
+      piSubagents: "0.44.0",
       directOutputBytes: direct.stdout.length,
       workflowOutputBytes: workflow.stdout.length,
       externalWorkerIsolation: externalIsolationGate ? "enforce" : "off",
