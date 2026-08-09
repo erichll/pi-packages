@@ -18,6 +18,14 @@ also run complete process-backed subagent trees inside independent sandboxes.
 - Every Bash command and persistent subagent session owns a separate broker
   process and Sandbox Runtime manager. Concurrent workers therefore keep
   independent policy, proxy, approval, and cleanup lifecycles.
+- Each sandboxed command is given a **private, writable temp directory**: a
+  fresh `pi-sandbox-tmp-*` subdirectory of the host temp tree that is added to
+  the sandbox's read/write allowlists, with the command's `TMPDIR`, `TMP`, and
+  `TEMP` pointed at it. Only that isolated directory is writable — the shared
+  host temp root (e.g. `/tmp` itself) stays read-only to the sandbox — and it
+  is removed when the command exits. If the host temp directory is unavailable
+  (e.g. a read-only `/tmp`) the command degrades to the previous denied-temp
+  behaviour rather than failing.
 - Project and global Pi security configuration, the trusted extensions tree,
   the installed package, Git hooks, and other Sandbox Runtime mandatory paths
   remain write-protected.

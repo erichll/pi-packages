@@ -1,6 +1,23 @@
 # Changelog
 
-## 0.6.0 - 2026-08-09
+## 0.6.1 - 2026-08-09
+
+- Upgrade `@anthropic-ai/sandbox-runtime` from `0.0.67` to `0.0.71` (path
+  normalization, proxy abort and query-string redaction hardening, per-command
+  violation attribution, network domain `:port` suffixes and per-entry deny
+  reasons, compacted macOS Seatbelt profiles). No breaking contract changes.
+- Give every sandboxed command (main-agent Bash and builtin subagents) a
+  **private, writable temp directory**: each invocation creates an isolated
+  `pi-sandbox-tmp-*` subdirectory of the host temp tree, adds it to the
+  sandbox's read/write allowlists, and points the command's `TMPDIR`, `TMP`,
+  and `TEMP` at it. The shared host temp root stays read-only to the sandbox;
+  the directory is removed when the command exits. If the host temp directory
+  is unavailable (e.g. a read-only `/tmp`), the command degrades to the
+  previous denied-temp behaviour instead of failing. This mirrors the outer
+  external-worker isolation and unifies the broker temp-dir env under
+  `PI_SANDBOX_TMPDIR`.
+- Add an injectable `createTempDir` test seam plus a broker probe fixture and
+  runner coverage for the private-temp success and degrade paths.
 
 - Retarget the development compatibility target from `pi-subagents 0.42.1` to
   `pi-subagents 0.44.0` and update the coexistence assertions, capability

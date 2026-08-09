@@ -215,7 +215,7 @@ if (!realPi) {
     detached: true,
     env: {
       ...process.env,
-      PI_SANDBOX_EXTERNAL_WORKER_TMPDIR: workerTempDir,
+      PI_SANDBOX_TMPDIR: workerTempDir,
       CLAUDE_CODE_TMPDIR: workerTempDir,
       TMPDIR: workerTempDir,
       TMP: workerTempDir,

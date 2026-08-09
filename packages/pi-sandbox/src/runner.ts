@@ -3,6 +3,9 @@ import {
   type ChildProcess,
   type ForkOptions,
 } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Writable } from "node:stream";
 import { getShellConfig } from "@earendil-works/pi-coding-agent";
@@ -38,6 +41,13 @@ export type SandboxCommandOptions = {
   ): Promise<SandboxApprovalAction>;
   policy?: SandboxPolicy;
   shellPath?: string;
+  /**
+   * Test seam. Production callers leave unset (uses a fresh private temp dir
+   * under the host temp dir). Returning undefined simulates a read-only or
+   * otherwise unavailable temp directory, in which case the command degrades
+   * to the previous (denied-temp) behaviour.
+   */
+  createTempDir?(): string | undefined;
   directInvocation?: {
     command: string;
     args: string[];
@@ -76,6 +86,45 @@ const BROKER_MODULE = fileURLToPath(
   new URL("./srt-broker.mjs", import.meta.url),
 );
 
+/**
+ * Env var the broker honors to point the sandboxed child's temp directories
+ * at a private, writable directory (see srt-broker.mjs). Shared with the
+ * external worker launcher, which creates the same per-worker temp dir.
+ */
+const SANDBOX_TMPDIR_ENV = "PI_SANDBOX_TMPDIR";
+const COMMAND_TMPDIR_PREFIX = "pi-sandbox-tmp-";
+
+/**
+ * Create a private writable temp directory for one sandboxed command. The
+ * writable temp is per-command and isolated (a fresh subdirectory of the host
+ * temp dir, never the shared /tmp itself), so tools that honour TMPDIR keep
+ * working without opening the host's world-writable temp to the sandbox. When
+ * the host temp directory is unavailable (e.g. read-only /tmp) we degrade to
+ * the previous behaviour rather than fail the command.
+ */
+function createCommandTempDir(): string | undefined {
+  try {
+    return mkdtempSync(join(tmpdir(), COMMAND_TMPDIR_PREFIX));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Add a private temp dir to the sandbox's read/write allowlists (non-mutating). */
+function withWritableTempDir(
+  policy: SandboxPolicy,
+  tempDir: string,
+): SandboxPolicy {
+  return {
+    ...policy,
+    filesystem: {
+      ...policy.filesystem,
+      allowRead: [...policy.filesystem.allowRead, tempDir],
+      allowWrite: [...policy.filesystem.allowWrite, tempDir],
+    },
+  };
+}
+
 function killProcessTree(child: ChildProcess): void {
   if (child.pid === undefined) return;
   try {
@@ -108,7 +157,10 @@ function commandInvocation(options: SandboxCommandOptions): {
   };
 }
 
-function spawnBroker(options: SandboxCommandOptions): ChildProcess {
+function spawnBroker(
+  options: SandboxCommandOptions,
+  env: NodeJS.ProcessEnv,
+): ChildProcess {
   const broker = options.broker ?? {
     modulePath: BROKER_MODULE,
     execArgv: [],
@@ -116,7 +168,7 @@ function spawnBroker(options: SandboxCommandOptions): ChildProcess {
   const forkOptions: ForkOptions = {
     cwd: options.cwd,
     detached: true,
-    env: options.env ?? process.env,
+    env,
     execArgv: broker.execArgv ?? [],
     stdio: ["pipe", "pipe", "pipe", "ipc"],
   };
@@ -133,8 +185,20 @@ export async function runSandboxedCommand(
   if (options.signal?.aborted) throw new Error("aborted");
 
   const invocation = commandInvocation(options);
-  const policy = options.policy ?? createDefaultPolicy(options.cwd);
-  const broker = spawnBroker(options);
+  let policy = options.policy ?? createDefaultPolicy(options.cwd);
+  let brokerEnv = options.env ?? process.env;
+  // Give every sandboxed command a private, writable temp dir (see
+  // createCommandTempDir). The broker receives SANDBOX_TMPDIR_ENV and redirects
+  // the child's TMPDIR/TMP/TEMP there. The test seam, when provided, is
+  // authoritative (returning undefined simulates an unavailable temp dir).
+  const tempDir = options.createTempDir
+    ? options.createTempDir()
+    : createCommandTempDir();
+  if (tempDir) {
+    policy = withWritableTempDir(policy, tempDir);
+    brokerEnv = { ...brokerEnv, [SANDBOX_TMPDIR_ENV]: tempDir };
+  }
+  const broker = spawnBroker(options, brokerEnv);
   let timeoutHandle: NodeJS.Timeout | undefined;
   let timedOut = false;
   let onAbort: (() => void) | undefined;
@@ -191,6 +255,13 @@ export async function runSandboxedCommand(
     if (onAbort) options.signal?.removeEventListener("abort", onAbort);
     if (broker.exitCode === null && broker.signalCode === null) {
       killProcessTree(broker);
+    }
+    if (tempDir) {
+      try {
+        rmSync(tempDir, { recursive: true, force: true });
+      } catch {
+        // Best-effort cleanup; the temp dir is beneath the host temp tree.
+      }
     }
   }
 }

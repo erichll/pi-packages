@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -16,6 +17,10 @@ import type { SandboxPolicy } from "../src/policy.ts";
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const fakeBroker = {
   modulePath: join(fixtures, "srt-broker.mjs"),
+  execArgv: [],
+};
+const probeBroker = {
+  modulePath: join(fixtures, "srt-broker-probe.mjs"),
   execArgv: [],
 };
 const hasSrtDependencies =
@@ -200,6 +205,75 @@ test("kills the sandboxed process tree on timeout", async () => {
       /timeout:0.05/,
     );
     assert.ok(Date.now() - started < 2_000);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("injects a private writable temp dir into policy and broker env, then cleans up", async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "pi-sandbox-tmpenv-"));
+  const tempDir = join(workspace, "command-tmp");
+  mkdirSync(tempDir, { recursive: true });
+  let output = "";
+  try {
+    const result = await runSandboxedCommand({
+      command: "probe",
+      cwd: workspace,
+      broker: probeBroker,
+      createTempDir() {
+        return tempDir;
+      },
+      onData(data) {
+        output += data.toString("utf8");
+      },
+      async review() {
+        return "deny";
+      },
+    });
+    assert.equal(result.exitCode, 0);
+    const probe = JSON.parse(output);
+    assert.ok(probe.allowWrite.includes(tempDir), "allowWrite should include temp dir");
+    assert.ok(probe.allowRead.includes(tempDir), "allowRead should include temp dir");
+    assert.equal(probe.tmpdirEnv, tempDir, "broker env should carry PI_SANDBOX_TMPDIR");
+    // The runner must remove the per-command temp dir on completion.
+    assert.equal(existsSync(tempDir), false, "temp dir should be cleaned up");
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("degrades (no writable temp) when a temp dir cannot be created", async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "pi-sandbox-tmpdegrade-"));
+  let output = "";
+  try {
+    const result = await runSandboxedCommand({
+      command: "probe",
+      cwd: workspace,
+      broker: probeBroker,
+      policy: policy(workspace, workspace),
+      createTempDir() {
+        return undefined;
+      },
+      onData(data) {
+        output += data.toString("utf8");
+      },
+      async review() {
+        return "deny";
+      },
+    });
+    assert.equal(result.exitCode, 0);
+    const probe = JSON.parse(output);
+    assert.equal(
+      probe.tmpdirEnv,
+      "",
+      "no PI_SANDBOX_TMPDIR should be set when temp is unavailable",
+    );
+    assert.deepEqual(
+      probe.allowWrite,
+      [workspace],
+      "allowWrite should stay unchanged when temp is unavailable",
+    );
+    assert.deepEqual(probe.allowRead, [workspace]);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

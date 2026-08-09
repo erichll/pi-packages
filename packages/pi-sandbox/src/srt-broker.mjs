@@ -88,7 +88,7 @@ async function main() {
     undefined,
     process.cwd(),
   );
-  const workerTempDir = process.env.PI_SANDBOX_EXTERNAL_WORKER_TMPDIR;
+  const workerTempDir = process.env.PI_SANDBOX_TMPDIR;
   target = spawn(wrapped.argv[0], wrapped.argv.slice(1), {
     cwd: process.cwd(),
     env: workerTempDir
