@@ -9,6 +9,7 @@ const externalIsolationGate = process.env.PI_SUBAGENTS_GATE_EXTERNAL_ISOLATION =
 const execFileAsync = promisify(execFile);
 const directTimeoutMs = gateTimeout("PI_SUBAGENTS_GATE_DIRECT_TIMEOUT_MS", 10 * 60_000);
 const workflowTimeoutMs = gateTimeout("PI_SUBAGENTS_GATE_WORKFLOW_TIMEOUT_MS", 15 * 60_000);
+const asyncTimeoutMs = gateTimeout("PI_SUBAGENTS_GATE_ASYNC_TIMEOUT_MS", 15 * 60_000);
 const credentialNames = [
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_AUTH_TOKEN",
@@ -236,6 +237,128 @@ function toolCounts(output: string): Record<string, number> {
   };
 }
 
+/** Rough semver floor check (e.g. 0.45.1 is at least 0.45). Tolerant of unparsable versions. */
+function piSubagentsAtLeast(version: unknown, major: number, minor: number): boolean {
+  if (typeof version !== "string") return false;
+  const [maj, min] = version.split(".").map((part) => Number.parseInt(part, 10));
+  return Number.isInteger(maj) && Number.isInteger(min) &&
+    (maj > major || (maj === major && min >= minor));
+}
+
+type CompletionEvidence = {
+  childRunIds: string[];
+  artifactPathsPresent: boolean;
+  runId?: string;
+  success?: boolean;
+};
+
+/**
+ * Recursively collect every object whose `completions` key holds the
+ * `WaitCompletion[]` payload pi-subagents 0.45.0+ surfaces on the
+ * `subagent_wait` tool-result details. Scanning is shape-agnostic so it stays
+ * stable across the parent-session records and any transient async result
+ * artifacts, without depending on the exact serialized session shape.
+ */
+function collectCompletions(value: unknown, out: CompletionEvidence[]): void {
+  if (Array.isArray(value)) {
+    for (const entry of value) collectCompletions(entry, out);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  const record = value as Record<string, unknown>;
+  const completions = record.completions;
+  if (Array.isArray(completions)) {
+    for (const completion of completions) {
+      if (!completion || typeof completion !== "object" || Array.isArray(completion)) continue;
+      const item = completion as Record<string, unknown>;
+      const childRunIds: string[] = [];
+      let artifactPathsPresent = false;
+      if (Array.isArray(item.results)) {
+        for (const child of item.results) {
+          if (!child || typeof child !== "object" || Array.isArray(child)) continue;
+          const childRecord = child as Record<string, unknown>;
+          if (typeof childRecord.runId === "string" && childRecord.runId) childRunIds.push(childRecord.runId);
+          if (childRecord.artifactPaths !== undefined && childRecord.artifactPaths !== null) artifactPathsPresent = true;
+        }
+      }
+      out.push({
+        ...(typeof item.runId === "string" && item.runId ? { runId: item.runId } : {}),
+        ...(typeof item.success === "boolean" ? { success: item.success } : {}),
+        childRunIds,
+        artifactPathsPresent,
+      });
+    }
+  }
+  for (const key of Object.keys(record)) {
+    if (key === "completions") continue;
+    collectCompletions(record[key], out);
+  }
+}
+
+/**
+ * Scan the parent/child session artifacts for (a) the `subagent_wait` tool
+ * call, (b) any structured `details.completions` completion payload that
+ * pi-subagents 0.45.0+ delivered for the async wait, and (c) literal child
+ * output markers that prove the async children actually produced and delivered
+ * their results. Scanning is shape-agnostic so it stays stable across the
+ * parent-session records and any transient async result artifacts.
+ */
+async function waitCompletionEvidence(sessionDir: string, markers: string[]): Promise<{
+  waitToolCalls: number;
+  completions: CompletionEvidence[];
+  markersSeen: string[];
+}> {
+  const completions: CompletionEvidence[] = [];
+  const markersSeen = new Set<string>();
+  let waitToolCalls = 0;
+  const considerToolCall = (name: unknown): void => {
+    if (typeof name === "string" && name === "subagent_wait") waitToolCalls++;
+  };
+  const considerText = (text: unknown): void => {
+    if (typeof text !== "string") return;
+    for (const marker of markers) if (text.includes(marker)) markersSeen.add(marker);
+  };
+  try {
+    const entries = await readdir(sessionDir, { recursive: true, withFileTypes: true });
+    const jsonlFiles = entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
+      .map((entry) => join(entry.parentPath, entry.name));
+    for (const file of jsonlFiles) {
+      const lines = (await readFile(file, "utf8")).split("\n");
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let event: unknown;
+        try { event = JSON.parse(line); } catch { continue; }
+        if (!event || typeof event !== "object") continue;
+        const record = event as Record<string, unknown>;
+        const tool = typeof record.toolName === "string"
+          ? record.toolName
+          : record.type === "tool_call" && typeof record.name === "string" ? record.name : undefined;
+        considerToolCall(tool);
+        // Tool calls inside an assistant message content (toolCall/tool_use parts).
+        const message = record.message;
+        if (message && typeof message === "object" && !Array.isArray(message)) {
+          const content = (message as Record<string, unknown>).content;
+          if (Array.isArray(content)) {
+            for (const part of content) {
+              if (part && typeof part === "object" && !Array.isArray(part)) {
+                const partRecord = part as Record<string, unknown>;
+                if (partRecord.type === "toolCall" || partRecord.type === "tool_use") considerToolCall(partRecord.name);
+                considerText(partRecord.text);
+              }
+            }
+          }
+        }
+        considerText(line);
+        collectCompletions(event, completions);
+      }
+    }
+  } catch {
+    // Missing artifacts are reported as empty evidence.
+  }
+  return { waitToolCalls, completions, markersSeen: [...markersSeen] };
+}
+
 async function initializeWorkspaceRepository(workspaceDir: string): Promise<void> {
   // workflowScript's worktree option requires a committed Git repository. Set
   // it up before any isolated worker starts, because the isolated policy
@@ -284,6 +407,10 @@ async function main(): Promise<void> {
     PI_AUTO_REVIEW_ALLOW_UNTRUSTED_DEV: "1",
     PI_AUTO_REVIEW_AUDIT_FILE: autoReviewAuditFile,
   };
+  const piSubagentsVersion = await readFile(
+    resolve("node_modules/pi-subagents/package.json"),
+    "utf8",
+  ).then((raw) => (JSON.parse(raw) as { version?: unknown }).version).catch(() => "unknown");
   let passed = false;
 
   try {
@@ -435,6 +562,57 @@ async function main(): Promise<void> {
       ...common,
       `Make exactly one subagent tool call. Set async:false and workflowScript to the exact JavaScript below; do not list agents, launch a background workflow, call status, or create replacement runs.\n\n${workflowScript}\n\nWait for that foreground tool call to return. Report every run id and output, then end the response with exactly ${workflowCompletionMarker}.`,
     ], env, workflowTimeoutMs, workspaceDir, forwardingLog, 4, sessionDir, workflowCompletionMarker);
+    console.log("gate: async workflow completion payloads");
+    const asyncCompletionMarker = `PI_SUBAGENTS_GATE_ASYNC_COMPLETE_${process.pid}`;
+    const asyncScript = [
+      "const [left, right] = await runs.all([",
+      `  { key: "left", agent: "delegate", task: ${JSON.stringify(`Run Bash \`pwd\` first, then return your output and the marker ASYNC-LEFT.${providerNetworkAuthorization}`)} },`,
+      `  { key: "right", agent: "delegate", task: ${JSON.stringify(`Run Bash \`pwd\` first, then return your output and the marker ASYNC-RIGHT.${providerNetworkAuthorization}`)} },`,
+      "] );",
+      "return { left, right };",
+    ].join("\n");
+    const asyncWorkflow = await runPi([
+      ...common,
+      `Make exactly one subagent tool call that launches a background workflow: set async:true and workflowScript to the exact JavaScript below; do not call status, list agents, or create replacement runs.${providerNetworkAuthorization}\n\n${asyncScript}\n\nFrom the returned control record, read the run id. Then call subagent_wait({ id: <that run id>, nonBlocking: false }) and wait for it to return the completed result. Report each child's run id, the markers ASYNC-LEFT and ASYNC-RIGHT, and note whether the subagent_wait result carried structured completion details. Then end your response with exactly ${asyncCompletionMarker}.`,
+    ], env, asyncTimeoutMs, workspaceDir, forwardingLog, 2, sessionDir, asyncCompletionMarker);
+    const asyncMarkers = ["ASYNC-LEFT", "ASYNC-RIGHT"];
+    const completionEvidence = await waitCompletionEvidence(sessionDir, asyncMarkers);
+    // Hard gate: pi-subagents >= 0.45.0 must surface the structured completion
+    // surface (#915) — the explicit subagent_wait call and its
+    // details.completions payload. With the pinned 0.45.1 dependency this is
+    // mandatory; the check is version-gated so an unexpected downgrade fails
+    // loudly rather than silently skipping the new contract.
+    const requiresCompletionContract = piSubagentsAtLeast(piSubagentsVersion, 0, 45);
+    if (requiresCompletionContract) {
+      if (completionEvidence.waitToolCalls < 1) {
+        throw new Error(
+          `async probe: pi-subagents ${String(piSubagentsVersion)} >= 0.45.0 must surface subagent_wait, but no subagent_wait tool call was recorded (sessionDir=${sessionDir})`,
+        );
+      }
+      if (completionEvidence.completions.length < 1) {
+        throw new Error(
+          `async probe: pi-subagents ${String(piSubagentsVersion)} >= 0.45.0 must surface details.completions for the async wait, but no completion payload was observed (waitToolCalls=${completionEvidence.waitToolCalls})`,
+        );
+      }
+    }
+    // When a completion payload is present, validate its shape so a regression
+    // that drops run identity / per-child run ids is caught regardless of the
+    // version gate above.
+    if (completionEvidence.completions.length > 0) {
+      const malformed = completionEvidence.completions.filter(
+        (completion) => !completion.runId || completion.childRunIds.length === 0,
+      );
+      if (malformed.length > 0) {
+        throw new Error(
+          `async probe: detail completion payload present but missing run identity or per-child run ids: ${JSON.stringify(malformed)}`,
+        );
+      }
+    }
+    if (completionEvidence.waitToolCalls === 0 || completionEvidence.markersSeen.length < asyncMarkers.length) {
+      console.log(
+        `gate: async probe completed (evidence: waitToolCalls=${completionEvidence.waitToolCalls}, completionPayloads=${completionEvidence.completions.length}, childMarkers=${JSON.stringify(completionEvidence.markersSeen)}); structured completion surface not fully exercised this run`,
+      );
+    }
     console.log("gate: forwarded permission audit");
     const audit = await auditEvidence(join(agentDir, "extensions", "pi-permission-system", "logs"));
     const autoReviewAudit = await readFile(autoReviewAuditFile, "utf8").catch(() => "");
@@ -456,9 +634,14 @@ async function main(): Promise<void> {
     passed = true;
     console.log(JSON.stringify({
       status: "PASS",
-      piSubagents: "0.44.0",
+      piSubagents: String(piSubagentsVersion),
       directOutputBytes: direct.stdout.length,
       workflowOutputBytes: workflow.stdout.length,
+      asyncOutputBytes: asyncWorkflow.stdout.length,
+      asyncWaitToolCalls: completionEvidence.waitToolCalls,
+      asyncCompletionPayloads: completionEvidence.completions.length,
+      asyncMarkersSeen: completionEvidence.markersSeen,
+      asyncCompletionEnforced: requiresCompletionContract,
       externalWorkerIsolation: externalIsolationGate ? "enforce" : "off",
       agentDir: "[temporary, removed]",
     }));

@@ -103,13 +103,15 @@ READMEs for provider, platform, and trust-boundary details.
 ## Development and release verification
 
 Run deterministic checks with `npm run check` and `npm test`. The external
-provider compatibility target is `pi-subagents 0.42.1`. Before a release, run
+provider compatibility target is `pi-subagents 0.45.2`. Before a release, run
 `npm run gate:pi-subagents` with `PI_SUBAGENTS_GATE_MODEL` and its normal Pi
 credential environment. It uses an isolated temporary agent directory and
 prints `SKIP` (rather than pass) when the required model setup is absent.
 
 The gate waits for returned child results, with provider-latency budgets of 10
-minutes for the direct child and 15 minutes for the multi-stage workflow. Set
-`PI_SUBAGENTS_GATE_DIRECT_TIMEOUT_MS` or
-`PI_SUBAGENTS_GATE_WORKFLOW_TIMEOUT_MS` to positive millisecond values when a
+minutes for the direct child, 15 minutes for the multi-stage workflow, and 15
+minutes for the async background-workflow completion payload. Set
+`PI_SUBAGENTS_GATE_DIRECT_TIMEOUT_MS`,
+`PI_SUBAGENTS_GATE_WORKFLOW_TIMEOUT_MS`, or
+`PI_SUBAGENTS_GATE_ASYNC_TIMEOUT_MS` to positive millisecond values when a
 dedicated test provider needs different bounds.

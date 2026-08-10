@@ -82,12 +82,12 @@ Supported modes:
   itself is not wrapped while `externalWorkerIsolation` is `off`.
 - `off`: protect Bash only.
 
-### `pi-subagents` 0.44.0 capability boundary
+### `pi-subagents` 0.45.2 capability boundary
 
 `pi-sandbox` verifies the following combination in its test suite and release
 gate:
 
-| Capability | `builtin` | `pi-subagents` 0.44.0 |
+| Capability | `builtin` | `pi-subagents` 0.45.2 |
 | --- | --- | --- |
 | Outer worker sandbox | Yes | Opt-in (`externalWorkerIsolation: "enforce"`) |
 | Bash sandbox | Yes | Yes |

@@ -81,7 +81,16 @@ test(
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
     process.env.PI_CODING_AGENT_DIR = agentDir;
     try {
-      assert.equal(piSubagentsPackage.version, "0.44.0");
+      // Compatibility floor: the external provider must be new enough to
+      // deliver the 0.45.x async completion surface exercised by the release
+      // gate. Assert a >= 0.45.0 version instead of pinning an exact build so
+      // the smoke test keeps passing across patch bumps within the target line.
+      const version = String(piSubagentsPackage.version ?? "0.0.0");
+      const [major, minor] = version.split(".").map((part) => Number.parseInt(part, 10));
+      assert.ok(
+        Number.isInteger(major) && major >= 0 && Number.isInteger(minor) && (major > 0 || minor >= 45),
+        `expected pi-subagents >= 0.45.0, got ${version}`,
+      );
       for (const order of [
         ["pi-sandbox", "pi-subagents"],
         ["pi-subagents", "pi-sandbox"],
