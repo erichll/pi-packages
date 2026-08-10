@@ -125,9 +125,9 @@ const BOUNDED_SURFACES = new Set(["path", "external_directory"]);
 const DEFAULT_CONFIG: Config = {
   model: "codex-auto-review",
   reasoning: "low",
-  timeoutMs: 45_000,
+  timeoutMs: 90_000,
   maxTokens: 1_600,
-  retries: 1,
+  retries: 2,
   maxUserTranscriptTokens: 1_200,
   maxToolTranscriptTokens: 1_200,
   maxRelevantResultTokens: 800,
