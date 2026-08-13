@@ -63,30 +63,44 @@ jobs:
           npm run check
           npm test
 
+  # NOTE: `secrets` cannot be referenced from a job-level `if`. The opt-in is
+  # therefore implemented by importing the secrets into a job-level `env` and
+  # gating each step with `if: env.PI_SUBAGENTS_GATE_MODEL != ''`. When no
+  # model secret is configured, the job prints a skip notice and is green.
   model-gate:
     name: Model-backed compat gate (opt-in)
     runs-on: ubuntu-latest
-    if: ${{ secrets.PI_SUBAGENTS_GATE_MODEL != '' }}
+    env:
+      PI_SUBAGENTS_GATE_MODEL: ${{ secrets.PI_SUBAGENTS_GATE_MODEL }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      CLIPROXYAPI_API_KEY: ${{ secrets.CLIPROXYAPI_API_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Skip unless a model secret is configured
+        if: env.PI_SUBAGENTS_GATE_MODEL == ''
+        run: echo "model-gate skipped (PI_SUBAGENTS_GATE_MODEL not configured)"; exit 0
+      - name: Checkout
+        if: env.PI_SUBAGENTS_GATE_MODEL != ''
+        uses: actions/checkout@v4
       - uses: actions/setup-node@v4
+        if: env.PI_SUBAGENTS_GATE_MODEL != ''
         with:
           node-version: 22
           cache: npm
       - name: Install tmux (gate needs a real PTY)
+        if: env.PI_SUBAGENTS_GATE_MODEL != ''
         run: sudo apt-get update && sudo apt-get install -y tmux
       - run: npm ci
+        if: env.PI_SUBAGENTS_GATE_MODEL != ''
       - name: Install latest pi-subagents
+        if: env.PI_SUBAGENTS_GATE_MODEL != ''
         run: npm install -D -E pi-subagents@latest --workspace packages/pi-sandbox
       - name: Install pi binary (PI_SUBAGENTS_GATE_PI_BINARY)
+        if: env.PI_SUBAGENTS_GATE_MODEL != ''
         run: npm i -g @earendil-works/pi-coding-agent
       - name: Run compatibility gate
-        env:
-          PI_SUBAGENTS_GATE_MODEL: ${{ secrets.PI_SUBAGENTS_GATE_MODEL }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          CLIPROXYAPI_API_KEY: ${{ secrets.CLIPROXYAPI_API_KEY }}
+        if: env.PI_SUBAGENTS_GATE_MODEL != ''
         run: npm run gate:pi-subagents
