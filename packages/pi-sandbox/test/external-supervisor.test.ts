@@ -10,11 +10,12 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { createExternalWorkerSupervisor } from "../src/external-supervisor.ts";
+import { sandboxRuntimeNetworkCapable } from "./srt-capable.ts";
 
 const launcher = fileURLToPath(
   new URL("../src/external-worker-launcher.mjs", import.meta.url),
 );
-const linuxTest = process.platform === "linux" ? test : test.skip;
+const sandboxTest = sandboxRuntimeNetworkCapable() ? test : test.skip;
 
 function request(socketPath: string, value: Record<string, unknown>): Promise<{ action: string }> {
   return new Promise((resolve, reject) => {
@@ -108,7 +109,7 @@ test("external supervisor accepts only one capability-bound network request", as
   }
 });
 
-linuxTest("external launcher wraps the complete worker process tree", async () => {
+sandboxTest("external launcher wraps the complete worker process tree", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-sandbox-external-launcher-"));
   const workspace = join(root, "workspace");
   const agentDir = join(root, "agent");
@@ -158,7 +159,7 @@ linuxTest("external launcher wraps the complete worker process tree", async () =
   }
 });
 
-linuxTest("external launcher permits Pi project-state creation in a new workspace", async () => {
+sandboxTest("external launcher permits Pi project-state creation in a new workspace", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "pi-sandbox-external-project-state-"));
   const agentDir = join(workspace, ".agent");
   const worker = join(workspace, "worker.mjs");
@@ -207,7 +208,7 @@ linuxTest("external launcher permits Pi project-state creation in a new workspac
   }
 });
 
-linuxTest("external launcher blocks first-time security configuration creation", async () => {
+sandboxTest("external launcher blocks first-time security configuration creation", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-sandbox-external-security-create-"));
   const workspace = join(root, "workspace");
   const agentDir = join(root, "agent");
@@ -259,7 +260,7 @@ linuxTest("external launcher blocks first-time security configuration creation",
   }
 });
 
-linuxTest("external launcher permits read-only Git worktree metadata", async () => {
+sandboxTest("external launcher permits read-only Git worktree metadata", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-sandbox-external-worktree-"));
   const repository = join(root, "repository");
   const worktree = join(root, "worktree");
@@ -310,7 +311,7 @@ linuxTest("external launcher permits read-only Git worktree metadata", async () 
   }
 });
 
-linuxTest("external launcher preserves the wrapper for nested child launches", async () => {
+sandboxTest("external launcher preserves the wrapper for nested child launches", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "pi-sandbox-external-nested-"));
   const agentDir = join(workspace, ".agent");
   const worker = join(workspace, "worker.mjs");

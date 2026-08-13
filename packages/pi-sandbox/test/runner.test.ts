@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { runSandboxedCommand } from "../src/runner.ts";
 import type { SandboxPolicy } from "../src/policy.ts";
+import { sandboxRuntimeNetworkCapable } from "./srt-capable.ts";
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const fakeBroker = {
@@ -29,6 +30,7 @@ const hasSrtDependencies =
   spawnSync("socat", ["-V"]).status === 0 &&
   spawnSync("rg", ["--version"]).status === 0;
 const srtTest = hasSrtDependencies ? test : test.skip;
+const rpcTest = sandboxRuntimeNetworkCapable() ? test : test.skip;
 
 function policy(root: string, workspace: string): SandboxPolicy {
   return {
@@ -156,7 +158,7 @@ srtTest("Sandbox Runtime blocks filesystem access outside policy", async () => {
   }
 });
 
-srtTest("Sandbox Runtime supports a persistent direct invocation", async () => {
+rpcTest("Sandbox Runtime supports a persistent direct invocation", async () => {
   const workspace = mkdtempSync(join(tmpdir(), "pi-sandbox-srt-stdin-"));
   const worker = join(workspace, "worker.mjs");
   writeFileSync(
