@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.5 - 2026-08-13
+
+- Raise the default model-review `timeoutMs` from 45s to 90s and the default
+  `retries` from 1 to 2. Approval now tolerates real-world model latency better
+  while keeping the same bounded transcript surface.
+
 ## 0.3.4 - 2026-08-08
 
 - Normalize direct and permission-system v24 forwarded evidence before policy

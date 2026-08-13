@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.2 - 2026-08-13
+
+- Bump `@erichll/pi-auto-review` to `0.3.5` so consumers inherit the raised
+  default model-review timeout (90s) and retries (2) through the broker.
+- Update the documented `pi-subagents` capability boundary to `0.45.2` and relax
+  the dev dependency to `^0.47.1` (test/CI only; does not affect the published
+  runtime).
+
 ## 0.6.1 - 2026-08-09
 
 - Upgrade `@anthropic-ai/sandbox-runtime` from `0.0.67` to `0.0.71` (path
