@@ -103,10 +103,20 @@ READMEs for provider, platform, and trust-boundary details.
 ## Development and release verification
 
 Run deterministic checks with `npm run check` and `npm test`. The external
-provider compatibility target is `pi-subagents 0.45.2`. Before a release, run
-`npm run gate:pi-subagents` with `PI_SUBAGENTS_GATE_MODEL` and its normal Pi
-credential environment. It uses an isolated temporary agent directory and
-prints `SKIP` (rather than pass) when the required model setup is absent.
+provider runtime contract floor (the `subagent`/`subagent_wait` coexistence
+contract) is `pi-subagents 0.45.0+`; the `pi-sandbox` devDependency is pinned
+exactly to the version the suite and gate are exercised against. Before a
+release, run `npm run gate:pi-subagents` with `PI_SUBAGENTS_GATE_MODEL` and its
+normal Pi credential environment. It uses an isolated temporary agent directory
+and prints `SKIP` (rather than pass) when the required model setup is absent.
+
+A GitHub Actions workflow (`.github/workflows/compat-latest.yml`) runs the
+deterministic `check` + test suite against the pinned dependency on every push
+and against the **latest** published pi-subagents on a nightly schedule, so
+drift surfaces as an early CI signal without a manual bump. An opt-in
+`model-gate` job runs the end-to-end `gate:pi-subagents` against latest; it only
+activates when `PI_SUBAGENTS_GATE_MODEL` and a matching model credential secret
+are configured.
 
 The gate waits for returned child results, with provider-latency budgets of 10
 minutes for the direct child, 15 minutes for the multi-stage workflow, and 15

@@ -1,0 +1,92 @@
+name: pi-subagents compatibility
+
+# Detects drift against the newest published pi-subagents before it surprises
+# users, without relying on a manual devDependency bump each release.
+#
+# Jobs:
+#   - pinned-suite : regression canary against the committed (pinned) deps.
+#   - latest-compat: re-runs the type check + test suite against the *latest*
+#                    pi-subagents to surface early compatibility signals.
+#   - model-gate   : opt-in end-to-end gate. Only activates when
+#                    PI_SUBAGENTS_GATE_MODEL and a matching model credential
+#                    secret are configured; otherwise it is inert.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Nightly (04:17 UTC). Catch upstream releases that land outside PR hours.
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pinned-suite:
+    name: Pinned suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Type check + tests (pinned)
+        run: |
+          echo "Pinned pi-subagents: $(node -p "require('./node_modules/pi-subagents/package.json').version")"
+          npm run check
+          npm test
+
+  latest-compat:
+    name: Latest pi-subagents drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Record pinned version
+        id: pinned
+        run: echo "version=$(node -p "require('./node_modules/pi-subagents/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Install latest pi-subagents
+        run: npm install -D -E pi-subagents@latest --workspace packages/pi-sandbox
+      - name: Show version drift
+        run: |
+          echo "Pinned: ${{ steps.pinned.outputs.version }} -> Latest: $(node -p "require('./node_modules/pi-subagents/package.json').version")"
+      - name: Type check + tests (latest)
+        run: |
+          npm run check
+          npm test
+
+  model-gate:
+    name: Model-backed compat gate (opt-in)
+    runs-on: ubuntu-latest
+    if: ${{ secrets.PI_SUBAGENTS_GATE_MODEL != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install tmux (gate needs a real PTY)
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - run: npm ci
+      - name: Install latest pi-subagents
+        run: npm install -D -E pi-subagents@latest --workspace packages/pi-sandbox
+      - name: Install pi binary (PI_SUBAGENTS_GATE_PI_BINARY)
+        run: npm i -g @earendil-works/pi-coding-agent
+      - name: Run compatibility gate
+        env:
+          PI_SUBAGENTS_GATE_MODEL: ${{ secrets.PI_SUBAGENTS_GATE_MODEL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          CLIPROXYAPI_API_KEY: ${{ secrets.CLIPROXYAPI_API_KEY }}
+        run: npm run gate:pi-subagents
