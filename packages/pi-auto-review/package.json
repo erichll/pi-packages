@@ -47,15 +47,15 @@
     "test": "node --disable-warning=ExperimentalWarning --experimental-loader ./test/typescript-loader.mjs --test test/*.test.ts"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": ">=0.82.1",
-    "@earendil-works/pi-coding-agent": ">=0.82.1",
-    "@gotgenes/pi-permission-system": ">=23.0.0"
+    "@earendil-works/pi-ai": "^0.84.1",
+    "@earendil-works/pi-coding-agent": "^0.84.1",
+    "@gotgenes/pi-permission-system": "^25.1.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "0.83.0",
-    "@earendil-works/pi-coding-agent": "0.83.0",
-    "@gotgenes/pi-permission-system": "24.0.0",
-    "@types/node": "^22.15.3",
+    "@earendil-works/pi-ai": "^0.84.1",
+    "@earendil-works/pi-coding-agent": "^0.84.1",
+    "@gotgenes/pi-permission-system": "^25.1.0",
+    "@types/node": "^26.2.0",
     "typescript": "^6.0.3"
   }
 }

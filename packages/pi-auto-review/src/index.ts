@@ -93,7 +93,8 @@ type ReviewerRuntime = {
   model: Parameters<typeof completeSimple>[0];
   auth: {
     apiKey?: string;
-    headers?: Record<string, string>;
+    // ProviderHeaders allows null values (e.g. "clear" directives) in 0.84.x.
+    headers?: Record<string, string | null>;
     env?: Record<string, string>;
   };
   streamSimple?: ApiStreamSimpleFunction;

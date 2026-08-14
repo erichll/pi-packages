@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Raise the documented `pi-subagents` capability boundary from `0.45.2` to
+  `0.48.0` and the dev dependency from `^0.47.1` to `^0.48.0` (test/CI only;
+  does not affect the published runtime). Verified by the real
+  `pi-subagents` compatibility gate (`npm run gate:pi-subagents`) against
+  `0.48.0`.
+
 ## 0.6.2 - 2026-08-13
 
 - Bump `@erichll/pi-auto-review` to `0.3.5` so consumers inherit the raised

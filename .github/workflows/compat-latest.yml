@@ -41,6 +41,8 @@ jobs:
           echo "Pinned pi-subagents: $(node -p "require('./node_modules/pi-subagents/package.json').version")"
           npm run check
           npm test
+      - name: External-isolation contract probe (pinned)
+        run: npm run gate:external-isolation
 
   latest-compat:
     name: Latest pi-subagents drift
@@ -66,6 +68,8 @@ jobs:
         run: |
           npm run check
           npm test
+      - name: External-isolation contract probe (latest)
+        run: npm run gate:external-isolation
 
   # NOTE: `secrets` cannot be referenced from a job-level `if`. The opt-in is
   # therefore implemented by importing the secrets into a job-level `env` and

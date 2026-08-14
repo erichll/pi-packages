@@ -105,7 +105,9 @@ READMEs for provider, platform, and trust-boundary details.
 Run deterministic checks with `npm run check` and `npm test`. The external
 provider runtime contract floor (the `subagent`/`subagent_wait` coexistence
 contract) is `pi-subagents 0.45.0+`; the `pi-sandbox` devDependency is pinned
-exactly to the version the suite and gate are exercised against. Before a
+exactly to the version the suite and gate are exercised against. Run
+`npm run gate:external-isolation` to verify the external-worker-isolation
+(`PI_SUBAGENT_PI_BINARY`) contract seam without any model credential. Before a
 release, run `npm run gate:pi-subagents` with `PI_SUBAGENTS_GATE_MODEL` and its
 normal Pi credential environment. It uses an isolated temporary agent directory
 and prints `SKIP` (rather than pass) when the required model setup is absent.
