@@ -20,6 +20,13 @@ type Request = {
   port?: unknown;
 };
 
+export type ExternalWorkerSupervisorLifecycle = {
+  /** Called immediately after a worker finishes the register protocol. */
+  registered?(worker: { id: string; cwd: string; startedAt: number }): void;
+  /** Called immediately after a worker completes the unregister protocol. */
+  unregistered?(worker: { id: string; cwd: string }): void;
+};
+
 export type ExternalWorkerSupervisor = {
   socketPath: string;
   capability: string;
@@ -35,6 +42,7 @@ export type ExternalWorkerSupervisor = {
 
 export async function createExternalWorkerSupervisor(
   approvalContext: (worker: { id: string; cwd: string }) => TrapApprovalContext,
+  lifecycle: ExternalWorkerSupervisorLifecycle = {},
 ): Promise<ExternalWorkerSupervisor> {
   const directory = await mkdtemp(join(tmpdir(), "pi-sandbox-external-"));
   await chmod(directory, 0o700);
@@ -94,6 +102,11 @@ export async function createExternalWorkerSupervisor(
           requests: 0,
         });
         socket.write(`${JSON.stringify({ id: request.id, action: "allow" })}\n`);
+        lifecycle.registered?.({
+          id: request.workerId as string,
+          cwd: request.cwd as string,
+          startedAt: workers.get(request.workerId as string)!.startedAt,
+        });
         return;
       }
       const knownWorker =
@@ -106,6 +119,10 @@ export async function createExternalWorkerSupervisor(
         seen.add(request.id as string);
         knownWorker.state = "exited";
         socket.write(`${JSON.stringify({ id: request.id, action: "allow" })}\n`);
+        lifecycle.unregistered?.({
+          id: request.workerId as string,
+          cwd: request.cwd as string,
+        });
         return;
       }
       const workerCwd =

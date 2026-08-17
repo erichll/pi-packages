@@ -37,6 +37,11 @@ import {
   createExternalWorkerSupervisor,
   type ExternalWorkerSupervisor,
 } from "./external-supervisor.ts";
+import {
+  createExternalRunsView,
+  externalRunsViewEnabledWhen,
+  type ExternalRunsView,
+} from "./external-runs-view.ts";
 
 const EXTENSION_NAME = "pi-sandbox";
 const registrations = new WeakMap<ExtensionAPI, Promise<void>>();
@@ -255,6 +260,10 @@ async function performRegistration(
   const subagentProvider =
     options.subagentProvider ?? config.subagents.provider;
   const externalWorkerIsolation = config.subagents.externalWorkerIsolation;
+  const externalRunsViewEnabled = externalRunsViewEnabledWhen(
+    subagentProvider,
+    externalWorkerIsolation,
+  );
   const additionalAllowRead = config.filesystem.additionalAllowRead;
   const hostIPC = options.hostIPC ?? config.hostIPC;
   const subagents =
@@ -269,6 +278,7 @@ async function performRegistration(
   const cwd = process.cwd();
   let isolation: ExternalWorkerIsolation | undefined;
   let supervisor: ExternalWorkerSupervisor | undefined;
+  let fleetView: ExternalRunsView | undefined;
   let externalIsolationFailure: string | undefined;
   const localBash = createBashToolDefinition(cwd);
 
@@ -564,6 +574,10 @@ async function performRegistration(
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    // A new session may replace a prior supervisor ownership; drop the old
+    // session's FleetView registrations before reconstructing.
+    fleetView?.close();
+    fleetView = undefined;
     if (
       subagentProvider === "pi-subagents" &&
       externalWorkerIsolation === "enforce"
@@ -571,15 +585,28 @@ async function performRegistration(
       try {
         isolation?.restore();
         await supervisor?.close();
-        supervisor = await createExternalWorkerSupervisor((worker) => ({
-          broker: getBoundaryBroker(),
-          command: "external pi-subagents worker network request",
-          cwd: worker.cwd,
-          sessionId: sessionId(ctx),
-          scopeKey: `${sessionId(ctx)}:turn:${currentTurn}`,
-          agentName: `pi-subagents-worker:${worker.id}`,
-          humanApproval: humanApproval(ctx),
-        }));
+        supervisor = undefined;
+        if (externalRunsViewEnabled) {
+          fleetView = await createExternalRunsView(sessionId(ctx));
+        }
+        supervisor = await createExternalWorkerSupervisor(
+          (worker) => ({
+            broker: getBoundaryBroker(),
+            command: "external pi-subagents worker network request",
+            cwd: worker.cwd,
+            sessionId: sessionId(ctx),
+            scopeKey: `${sessionId(ctx)}:turn:${currentTurn}`,
+            agentName: `pi-subagents-worker:${worker.id}`,
+            humanApproval: humanApproval(ctx),
+          }),
+          {
+            // Observability-only: never influences allow/deny, and a failure
+            // here must not stop the supervisor from answering approval RPCs
+            // or make the worker launch on the host.
+            registered: (worker) => fleetView?.registered(worker),
+            unregistered: (worker) => fleetView?.unregistered(worker.id),
+          },
+        );
         isolation = enableExternalWorkerIsolation(supervisor);
         externalIsolationFailure = undefined;
       } catch (error) {
@@ -589,6 +616,8 @@ async function performRegistration(
         isolation = undefined;
         await supervisor?.close();
         supervisor = undefined;
+        fleetView?.close();
+        fleetView = undefined;
         console.error(message);
         if (ctx.hasUI) ctx.ui.notify(message, "warning");
       }
@@ -638,6 +667,8 @@ async function performRegistration(
   pi.on("session_shutdown", async () => {
     isolation?.restore();
     isolation = undefined;
+    fleetView?.close();
+    fleetView = undefined;
     await supervisor?.close();
     supervisor = undefined;
     await subagents?.shutdown();

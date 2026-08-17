@@ -17,7 +17,10 @@ Current pinned baseline: `pi-subagents 0.50.0` (exact pin in
 | `src/runs/shared/pi-spawn.ts` | Internal | `0.47.x` | probe single-point dependency | `gate:external-isolation` probe + upstream D1 | — |
 | `PI_SUBAGENT_PI_BINARY` | Env contract | `0.47.x` | external isolation requires it | `gate:external-isolation` probe | — |
 | `subagent_wait` / `details.completions` | Tool-result contract | `0.45.0` | model gate enforces | model-backed compat gate | `>=0.45.0` |
-| `pi-subagents/external-runs` | Public, `0.50+` | `0.50.0` | runtime seam only if C1 ships | unit tests + FleetView integration once implemented | C1 (FleetView) |
+| `pi-subagents/external-runs` | Public, `0.50+` | `0.50.0` | active runtime seam (C1 landed) | unit + supervisor integration tests | C1 (FleetView) |
+
+The seam registry lists `pi-subagents/external-runs` as a public `0.50+`
+subpath; with C1 implemented it is now an active runtime seam.
 
 ## Detail
 
@@ -71,17 +74,24 @@ Current pinned baseline: `pi-subagents 0.50.0` (exact pin in
 - **Rollback:** revert upgrade commit and re-run the gate against the prior
   version to determine whether the failure is an upstream drift.
 
-### 5. `pi-subagents/external-runs` (public, `0.50+`) — pending C1
+### 5. `pi-subagents/external-runs` (public, `0.50+`) — C1 implemented
 
 - **First introduced:** `0.50.0` (public subpath).
-- **Local files:** none yet. It becomes a runtime seam only if C1 (FleetView
-  external-worker display) ships, and only as an **optional peer dependency +**
-  **dynamic import** — never a top-level static import.
-- **Failure impact:** dynamic-import failure disables only FleetView
-  registration; it must not roll back or bypass established external worker
-  isolation.
-- **Rollback:** disable/remove the FleetView registration path; supervisor
-  fail-closed and network approval are untouched.
+- **Local files:** `packages/pi-sandbox/src/external-runs-view.ts` mirrors
+  supervised external workers; `packages/pi-sandbox/src/external-supervisor.ts`
+  exposes `registered`/`unregistered` lifecycle callbacks;
+  `packages/pi-sandbox/src/index.ts` wires them under
+  `provider === "pi-subagents"` AND `externalWorkerIsolation === "enforce"`
+  and cleans up on unregister, session shutdown, and supervisor replacement.
+- **Reach:** only through an **optional peer dependency** (`pi-subagents
+  >=0.50.0`, `peerDependenciesMeta.optional`) and a **dynamic import** — never
+  a top-level static import.
+- **Failure impact:** import/registry failure disables only FleetView
+  registration (v1 is running-only and cleaned up on exit); it must not roll
+  back or bypass established external worker isolation. Unit + supervisor
+  integration tests verify `registered`/`unregistered` flow, duplicate and
+  registry-full handling, import failure, and that snapshots carry no
+  secrets/prompts.
 
 ## Upgrade procedure (applies whenever the pinned version changes)
 

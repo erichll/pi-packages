@@ -9,6 +9,15 @@
   `:thinking` suffix is preserved; `status`/`wait`/`stop`/`follow_up` are never
   intercepted.
 
+- Declare `pi-subagents >=0.50.0` as an **optional** peer dependency and mirror
+  pi-sandbox's isolated external workers into pi-subagents' FleetView
+  (caller-owned `external-runs`) whenever `subagents.provider ===
+  "pi-subagents"` AND `externalWorkerIsolation === "enforce"`. Loading uses a
+  dynamic import only; import/registry failures disable the display path
+  without weakening fail-closed isolation or network approval. v1 records are
+  `running`-only and cleaned up on worker unregister, session shutdown, and
+  supervisor replacement.
+
 - Raise the documented `pi-subagents` capability boundary from `0.48.0` to
   `0.50.0` and pin the dev dependency exactly to `0.50.0` (test/CI only; does
   not affect the published runtime). Verified by the deterministic
