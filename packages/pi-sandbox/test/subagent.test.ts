@@ -14,6 +14,8 @@ import {
   finalAssistantText,
   ProcessBackedSubagentManager,
   runProcessBackedSubagent,
+  splitModelThinking,
+  validateSubagentModel,
 } from "../src/subagent.ts";
 
 const linuxTest = process.platform === "linux" ? test : test.skip;
@@ -92,6 +94,83 @@ test("extracts only the final assistant JSON event", () => {
     ),
     "final",
   );
+});
+
+const catalog = [
+  { id: "claude-sonnet", provider: "anthropic" },
+  { id: "claude-haiku", provider: "anthropic" },
+  { id: "gpt-4o", provider: "openai" },
+  { id: "shared-model", provider: "anthropic" },
+  { id: "shared-model", provider: "openai" },
+];
+
+function assertOk(
+  value: ReturnType<typeof validateSubagentModel>,
+): asserts value is { ok: true; mode: "inherit" | "explicit" } {
+  assert.equal(value.ok, true);
+}
+
+function assertFail(
+  value: ReturnType<typeof validateSubagentModel>,
+): asserts value is { ok: false; error: string } {
+  assert.equal(value.ok, false);
+}
+
+test("model validation: absent model inherits host behavior", () => {
+  const inherit = validateSubagentModel(undefined, catalog, "anthropic");
+  assertOk(inherit);
+  assert.equal(inherit.mode, "inherit");
+  assertOk(validateSubagentModel("", catalog, "anthropic"));
+  assertOk(validateSubagentModel("  ", catalog, "anthropic"));
+});
+
+test("model validation: exact provider/model id is accepted", () => {
+  assertOk(validateSubagentModel("anthropic/claude-sonnet", catalog, "anthropic"));
+  assertOk(validateSubagentModel("openai/gpt-4o", catalog, "anthropic"));
+  // Non-preferred provider full id is still a valid full reference.
+  assertOk(validateSubagentModel("openai/gpt-4o", catalog, "anthropic"));
+});
+
+test("model validation: bare id matches current provider first", () => {
+  // 'shared-model' exists under anthropic + openai; preferred provider disambiguates.
+  assertOk(validateSubagentModel("shared-model", catalog, "anthropic"));
+  assertOk(validateSubagentModel("shared-model", catalog, "openai"));
+});
+
+test("model validation: unique bare id is accepted without a provider", () => {
+  assertOk(validateSubagentModel("claude-sonnet", catalog, undefined));
+  assertOk(validateSubagentModel("gpt-4o", catalog, undefined));
+});
+
+test("model validation: unknown provider/model is rejected before spawn", () => {
+  const r = validateSubagentModel("example/missing", catalog, "anthropic");
+  assertFail(r);
+  assert.match(r.error, /unknown model 'example\/missing'/);
+});
+
+test("model validation: ambiguous bare id is rejected with full-id hint", () => {
+  const r = validateSubagentModel("shared-model", catalog, undefined);
+  assertFail(r);
+  assert.match(r.error, /multiple providers \(anthropic, openai\)/);
+  assert.match(r.error, /provider\/model/);
+});
+
+test("model validation: thinking suffix is stripped for base and preserved", () => {
+  const split = splitModelThinking("anthropic/claude-sonnet:high");
+  assert.equal(split.base, "anthropic/claude-sonnet");
+  assert.equal(split.thinking, "high");
+  // Validating the base model with the explicit high suffix passes.
+  assertOk(validateSubagentModel("anthropic/claude-sonnet:high", catalog, "anthropic"));
+  // A colon that is not a thinking level stays part of the model id.
+  const exacto = splitModelThinking("openrouter/anthropic/claude:exacto");
+  assert.equal(exacto.base, "openrouter/anthropic/claude:exacto");
+  assert.equal(exacto.thinking, undefined);
+});
+
+test("model validation: unknown bare id is rejected", () => {
+  const r = validateSubagentModel("does-not-exist", catalog, "anthropic");
+  assertFail(r);
+  assert.match(r.error, /unknown model 'does-not-exist'/);
 });
 
 linuxTest("worker runs inside its dedicated outer broker", async () => {

@@ -104,6 +104,103 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+/**
+ * Minimal structural shape of a registry model used for validation. Kept as
+ * a structural type so this pure helper does not depend on the host coding
+ * agent's `Model` type.
+ */
+export interface SubagentModelLike {
+  /** Bare model id, e.g. `claude-3-5-sonnet` (not provider-prefixed). */
+  id: string;
+  /** Provider id, e.g. `anthropic`. */
+  provider: string;
+}
+
+export type SubagentModelValidation =
+  | { ok: true; mode: "inherit" }
+  | { ok: true; mode: "explicit" }
+  | { ok: false; error: string };
+
+// Mirrors pi's valid thinking levels (cli/args.ts VALID_THINKING_LEVELS).
+const VALID_THINKING_LEVELS = new Set([
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
+
+/**
+ * Split an optional trailing `:thinking` suffix off a model pattern. A suffix
+ * that is not a valid thinking level is treated as part of the model id (pi
+ * supports model ids containing colons, e.g. OpenRouter's `:exacto`).
+ */
+export function splitModelThinking(
+  modelSpec: string,
+): { base: string; thinking?: string } {
+  const colon = modelSpec.lastIndexOf(":");
+  if (colon === -1) return { base: modelSpec };
+  const suffix = modelSpec.slice(colon + 1);
+  if (VALID_THINKING_LEVELS.has(suffix)) {
+    return { base: modelSpec.slice(0, colon), thinking: suffix };
+  }
+  return { base: modelSpec };
+}
+
+/**
+ * Fail-fast validation of an explicit subagent model before a child Pi spawns.
+ *
+ * Rules (see docs/compat-notes.md / Plan.md phase C2):
+ *  - `undefined`/empty -> inherit host behavior, never validated.
+ *  - `provider/model` -> requires an exact match on `${provider}/${modelId}`.
+ *  - bare model id -> preferred provider first; otherwise accept only when
+ *    globally unique; otherwise reject as ambiguous and ask for the full id.
+ *  - a valid trailing `:thinking` suffix is stripped for base validation and
+ *    preserved in the original pattern passed to the child.
+ *
+ * Only `start`/`handoff` (process-spawning actions) should call this.
+ */
+export function validateSubagentModel(
+  modelSpec: string | undefined,
+  available: readonly SubagentModelLike[],
+  preferredProvider: string | undefined,
+): SubagentModelValidation {
+  const spec = (modelSpec ?? "").trim();
+  if (!spec) return { ok: true, mode: "inherit" };
+  const { base } = splitModelThinking(spec);
+
+  // Full `provider/model` reference: require an exact registry match.
+  const fullMatch = available.find((m) => `${m.provider}/${m.id}` === base);
+  if (fullMatch) return { ok: true, mode: "explicit" };
+
+  // Contains a `/`, so it was intended as a full provider/model reference that
+  // did not match any registered model. Do not fall back to bare matching.
+  if (base.includes("/")) {
+    return {
+      ok: false,
+      error: `subagent start requires an available model; unknown model '${base}'`, // eslint-disable-line
+    };
+  }
+
+  // Bare model id.
+  const matches = available.filter((m) => m.id === base);
+  if (matches.length === 0) {
+    return {
+      ok: false,
+      error: `subagent start requires an available model; unknown model '${base}'`, // eslint-disable-line
+    };
+  }
+  const preferred = matches.find((m) => m.provider === preferredProvider);
+  if (preferred) return { ok: true, mode: "explicit" };
+  if (matches.length === 1) return { ok: true, mode: "explicit" };
+  return {
+    ok: false,
+    error: `subagent start requires an unambiguous model; '${base}' is available under multiple providers (${matches.map((m) => m.provider).join(", ")}). Use provider/model or set PI_MODEL to disambiguate.`,
+  };
+}
+
 export function resolvePiInvocation(): ProcessInvocation {
   const currentEntry = process.argv[1];
   if (

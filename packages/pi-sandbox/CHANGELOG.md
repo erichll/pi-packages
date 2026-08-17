@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add builtin `subagent` model fail-fast: an explicit `model` on `start`/
+  `handoff` is validated against the host model registry before a child Pi
+  spawns. Unknown models fail before any session/broker/process is created;
+  ambiguous bare ids are rejected with a `provider/model` hint; a trailing
+  `:thinking` suffix is preserved; `status`/`wait`/`stop`/`follow_up` are never
+  intercepted.
+
 - Raise the documented `pi-subagents` capability boundary from `0.48.0` to
   `0.50.0` and pin the dev dependency exactly to `0.50.0` (test/CI only; does
   not affect the published runtime). Verified by the deterministic

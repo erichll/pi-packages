@@ -31,6 +31,7 @@ import type {
   ProcessBackedSubagentManager,
   ProcessBackedSubagentSession,
 } from "./subagent.ts";
+import { validateSubagentModel } from "./subagent.ts";
 import { Type } from "typebox";
 import {
   createExternalWorkerSupervisor,
@@ -474,6 +475,21 @@ async function performRegistration(
           : requireTask();
       const parentId =
         action === "handoff" ? requireSession().id : undefined;
+      // Fail fast on an invalid explicit model before spawning a child Pi.
+      // Only process-spawning actions (start/handoff) reach this block, so
+      // status/wait/stop/follow_up are never intercepted by model validation.
+      // When no model is specified the child inherits host behavior (no check).
+      const modelSpec = params.model?.trim();
+      if (modelSpec) {
+        const modelCheck = validateSubagentModel(
+          modelSpec,
+          ctx.modelRegistry?.getAvailable() ?? [],
+          ctx.model?.provider,
+        );
+        if (!modelCheck.ok) {
+          throw new Error(modelCheck.error);
+        }
+      }
       const session = await subagents.start(sessionOptions(task, parentId));
       const unsubscribe = update(session);
       try {

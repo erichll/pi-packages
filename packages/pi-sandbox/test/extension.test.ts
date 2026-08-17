@@ -70,6 +70,139 @@ linuxTest("registers and executes the sandboxed main Bash tool", async () => {
   }
 });
 
+linuxTest("subagent tool fails fast on invalid model before spawning", async () => {
+  let subagentTool: ToolDefinition | undefined;
+  let spawnAttempts = 0;
+  const viableSession = () =>
+    ({
+      id: "viable-1",
+      info: { id: "viable-1", state: "idle", text: "first" },
+      onUpdate: () => () => {},
+      prompt: async () => "t1",
+      waitForSettled: async () => ({ text: "first -> second", exitCode: 0 }),
+      followUp: async () => "t2",
+      abort: async () => {},
+    }) as unknown as Awaited<ReturnType<ProcessBackedSubagentManager["start"]>>;
+  const fakeManager = {
+    start: async () => {
+      spawnAttempts++;
+      return viableSession();
+    },
+    get: (id: string) =>
+      id === "viable-1" ? viableSession() : undefined,
+    list: () => [viableSession().info],
+    remove: async () => {},
+    shutdown: async () => {},
+  } as unknown as ProcessBackedSubagentManager;
+  const pi = {
+    registerTool(tool: ToolDefinition) {
+      if (tool.name === "subagent") subagentTool = tool;
+    },
+    on() {},
+    getActiveTools() {
+      return ["bash", "subagent"];
+    },
+  } as unknown as ExtensionAPI;
+  await registerPiSandbox(pi, {
+    subagentProvider: "builtin",
+    createSubagentManager: () => fakeManager,
+  });
+  assert.ok(subagentTool);
+  const cwd = mkdtempSync(join(tmpdir(), "pi-sandbox-model-failfast-"));
+  const ctx = {
+    cwd,
+    hasUI: false,
+    sessionManager: {
+      getSessionId: () => "model-failfast-session",
+      getSessionFile: () => undefined,
+    },
+    modelRegistry: {
+      getAvailable: () => [
+        { id: "claude-sonnet", provider: "anthropic" },
+        { id: "shared-model", provider: "anthropic" },
+        { id: "shared-model", provider: "openai" },
+        { id: "tied", provider: "vertex" },
+        { id: "tied", provider: "bedrock" },
+      ],
+    },
+    model: { provider: "anthropic" },
+  } as unknown as ExtensionContext;
+  try {
+    // Unknown provider/model -> throws before any spawn/session is created.
+    await assert.rejects(
+      subagentTool.execute(
+        "bad-1",
+        { action: "start", task: "x", model: "example/missing" },
+        undefined,
+        undefined,
+        ctx,
+      ),
+      /unknown model 'example\/missing'/,
+    );
+    assert.equal(spawnAttempts, 0, "invalid model must not reach manager.start");
+
+    // Ambiguous bare id with no preferred-provider match -> rejected with hint.
+    await assert.rejects(
+      subagentTool.execute(
+        "bad-2",
+        { action: "start", task: "x", model: "tied" },
+        undefined,
+        undefined,
+        ctx,
+      ),
+      /multiple providers \(vertex, bedrock\)/,
+    );
+    assert.equal(spawnAttempts, 0, "ambiguous model must not spawn");
+
+    // A valid explicit model passes validation and reaches manager.start.
+    const started = await subagentTool.execute(
+      "good-1",
+      { action: "start", model: "anthropic/claude-sonnet", task: "x" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    assert.equal(spawnAttempts, 1, "valid model should reach manager.start");
+    assert.equal(
+      (started.content[0]?.type === "text" ? started.content[0].text : "").trim(),
+      "first -> second",
+    );
+
+    // status/stop/follow_up are NOT intercepted by model validation even with
+    // an invalid model param.
+    spawnAttempts = 0;
+    const status = await subagentTool.execute(
+      "status-1",
+      { action: "status", sessionId: "viable-1", model: "example/missing" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    assert.equal(spawnAttempts, 0);
+    const statusText =
+      status.content[0]?.type === "text" ? status.content[0].text : "";
+    assert.match(statusText, /viable-1/);
+
+    const followed = await subagentTool.execute(
+      "follow-1",
+      {
+        action: "follow_up",
+        sessionId: "viable-1",
+        task: "second",
+        model: "example/missing",
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const followText =
+      followed.content[0]?.type === "text" ? followed.content[0].text : "";
+    assert.equal(followText, "first -> second");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 const tmuxTest =
   process.platform === "linux" &&
   spawnSync("tmux", ["-V"], { encoding: "utf8" }).status === 0
