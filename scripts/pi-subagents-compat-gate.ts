@@ -1,6 +1,8 @@
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -381,6 +383,24 @@ async function initializeWorkspaceRepository(workspaceDir: string): Promise<void
 }
 
 async function main(): Promise<void> {
+  // Entry-resolution assertion runs even without a model credential: the
+  // pi-subagents gate entry must resolve to a file inside the installed
+  // workspace package root. This guards against accidentally loading a
+  // freshly downloaded copy instead of the pinned/installed version.
+  const piSubagents = fileURLToPath(import.meta.resolve("pi-subagents"));
+  const piSubagentsRoot = dirname(piSubagents);
+  const installedPiSubagentsRoot = resolve("node_modules/pi-subagents");
+  if (piSubagentsRoot !== installedPiSubagentsRoot) {
+    throw new Error(
+      `pi-subagents gate entry resolved outside the installed package root: ` +
+        `entry=${piSubagentsRoot}, installed=${installedPiSubagentsRoot}`,
+    );
+  }
+  if (!existsSync(piSubagents)) {
+    throw new Error(`pi-subagents gate entry does not exist: ${piSubagents}`);
+  }
+  console.log(`pi-subagents gate entry resolved (exports["."]): ${piSubagents}`);
+
   if (!model) printSkip("set PI_SUBAGENTS_GATE_MODEL to a dedicated test model");
   if (!hasCredentials) printSkip("no supported Pi model credential is configured");
 
@@ -388,7 +408,6 @@ async function main(): Promise<void> {
   const sessionDir = join(agentDir, "sessions");
   const workspaceDir = join(agentDir, "workspace");
   const autoReviewAuditFile = join(agentDir, "pi-auto-review-audit.jsonl");
-  const piSubagents = resolve("node_modules/pi-subagents/index.ts");
   const permissions = resolve("node_modules/@gotgenes/pi-permission-system/src/index.ts");
   const permissionPackage = resolve("node_modules/@gotgenes/pi-permission-system");
   const autoReview = resolve("packages/pi-auto-review/src/index.ts");
