@@ -1,16 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 - 2026-08-17
 
-- Add builtin `subagent` model fail-fast: an explicit `model` on `start`/
-  `handoff` is validated against the host model registry before a child Pi
+- **Builtin `subagent` model fail-fast.** An explicit `model` on `start`/
+  `handoff` is now validated against the host model registry before a child Pi
   spawns. Unknown models fail before any session/broker/process is created;
   ambiguous bare ids are rejected with a `provider/model` hint; a trailing
   `:thinking` suffix is preserved; `status`/`wait`/`stop`/`follow_up` are never
   intercepted.
 
-- Declare `pi-subagents >=0.50.0` as an **optional** peer dependency and mirror
-  pi-sandbox's isolated external workers into pi-subagents' FleetView
+- **FleetView external-worker display.** Declare `pi-subagents >=0.50.0` as an
+  **optional** peer dependency (no forced install for builtin/off users) and
+  mirror pi-sandbox's isolated external workers into pi-subagents' FleetView
   (caller-owned `external-runs`) whenever `subagents.provider ===
   "pi-subagents"` AND `externalWorkerIsolation === "enforce"`. Loading uses a
   dynamic import only; import/registry failures disable the display path
@@ -18,18 +19,13 @@
   `running`-only and cleaned up on worker unregister, session shutdown, and
   supervisor replacement.
 
-- Raise the documented `pi-subagents` capability boundary from `0.48.0` to
-  `0.50.0` and pin the dev dependency exactly to `0.50.0` (test/CI only; does
-  not affect the published runtime). Verified by the deterministic
-  `gate:external-isolation` probe and the real `gate:pi-subagents` model gate.
-- Resolve the `pi-subagents` compatibility-gate entry through the package
-  `exports["."]` via `import.meta.resolve` instead of an internal source path.
-
-- Raise the documented `pi-subagents` capability boundary from `0.45.2` to
-  `0.48.0` and the dev dependency from `^0.47.1` to `^0.48.0` (test/CI only;
-  does not affect the published runtime). Verified by the real
-  `pi-subagents` compatibility gate (`npm run gate:pi-subagents`) against
-  `0.48.0`.
+- **`pi-subagents` capability baseline raised to `0.50.0`** (test/CI only;
+  does not affect the published runtime). The dev dependency is pinned exactly
+  to `0.50.0`, the capability boundary is redocumented, the compatibility-gate
+  entry resolves through the package `exports["."]` via `import.meta.resolve`,
+  and the external-isolation probe is generalized. Verified by
+  `gate:external-isolation` and the model-backed `gate:pi-subagents`
+  (`PASS`, `piSubagents: 0.50.0`).
 
 ## 0.6.2 - 2026-08-13
 
