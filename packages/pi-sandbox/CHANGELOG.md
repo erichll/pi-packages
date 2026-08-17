@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Raise the documented `pi-subagents` capability boundary from `0.48.0` to
+  `0.50.0` and pin the dev dependency exactly to `0.50.0` (test/CI only; does
+  not affect the published runtime). Verified by the deterministic
+  `gate:external-isolation` probe and the real `gate:pi-subagents` model gate.
+- Resolve the `pi-subagents` compatibility-gate entry through the package
+  `exports["."]` via `import.meta.resolve` instead of an internal source path.
+
 - Raise the documented `pi-subagents` capability boundary from `0.45.2` to
   `0.48.0` and the dev dependency from `^0.47.1` to `^0.48.0` (test/CI only;
   does not affect the published runtime). Verified by the real

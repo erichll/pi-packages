@@ -82,21 +82,27 @@ Supported modes:
   itself is not wrapped while `externalWorkerIsolation` is `off`.
 - `off`: protect Bash only.
 
-### `pi-subagents` 0.49.0 capability boundary
+### `pi-subagents` 0.50.0 capability boundary
 
 `pi-sandbox` verifies the following combination in its test suite and release
-gate. The 0.48.0 → 0.49.0 release changed no worker-spawn contract; the
-`PI_SUBAGENT_PI_BINARY` seam (`externalWorkerIsolation: "enforce"`) is re-checked
-deterministically by the `gate:external-isolation` probe on the pinned and
-latest dependency.
+gate. This version boundary is pinned exactly (see the package
+`devDependencies`) and additionally exercised against the latest published
+`pi-subagents` on a nightly CI schedule. The `PI_SUBAGENT_PI_BINARY` seam
+(`externalWorkerIsolation: "enforce"`) is re-checked deterministically by the
+`gate:external-isolation` probe on the pinned and latest dependency.
 
-| Capability | `builtin` | `pi-subagents` 0.49.0 |
+| Capability | `builtin` | `pi-subagents` 0.50.0 |
 | --- | --- | --- |
 | Outer worker sandbox | Yes | Opt-in (`externalWorkerIsolation: "enforce"`) |
 | Bash sandbox | Yes | Yes |
 | Persistent follow-up | Yes | Yes |
 | `workflowScript`, missions, schedules | No | Yes |
 | permission-system parent forwarding | Not required | Verified by compatibility gate |
+
+Upgrading across a capability boundary (for example `0.49.0` → `0.50.0`)
+requires re-running `npm run gate:external-isolation` and, before a release,
+the model-backed `npm run gate:pi-subagents`. See `docs/compat-notes.md` for
+the recorded compatibility seams and how each is verified on upgrade.
 
 For the external provider, `off` leaves the worker process outside the outer
 Sandbox Runtime boundary. Do not treat inherited Bash sandboxing as complete
