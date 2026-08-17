@@ -1,6 +1,6 @@
-// Ad-hoc non-model probe for pi-sandbox externalWorkerIsolation under
-// pi-subagents 0.49.0. It exercises the two real contract seams without a
-// model credential:
+// Ad-hoc non-model probe for pi-sandbox externalWorkerIsolation under the
+// currently installed pi-subagents version. It exercises the two real
+// contract seams without a model credential:
 //   1. pi-subagents getPiSpawnCommand honors sandbox's injected
 //      PI_SUBAGENT_PI_BINARY (the worker-spawn seam that makes
 //      externalWorkerIsolation effective).
@@ -13,7 +13,9 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
 const require = createRequire(import.meta.url);
-const pkg = require("../package.json");
+// The sandbox package version must come from the workspace package manifest,
+// not the root package.json (which reports the monorepo version 0.1.0).
+const pkg = require(resolve("packages/pi-sandbox/package.json"));
 const piSubagentsVersion = require(resolve("node_modules/pi-subagents/package.json")).version;
 
 const { createJiti } = require("jiti");
@@ -24,8 +26,14 @@ const jiti = createJiti(resolve(".") + "/", {
   nativeModules: ["node:fs", "node:path", "node:url", "node:crypto", "node:net", "node:os", "node:child_process"],
   tsconfig: { compilerOptions: { allowImportingTsExtensions: true, module: "esnext" } },
 });
+// Single-point internal-path import into pi-subagents' worker-spawn contract.
+// Not part of the package exports map; see docs/compat-notes.md and upstream
+// issue D1 (requesting a public ./pi-spawn subpath). Keep this import isolated
+// so the upgrade audit can find every reference.
+const PI_SUBAGENTS_PI_SPAWN_INTERNAL_PATH =
+  "node_modules/pi-subagents/src/runs/shared/pi-spawn.ts";
 const { getPiSpawnCommand } = await jiti.import(
-  resolve("node_modules/pi-subagents/src/runs/shared/pi-spawn.ts"),
+  resolve(PI_SUBAGENTS_PI_SPAWN_INTERNAL_PATH),
 );
 const { createExternalWorkerSupervisor } = await jiti.import(
   resolve("packages/pi-sandbox/src/external-supervisor.ts"),
