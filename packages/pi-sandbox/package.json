@@ -60,7 +60,7 @@
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.84.1",
     "@types/node": "^26.2.0",
-    "pi-subagents": "^0.49.0",
+    "pi-subagents": "0.50.0",
     "typescript": "^6.0.3"
   }
 }
