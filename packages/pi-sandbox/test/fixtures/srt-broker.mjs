@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { matchesDomainPatternWithPort } from "../../../../node_modules/@anthropic-ai/sandbox-runtime/dist/sandbox/domain-pattern.js";
 
 let target;
 
@@ -18,11 +19,31 @@ process.on("message", (message) => {
   if (message?.type !== "init") return;
   globalThis.init = message;
   if (process.env.FAKE_SRT_NETWORK_HOST) {
+    const hostname = process.env.FAKE_SRT_NETWORK_HOST
+      .trim()
+      .replace(/\.$/, "")
+      .toLowerCase();
+    const port = Number(process.env.FAKE_SRT_NETWORK_PORT || "443");
+    const { allowedDomains = [], deniedDomains = [] } =
+      message.runtimeConfig.network;
+    if (deniedDomains.some((pattern) =>
+      matchesDomainPatternWithPort(hostname, port, pattern))) {
+      process.stderr.write("fake broker: network statically denied\n");
+      process.exitCode = 1;
+      process.stdin.pause();
+      process.disconnect();
+      return;
+    }
+    if (allowedDomains.some((pattern) =>
+      matchesDomainPatternWithPort(hostname, port, pattern))) {
+      start(message);
+      return;
+    }
     process.send({
       type: "network-request",
       id: "fake-network-request",
-      hostname: process.env.FAKE_SRT_NETWORK_HOST,
-      port: Number(process.env.FAKE_SRT_NETWORK_PORT || "443"),
+      hostname,
+      port,
     });
     return;
   }

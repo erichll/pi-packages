@@ -32,6 +32,20 @@ function gateTimeout(name: string, fallback: number): number {
   return value;
 }
 
+function exactWorkflowToolInput(
+  async: boolean,
+  workflowScript: string,
+): string {
+  return [
+    "Call the subagent tool with exactly this top-level JSON input:",
+    "",
+    JSON.stringify({ async, workflowScript }),
+    "",
+    "The top-level input must contain exactly the two keys `async` and `workflowScript`.",
+    "Do not add top-level `agent`, `task`, or `action` fields. The `agent` and `task` fields inside the workflowScript string belong only to runs.run/runs.all and must not be copied to the tool input.",
+  ].join("\n");
+}
+
 function printSkip(reason: string): never {
   console.log(`SKIP pi-subagents compatibility gate: ${reason}`);
   process.exit(0);
@@ -562,7 +576,7 @@ async function main(): Promise<void> {
     ].join("\n");
     const direct = await runPi([
       ...common,
-      `Make exactly one subagent tool call that runs a single child. Set async:false and workflowScript to the exact JavaScript below; do not list agents, launch a background workflow, call status, or create replacement runs.${providerNetworkAuthorization}\n\n${directScript}\n\nWait for that foreground tool call to return. Report the run id and output, then end the response with exactly ${directCompletionMarker}.`,
+      `Make exactly one subagent tool call that runs a single child; do not list agents, launch a background workflow, call status, retry, or create replacement runs.${providerNetworkAuthorization}\n\n${exactWorkflowToolInput(false, directScript)}\n\nWait for that foreground tool call to return. Report the run id and output, then end the response with exactly ${directCompletionMarker}.`,
     ], env, directTimeoutMs, workspaceDir, forwardingLog, 1, sessionDir, directCompletionMarker);
     console.log("gate: workflowScript");
     const workflowCompletionMarker = `PI_SUBAGENTS_GATE_WORKFLOW_COMPLETE_${process.pid}`;
@@ -579,7 +593,7 @@ async function main(): Promise<void> {
     ].join("\n");
     const workflow = await runPi([
       ...common,
-      `Make exactly one subagent tool call. Set async:false and workflowScript to the exact JavaScript below; do not list agents, launch a background workflow, call status, or create replacement runs.\n\n${workflowScript}\n\nWait for that foreground tool call to return. Report every run id and output, then end the response with exactly ${workflowCompletionMarker}.`,
+      `Make exactly one subagent tool call; do not list agents, launch a background workflow, call status, retry, or create replacement runs.\n\n${exactWorkflowToolInput(false, workflowScript)}\n\nWait for that foreground tool call to return. Report every run id and output, then end the response with exactly ${workflowCompletionMarker}.`,
     ], env, workflowTimeoutMs, workspaceDir, forwardingLog, 4, sessionDir, workflowCompletionMarker);
     console.log("gate: async workflow completion payloads");
     const asyncCompletionMarker = `PI_SUBAGENTS_GATE_ASYNC_COMPLETE_${process.pid}`;
@@ -592,7 +606,7 @@ async function main(): Promise<void> {
     ].join("\n");
     const asyncWorkflow = await runPi([
       ...common,
-      `Make exactly one subagent tool call that launches a background workflow: set async:true and workflowScript to the exact JavaScript below; do not call status, list agents, or create replacement runs.${providerNetworkAuthorization}\n\n${asyncScript}\n\nFrom the returned control record, read the run id. Then call subagent_wait({ id: <that run id>, nonBlocking: false }) and wait for it to return the completed result. Report each child's run id, the markers ASYNC-LEFT and ASYNC-RIGHT, and note whether the subagent_wait result carried structured completion details. Then end your response with exactly ${asyncCompletionMarker}.`,
+      `Make exactly one subagent tool call that launches a background workflow; do not call status, list agents, retry, or create replacement runs.${providerNetworkAuthorization}\n\n${exactWorkflowToolInput(true, asyncScript)}\n\nFrom the returned control record, read the run id. Then call subagent_wait({ id: <that run id>, nonBlocking: false }) and wait for it to return the completed result. Report each child's run id, the markers ASYNC-LEFT and ASYNC-RIGHT, and note whether the subagent_wait result carried structured completion details. Then end your response with exactly ${asyncCompletionMarker}.`,
     ], env, asyncTimeoutMs, workspaceDir, forwardingLog, 2, sessionDir, asyncCompletionMarker);
     const asyncMarkers = ["ASYNC-LEFT", "ASYNC-RIGHT"];
     const completionEvidence = await waitCompletionEvidence(sessionDir, asyncMarkers);

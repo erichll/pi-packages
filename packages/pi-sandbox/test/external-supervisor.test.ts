@@ -34,7 +34,7 @@ function request(socketPath: string, value: Record<string, unknown>): Promise<{ 
   });
 }
 
-test("external supervisor accepts only one capability-bound network request", async () => {
+test("external supervisor supplies trusted policy and accepts only one capability-bound network request", async () => {
   let approvals = 0;
   const supervisor = await createExternalWorkerSupervisor(() => ({
     command: "external worker",
@@ -57,7 +57,10 @@ test("external supervisor accepts only one capability-bound network request", as
       },
       consumeGrant() { return true; },
     },
-  }));
+  }), {}, {
+    allowedDomains: ["github.com"],
+    deniedDomains: ["uploads.github.com"],
+  });
   try {
     const registration = {
       version: 1,
@@ -67,7 +70,15 @@ test("external supervisor accepts only one capability-bound network request", as
       workerId: "worker-1",
       cwd: process.cwd(),
     };
-    assert.equal((await request(supervisor.socketPath, registration)).action, "allow");
+    const registered = await request(supervisor.socketPath, registration) as {
+      action: string;
+      network: { allowedDomains: string[]; deniedDomains: string[] };
+    };
+    assert.equal(registered.action, "allow");
+    assert.deepEqual(registered.network, {
+      allowedDomains: ["github.com"],
+      deniedDomains: ["uploads.github.com"],
+    });
     const valid = {
       ...registration,
       id: "request-1",

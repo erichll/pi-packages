@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { NetworkEndpoint, TrapApprovalContext } from "./approval.ts";
 import { approveDomainEndpoint } from "./approval.ts";
+import type { NetworkConfig } from "./config.ts";
 
 const MAX_FRAME_BYTES = 16 * 1024;
 const PROTOCOL_VERSION = 1;
@@ -43,7 +44,12 @@ export type ExternalWorkerSupervisor = {
 export async function createExternalWorkerSupervisor(
   approvalContext: (worker: { id: string; cwd: string }) => TrapApprovalContext,
   lifecycle: ExternalWorkerSupervisorLifecycle = {},
+  network: NetworkConfig = { allowedDomains: [], deniedDomains: [] },
 ): Promise<ExternalWorkerSupervisor> {
+  const trustedNetwork = {
+    allowedDomains: [...network.allowedDomains],
+    deniedDomains: [...network.deniedDomains],
+  };
   const directory = await mkdtemp(join(tmpdir(), "pi-sandbox-external-"));
   await chmod(directory, 0o700);
   const socketPath = join(directory, "supervisor.sock");
@@ -101,7 +107,14 @@ export async function createExternalWorkerSupervisor(
           startedAt: Date.now(),
           requests: 0,
         });
-        socket.write(`${JSON.stringify({ id: request.id, action: "allow" })}\n`);
+        socket.write(`${JSON.stringify({
+          id: request.id,
+          action: "allow",
+          network: {
+            allowedDomains: [...trustedNetwork.allowedDomains],
+            deniedDomains: [...trustedNetwork.deniedDomains],
+          },
+        })}\n`);
         lifecycle.registered?.({
           id: request.workerId as string,
           cwd: request.cwd as string,

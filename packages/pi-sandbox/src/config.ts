@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
+import { NetworkConfigSchema } from "@anthropic-ai/sandbox-runtime";
 
 export const SUBAGENT_PROVIDERS = [
   "builtin",
@@ -19,6 +20,11 @@ export type HostIPCConfig = {
   retryOnUnixSocketError: boolean;
 };
 
+export type NetworkConfig = {
+  readonly allowedDomains: readonly string[];
+  readonly deniedDomains: readonly string[];
+};
+
 export type PiSandboxConfig = {
   subagents: {
     provider: SubagentProvider;
@@ -27,6 +33,7 @@ export type PiSandboxConfig = {
   filesystem: {
     additionalAllowRead: readonly string[];
   };
+  network: NetworkConfig;
   hostIPC: HostIPCConfig;
 };
 
@@ -44,6 +51,10 @@ export const DEFAULT_PI_SANDBOX_CONFIG: Readonly<PiSandboxConfig> = Object.freez
     }),
     filesystem: Object.freeze({
       additionalAllowRead: Object.freeze([]),
+    }),
+    network: Object.freeze({
+      allowedDomains: Object.freeze([]),
+      deniedDomains: Object.freeze([]),
     }),
     hostIPC: Object.freeze({
       mode: "off",
@@ -86,11 +97,40 @@ function rejectUnknownKeys(
   }
 }
 
+function hasValidDomainLabels(
+  pattern: string,
+  allowDenyAll: boolean,
+): boolean {
+  const portMatch = pattern.match(/:([1-9][0-9]{0,4})$/);
+  const hostPattern = portMatch
+    ? pattern.slice(0, -portMatch[0].length)
+    : pattern;
+  if (portMatch && Number(portMatch[1]) > 65_535) return false;
+  if (hostPattern === "*") return allowDenyAll;
+  const hostname = hostPattern.startsWith("*.")
+    ? hostPattern.slice(2)
+    : hostPattern;
+  return (
+    hostname.length <= 253 &&
+    hostname.includes(".") &&
+    hostname.split(".").every(
+      (label) =>
+        label.length > 0 &&
+        label.length <= 63 &&
+        /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label),
+    )
+  );
+}
+
 export function parsePiSandboxConfig(value: unknown): PiSandboxConfig {
   if (!isRecord(value)) {
     throw new Error("invalid pi-sandbox configuration: root must be an object");
   }
-  rejectUnknownKeys(value, ["subagents", "filesystem", "hostIPC"], "root");
+  rejectUnknownKeys(
+    value,
+    ["subagents", "filesystem", "network", "hostIPC"],
+    "root",
+  );
 
   if (value.subagents !== undefined && !isRecord(value.subagents)) {
     throw new Error(
@@ -154,6 +194,58 @@ export function parsePiSandboxConfig(value: unknown): PiSandboxConfig {
     );
   }
 
+  if (value.network !== undefined && !isRecord(value.network)) {
+    throw new Error(
+      "invalid pi-sandbox configuration: network must be an object",
+    );
+  }
+  const network = value.network ?? {};
+  rejectUnknownKeys(
+    network,
+    ["allowedDomains", "deniedDomains"],
+    "network",
+  );
+  const normalizeDomainList = (
+    key: "allowedDomains" | "deniedDomains",
+  ): string[] => {
+    const configured = network[key] ?? DEFAULT_PI_SANDBOX_CONFIG.network[key];
+    if (
+      !Array.isArray(configured) ||
+      configured.some(
+        (pattern) => typeof pattern !== "string" || pattern.trim() === "",
+      )
+    ) {
+      throw new Error(
+        `invalid pi-sandbox configuration: network.${key} must be an array of non-empty strings`,
+      );
+    }
+    const normalized = [
+      ...new Set(configured.map((pattern) => pattern.trim())),
+    ];
+    const invalidIndex = normalized.findIndex(
+      (pattern) => !hasValidDomainLabels(pattern, key === "deniedDomains"),
+    );
+    if (invalidIndex >= 0) {
+      throw new Error(
+        `invalid pi-sandbox configuration: network.${key}[${invalidIndex}] contains an invalid domain pattern`,
+      );
+    }
+    const candidate = {
+      allowedDomains: key === "allowedDomains" ? normalized : [],
+      deniedDomains: key === "deniedDomains" ? normalized : [],
+    };
+    const result = NetworkConfigSchema.safeParse(candidate);
+    if (!result.success) {
+      const issue = result.error.issues[0];
+      throw new Error(
+        `invalid pi-sandbox configuration: network.${key}${typeof issue?.path[1] === "number" ? `[${issue.path[1]}]` : ""} ${issue?.message ?? "contains an invalid domain pattern"}`,
+      );
+    }
+    return normalized;
+  };
+  const allowedDomains = normalizeDomainList("allowedDomains");
+  const deniedDomains = normalizeDomainList("deniedDomains");
+
   if (value.hostIPC !== undefined && !isRecord(value.hostIPC)) {
     throw new Error(
       "invalid pi-sandbox configuration: hostIPC must be an object",
@@ -204,6 +296,10 @@ export function parsePiSandboxConfig(value: unknown): PiSandboxConfig {
     filesystem: {
       additionalAllowRead: [...new Set(additionalAllowRead)],
     },
+    network: {
+      allowedDomains: [...allowedDomains],
+      deniedDomains: [...deniedDomains],
+    },
     hostIPC: {
       mode: hostIPCMode as HostIPCMode,
       preflightCommandPrefixes: [
@@ -225,6 +321,10 @@ function defaultPiSandboxConfig(): PiSandboxConfig {
       additionalAllowRead: [
         ...DEFAULT_PI_SANDBOX_CONFIG.filesystem.additionalAllowRead,
       ],
+    },
+    network: {
+      allowedDomains: [...DEFAULT_PI_SANDBOX_CONFIG.network.allowedDomains],
+      deniedDomains: [...DEFAULT_PI_SANDBOX_CONFIG.network.deniedDomains],
     },
     hostIPC: {
       mode: DEFAULT_PI_SANDBOX_CONFIG.hostIPC.mode,

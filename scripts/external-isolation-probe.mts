@@ -83,12 +83,19 @@ console.log("");
   // Import index.ts would pull the whole extension; instead inline the exact
   // injection contract from src/index.ts to compare against what pi-subagents
   // honors. We verify the supervisor half for real.
-  const supervisor = await createExternalWorkerSupervisor(() => ({
-    command: "external worker",
-    cwd: process.cwd(),
-    sessionId: "parent",
-    scopeKey: "parent:turn:1",
-  }));
+  const supervisor = await createExternalWorkerSupervisor(
+    () => ({
+      command: "external worker",
+      cwd: process.cwd(),
+      sessionId: "parent",
+      scopeKey: "parent:turn:1",
+    }),
+    {},
+    {
+      allowedDomains: ["github.com"],
+      deniedDomains: ["uploads.github.com"],
+    },
+  );
   try {
     const entry = resolve("packages/pi-sandbox/src/external-worker-launcher.mjs");
     const injected = {
@@ -104,17 +111,17 @@ console.log("");
 
     // Drive the real supervisor protocol through a socket client.
     const { createConnection } = await import("node:net");
-    const rpc = (payload) => new Promise((resolveAction) => {
+    const rpc = (payload) => new Promise((resolveResponse) => {
       const socket = createConnection(supervisor.socketPath);
       let buffer = "";
-      const done = (a) => { socket.destroy(); resolveAction(a); };
+      const done = (response) => { socket.destroy(); resolveResponse(response); };
       socket.setEncoding("utf8");
-      socket.once("error", () => done("deny"));
+      socket.once("error", () => done({ action: "deny" }));
       socket.on("data", (chunk) => {
         buffer += chunk;
         const nl = buffer.indexOf("\n");
         if (nl < 0) return;
-        try { done(JSON.parse(buffer.slice(0, nl)).action); } catch { done("deny"); }
+        try { done(JSON.parse(buffer.slice(0, nl))); } catch { done({ action: "deny" }); }
       });
       socket.on("connect", () => socket.write(JSON.stringify({
         version: 1, capability: supervisor.capability, id: "p-" + Math.random().toString(36).slice(2), ...payload,
@@ -122,24 +129,26 @@ console.log("");
     });
 
     const reg = await rpc({ type: "register", workerId: "w1", cwd: process.cwd() });
-    check("worker register allowed", reg === "allow");
-
-    // Network request to a domain that the default policy allows (approval
-    // context has no explicit host to deny here, exercising protocol wiring).
-    const allowedDomains = await import(resolve("packages/pi-sandbox/src/policy.ts")).then(
-      (m) => (typeof m.defaultPolicy === "function" ? m.defaultPolicy() : m.defaultPolicy ?? {}),
-    ).catch((e) => { console.log("    (policy import skipped)", e.message); return null; });
+    check("worker register allowed", reg.action === "allow");
+    check(
+      "registration carries the trusted network policy",
+      JSON.stringify(reg.network) === JSON.stringify({
+        allowedDomains: ["github.com"],
+        deniedDomains: ["uploads.github.com"],
+      }),
+      JSON.stringify(reg),
+    );
 
     const nw = await rpc({ type: "network", workerId: "w1", cwd: process.cwd(), hostname: "example.com", port: 443 });
-    console.log("    supervisor network verdict for example.com:443 =", nw);
+    console.log("    supervisor network verdict for example.com:443 =", nw.action);
     console.log("    (verdict depends on default approval policy; protocol did not crash)");
 
     const wrong = await rpc({ type: "network", workerId: "w1", cwd: process.cwd(), hostname: "example.com", port: 443, id: "p-" + Math.random().toString(36).slice(2) });
     // reusing a fresh id is fine; just confirm server still responsive
-    check("supervisor alive after requests", typeof wrong === "string");
+    check("supervisor alive after requests", typeof wrong.action === "string");
 
     const unreg = await rpc({ type: "unregister", workerId: "w1", cwd: process.cwd() });
-    check("worker unregister allowed", unreg === "allow");
+    check("worker unregister allowed", unreg.action === "allow");
   } finally {
     await supervisor.close();
   }

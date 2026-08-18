@@ -104,6 +104,83 @@ test("routes network requests to the command-specific reviewer", async () => {
   }
 });
 
+test("static allow bypasses review and uses canonical host matching", async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "pi-sandbox-network-allow-"));
+  let reviews = 0;
+  let output = "";
+  try {
+    const configured = policy(workspace, workspace);
+    configured.network.allowedDomains = ["api.example.com:8443"];
+    const result = await runSandboxedCommand({
+      command: "printf statically-allowed",
+      cwd: workspace,
+      broker: fakeBroker,
+      policy: configured,
+      env: {
+        ...process.env,
+        FAKE_SRT_NETWORK_HOST: "API.Example.COM.",
+        FAKE_SRT_NETWORK_PORT: "8443",
+      },
+      onData(data) { output += data.toString("utf8"); },
+      async review() { return "deny"; },
+      async reviewDomain() { reviews++; return "deny"; },
+    });
+    assert.equal(result.exitCode, 0);
+    assert.equal(output, "statically-allowed");
+    assert.equal(reviews, 0);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("static deny takes precedence over allow and bypasses review", async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "pi-sandbox-network-priority-"));
+  let reviews = 0;
+  try {
+    const configured = policy(workspace, workspace);
+    configured.network.allowedDomains = ["*.example.com"];
+    configured.network.deniedDomains = ["api.example.com:443"];
+    const result = await runSandboxedCommand({
+      command: "printf should-not-run",
+      cwd: workspace,
+      broker: fakeBroker,
+      policy: configured,
+      env: {
+        ...process.env,
+        FAKE_SRT_NETWORK_HOST: "api.example.com",
+        FAKE_SRT_NETWORK_PORT: "443",
+      },
+      onData() {},
+      async review() { return "deny"; },
+      async reviewDomain() { reviews++; return "allow"; },
+    });
+    assert.notEqual(result.exitCode, 0);
+    assert.equal(reviews, 0);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("network reviewer failures remain fail closed", async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "pi-sandbox-network-error-"));
+  let output = "";
+  try {
+    const result = await runSandboxedCommand({
+      command: "printf should-not-run",
+      cwd: workspace,
+      broker: fakeBroker,
+      env: { ...process.env, FAKE_SRT_NETWORK_HOST: "api.example.com" },
+      onData(data) { output += data.toString("utf8"); },
+      async review() { return "deny"; },
+      async reviewDomain() { throw new Error("review unavailable"); },
+    });
+    assert.notEqual(result.exitCode, 0);
+    assert.match(output, /network approval failed.*review unavailable/);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test("fails closed when a network request is denied", async () => {
   const workspace = mkdtempSync(join(tmpdir(), "pi-sandbox-network-deny-"));
   try {

@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Add trusted global `network.allowedDomains` and `network.deniedDomains`
+  configuration, including Sandbox Runtime-compatible wildcard and optional
+  `:port` patterns. Static deny takes precedence over static allow; unmatched
+  public targets continue through the existing one-shot reviewer, and empty
+  arrays preserve the previous behavior.
+- Apply the same copied network policy to main Bash, built-in subagents, and
+  outer-isolated `pi-subagents` workers. External workers receive policy only
+  through their capability-bound supervisor registration; missing or malformed
+  transport becomes deny-all without disabling dynamic review for valid
+  policies.
+- Document the exfiltration risk of broad or multi-tenant allowlisted domains.
+  This new public configuration capability is intended for the next minor
+  release; no version or publication action is included here.
+
 ## 0.7.0 - 2026-08-17
 
 - **Builtin `subagent` model fail-fast.** An explicit `model` on `start`/

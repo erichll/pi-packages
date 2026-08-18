@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +19,14 @@ const fakeBroker = {
     dirname(fileURLToPath(import.meta.url)),
     "fixtures",
     "srt-broker.mjs",
+  ),
+  execArgv: [],
+};
+const probeBroker = {
+  modulePath: join(
+    dirname(fileURLToPath(import.meta.url)),
+    "fixtures",
+    "srt-broker-probe.mjs",
   ),
   execArgv: [],
 };
@@ -66,6 +74,98 @@ linuxTest("registers and executes the sandboxed main Bash tool", async () => {
       /extension-ok/,
     );
   } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+linuxTest("main Bash and builtin subagents receive the same trusted network policy", async () => {
+  let bashTool: ToolDefinition | undefined;
+  let subagentTool: ToolDefinition | undefined;
+  let subagentPolicy: Parameters<ProcessBackedSubagentManager["start"]>[0]["policy"];
+  const session = {
+    id: "network-session",
+    info: { id: "network-session", state: "idle", text: "ok" },
+    onUpdate: () => () => {},
+    prompt: async () => "target",
+    waitForSettled: async () => ({ text: "ok", exitCode: 0 }),
+    abort: async () => {},
+  } as unknown as Awaited<ReturnType<ProcessBackedSubagentManager["start"]>>;
+  const manager = {
+    async start(options: Parameters<ProcessBackedSubagentManager["start"]>[0]) {
+      subagentPolicy = options.policy;
+      return session;
+    },
+    async remove() {},
+    async shutdown() {},
+  } as unknown as ProcessBackedSubagentManager;
+  const pi = {
+    registerTool(tool: ToolDefinition) {
+      if (tool.name === "bash") bashTool = tool;
+      if (tool.name === "subagent") subagentTool = tool;
+    },
+    on() {},
+    getActiveTools() { return ["bash", "subagent"]; },
+  } as unknown as ExtensionAPI;
+  const network = {
+    allowedDomains: ["github.com", "*.github.com:443"],
+    deniedDomains: ["uploads.github.com"],
+  };
+  const cwd = mkdtempSync(join(tmpdir(), "pi-sandbox-network-surfaces-"));
+  const trustedHome = join(cwd, "home");
+  const configPath = join(
+    trustedHome,
+    ".pi",
+    "agent",
+    "extensions",
+    "pi-sandbox",
+    "config.json",
+  );
+  mkdirSync(dirname(configPath), { recursive: true });
+  writeFileSync(configPath, JSON.stringify({ network }), "utf8");
+  const previousHome = process.env.HOME;
+  process.env.HOME = trustedHome;
+  const ctx = {
+    cwd,
+    hasUI: false,
+    sessionManager: { getSessionId: () => "parent", getSessionFile: () => undefined },
+  } as unknown as ExtensionContext;
+  try {
+    await registerPiSandbox(pi, {
+      subagentProvider: "builtin",
+      subagentManager: manager,
+      sandbox: { broker: probeBroker },
+    });
+    assert.ok(bashTool);
+    assert.ok(subagentTool);
+    const bashResult = await bashTool.execute(
+      "network-bash",
+      { command: "probe" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const bashText = bashResult.content[0]?.type === "text"
+      ? bashResult.content[0].text
+      : "";
+    assert.deepEqual(JSON.parse(bashText).network, {
+      ...network,
+      allowLocalBinding: false,
+      allowAllUnixSockets: false,
+      allowUnixSockets: [],
+    });
+
+    await subagentTool.execute(
+      "network-subagent",
+      { action: "start", task: "probe" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    assert.deepEqual(subagentPolicy?.network.allowedDomains, network.allowedDomains);
+    assert.deepEqual(subagentPolicy?.network.deniedDomains, network.deniedDomains);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
     rmSync(cwd, { recursive: true, force: true });
   }
 });

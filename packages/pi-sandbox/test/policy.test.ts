@@ -161,3 +161,28 @@ test("additional read paths extend rather than replace the default allowlist", (
   );
   assert.ok(policy.filesystem.allowRead.includes("/opt/tools/helper"));
 });
+
+test("network policy is copied into the policy and runtime config", () => {
+  const allowedDomains = ["github.com"];
+  const deniedDomains = ["uploads.github.com", "*:22"];
+  const policy = createDefaultPolicy("/workspace/project", {
+    network: { allowedDomains, deniedDomains },
+  });
+
+  allowedDomains.push("later.example.com");
+  deniedDomains.length = 0;
+  assert.deepEqual(policy.network.allowedDomains, ["github.com"]);
+  assert.deepEqual(policy.network.deniedDomains, ["uploads.github.com", "*:22"]);
+  assert.equal(policy.network.allowLocalBinding, false);
+  assert.equal(policy.network.allowAllUnixSockets, false);
+  assert.deepEqual(policy.network.allowUnixSockets, []);
+
+  const runtime = toSandboxRuntimeConfig(policy);
+  policy.network.allowedDomains.push("policy-change.example.com");
+  policy.network.deniedDomains.length = 0;
+  assert.deepEqual(runtime.network.allowedDomains, ["github.com"]);
+  assert.deepEqual(runtime.network.deniedDomains, ["uploads.github.com", "*:22"]);
+  assert.equal(runtime.network.allowLocalBinding, false);
+  assert.equal(runtime.network.allowAllUnixSockets, false);
+  assert.deepEqual(runtime.network.allowUnixSockets, []);
+});

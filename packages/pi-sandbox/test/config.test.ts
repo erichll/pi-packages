@@ -21,6 +21,10 @@ const defaultHostIPC = {
   preflightCommandPrefixes: [] as string[],
   retryOnUnixSocketError: false,
 };
+const defaultNetwork = {
+  allowedDomains: [] as string[],
+  deniedDomains: [] as string[],
+};
 
 function makeTempRoot(prefix: string): string {
   const parent = join(packageRoot, ".tmp");
@@ -45,11 +49,13 @@ test("defaults to the builtin provider when configuration is absent", () => {
     assert.deepEqual(loadPiSandboxConfig({ path: join(root, "missing.json") }), {
       subagents: { provider: "builtin", externalWorkerIsolation: "off" },
       filesystem: { additionalAllowRead: [] },
+      network: defaultNetwork,
       hostIPC: defaultHostIPC,
     });
     assert.deepEqual(loadPiSandboxConfig({ home: root }), {
       subagents: { provider: "builtin", externalWorkerIsolation: "off" },
       filesystem: { additionalAllowRead: [] },
+      network: defaultNetwork,
       hostIPC: defaultHostIPC,
     });
   } finally {
@@ -66,12 +72,20 @@ test("loads the extension-local config and falls back to the legacy path", () =>
       modernPath,
       JSON.stringify({
         subagents: { provider: "off" },
+        network: {
+          allowedDomains: ["github.com"],
+          deniedDomains: ["uploads.github.com"],
+        },
       }),
       "utf8",
     );
     assert.deepEqual(loadPiSandboxConfig({ home: root }), {
       subagents: { provider: "off", externalWorkerIsolation: "off" },
       filesystem: { additionalAllowRead: [] },
+      network: {
+        allowedDomains: ["github.com"],
+        deniedDomains: ["uploads.github.com"],
+      },
       hostIPC: defaultHostIPC,
     });
 
@@ -82,12 +96,20 @@ test("loads the extension-local config and falls back to the legacy path", () =>
       legacyPath,
       JSON.stringify({
         subagents: { provider: "pi-subagents" },
+        network: {
+          allowedDomains: ["github.com"],
+          deniedDomains: ["uploads.github.com"],
+        },
       }),
       "utf8",
     );
     assert.deepEqual(loadPiSandboxConfig({ home: root }), {
       subagents: { provider: "pi-subagents", externalWorkerIsolation: "off" },
       filesystem: { additionalAllowRead: [] },
+      network: {
+        allowedDomains: ["github.com"],
+        deniedDomains: ["uploads.github.com"],
+      },
       hostIPC: defaultHostIPC,
     });
   } finally {
@@ -102,6 +124,7 @@ test("accepts every supported subagent provider", () => {
       {
         subagents: { provider, externalWorkerIsolation: "off" },
         filesystem: { additionalAllowRead: [] },
+        network: defaultNetwork,
         hostIPC: defaultHostIPC,
       },
     );
@@ -125,18 +148,25 @@ test("defaults omitted sections to their secure defaults", () => {
   assert.deepEqual(parsePiSandboxConfig({}), {
     subagents: { provider: "builtin", externalWorkerIsolation: "off" },
     filesystem: { additionalAllowRead: [] },
+    network: defaultNetwork,
     hostIPC: defaultHostIPC,
   });
   assert.deepEqual(parsePiSandboxConfig({ subagents: {} }), {
     subagents: { provider: "builtin", externalWorkerIsolation: "off" },
     filesystem: { additionalAllowRead: [] },
+    network: defaultNetwork,
     hostIPC: defaultHostIPC,
   });
   assert.deepEqual(parsePiSandboxConfig({ filesystem: {} }), {
     subagents: { provider: "builtin", externalWorkerIsolation: "off" },
     filesystem: { additionalAllowRead: [] },
+    network: defaultNetwork,
     hostIPC: defaultHostIPC,
   });
+  const first = parsePiSandboxConfig({});
+  const second = parsePiSandboxConfig({});
+  assert.notStrictEqual(first.network.allowedDomains, second.network.allowedDomains);
+  assert.notStrictEqual(first.network.deniedDomains, second.network.deniedDomains);
 });
 
 test("accepts unique absolute additional read paths", () => {
@@ -158,6 +188,7 @@ test("accepts unique absolute additional read paths", () => {
           "/opt/tools/helper",
         ],
       },
+      network: defaultNetwork,
       hostIPC: defaultHostIPC,
     },
   );
@@ -179,12 +210,55 @@ test("accepts and normalizes the host-IPC configuration", () => {
     {
       subagents: { provider: "builtin", externalWorkerIsolation: "off" },
       filesystem: { additionalAllowRead: [] },
+      network: defaultNetwork,
       hostIPC: {
         mode: "ask",
         preflightCommandPrefixes: ["tmux", "/usr/bin/tmux"],
         retryOnUnixSocketError: true,
       },
     },
+  );
+});
+
+test("accepts, trims, and deduplicates network domain policies", () => {
+  assert.deepEqual(
+    parsePiSandboxConfig({
+      network: {
+        allowedDomains: [" github.com ", "github.com", "*.github.com:443"],
+        deniedDomains: ["uploads.github.com", " *:22 ", "uploads.github.com"],
+      },
+    }).network,
+    {
+      allowedDomains: ["github.com", "*.github.com:443"],
+      deniedDomains: ["uploads.github.com", "*:22"],
+    },
+  );
+});
+
+test("rejects malformed or invalid network policies with a precise path", () => {
+  for (const network of [
+    [],
+    { allowedDomains: "github.com" },
+    { allowedDomains: [""] },
+    { allowedDomains: [42] },
+    { deniedDomains: ["https://example.com"] },
+    { deniedDomains: ["*.com"] },
+    { deniedDomains: ["bad host.example"] },
+    { allowedDomains: ["bad..example.com"] },
+    { allowedDomains: ["-bad.example.com"] },
+    { allowedDomains: ["example_com.test"] },
+    { allowedDomains: ["*"] },
+    { allowedDomains: [], unexpected: [] },
+  ]) {
+    assert.throws(() => parsePiSandboxConfig({ network }), /network/);
+  }
+  assert.throws(
+    () => parsePiSandboxConfig({ network: { allowedDomains: ["example.com:0"] } }),
+    /network\.allowedDomains\[0\]/,
+  );
+  assert.throws(
+    () => parsePiSandboxConfig({ network: { deniedDomains: ["example.com:65536"] } }),
+    /network\.deniedDomains\[0\]/,
   );
 });
 

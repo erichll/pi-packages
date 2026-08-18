@@ -8,6 +8,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync,
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { decodeExternalNetworkPolicy } from "./external-network-policy.mjs";
 
 const realPi = process.env.PI_SANDBOX_EXTERNAL_REAL_PI_BINARY;
 const workerId = randomUUID();
@@ -32,19 +33,22 @@ function worktreeGitReadPaths(cwd) {
 function supervisorRequest(payload) {
   const socketPath = process.env.PI_SANDBOX_EXTERNAL_SUPERVISOR_SOCKET;
   const capability = process.env.PI_SANDBOX_EXTERNAL_SUPERVISOR_CAPABILITY;
-  if (!socketPath || !capability) return Promise.resolve("deny");
-  return new Promise((resolveAction) => {
+  if (!socketPath || !capability) return Promise.resolve({ action: "deny" });
+  return new Promise((resolveResponse) => {
     const socket = createConnection(socketPath);
     let buffer = "";
-    const finish = (action) => { socket.destroy(); resolveAction(action === "allow" ? "allow" : "deny"); };
+    const finish = (response) => {
+      socket.destroy();
+      resolveResponse(response?.action === "allow" ? response : { action: "deny" });
+    };
     socket.setEncoding("utf8");
-    socket.setTimeout(30_000, () => finish("deny"));
-    socket.once("error", () => finish("deny"));
+    socket.setTimeout(30_000, () => finish({ action: "deny" }));
+    socket.once("error", () => finish({ action: "deny" }));
     socket.on("data", (chunk) => {
       buffer += chunk;
       const newline = buffer.indexOf("\n");
       if (newline < 0 || Buffer.byteLength(buffer, "utf8") > 16 * 1024) return;
-      try { finish(JSON.parse(buffer.slice(0, newline)).action); } catch { finish("deny"); }
+      try { finish(JSON.parse(buffer.slice(0, newline))); } catch { finish({ action: "deny" }); }
     });
     socket.once("connect", () => socket.write(`${JSON.stringify({
       version: 1, capability, id: randomUUID(), ...payload,
@@ -55,10 +59,10 @@ function registerWorker() {
   return supervisorRequest({ type: "register", workerId, cwd: process.cwd() });
 }
 function unregisterWorker() {
-  return supervisorRequest({ type: "unregister", workerId, cwd: process.cwd() });
+  return supervisorRequest({ type: "unregister", workerId, cwd: process.cwd() }).then((response) => response.action);
 }
 function askSupervisor(hostname, port) {
-  return supervisorRequest({ type: "network", workerId, cwd: process.cwd(), hostname, port });
+  return supervisorRequest({ type: "network", workerId, cwd: process.cwd(), hostname, port }).then((response) => response.action);
 }
 
 function createMandatoryDenyPlaceholders(cwd, agentDir) {
@@ -174,6 +178,13 @@ if (!realPi) {
     join(agentDir, "sandbox.json"),
     join(agentDir, "extensions"),
   ];
+  const registration = await registerWorker();
+  if (registration.action !== "allow") {
+    process.stderr.write("pi-sandbox: external worker registration was denied\n");
+    process.exitCode = 1;
+    process.exit();
+  }
+  const registeredNetwork = decodeExternalNetworkPolicy(registration.network);
   const runtimeConfig = {
     filesystem: {
       denyRead: home === parse(home).root ? [] : [home],
@@ -200,16 +211,12 @@ if (!realPi) {
       allowGitConfig: true,
     },
     network: {
-      allowedDomains: [], deniedDomains: [], allowLocalBinding: false,
+      allowedDomains: registeredNetwork.allowedDomains,
+      deniedDomains: registeredNetwork.deniedDomains,
       allowAllUnixSockets: false, allowUnixSockets: [],
+      allowLocalBinding: false,
     },
   };
-  const registration = await registerWorker();
-  if (registration !== "allow") {
-    process.stderr.write("pi-sandbox: external worker registration was denied\n");
-    process.exitCode = 1;
-    process.exit();
-  }
   const broker = fork(new URL("./srt-broker.mjs", import.meta.url), [], {
     cwd,
     detached: true,

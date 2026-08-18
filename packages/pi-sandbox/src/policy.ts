@@ -10,6 +10,7 @@ import {
 } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
+import type { NetworkConfig } from "./config.ts";
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const NODE_INSTALL_ROOT = dirname(dirname(process.execPath));
@@ -120,6 +121,7 @@ export type SandboxPolicy = {
 
 export type CreateDefaultPolicyOptions = {
   additionalAllowRead?: readonly string[];
+  network?: NetworkConfig;
 };
 
 export function isSecretDenyWriteBasename(name: string): boolean {
@@ -271,8 +273,8 @@ export function createDefaultPolicy(
       ],
     },
     network: {
-      allowedDomains: [],
-      deniedDomains: [],
+      allowedDomains: [...(options.network?.allowedDomains ?? [])],
+      deniedDomains: [...(options.network?.deniedDomains ?? [])],
       allowLocalBinding: false,
       allowAllUnixSockets: false,
       allowUnixSockets: [],

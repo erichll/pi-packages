@@ -8,6 +8,7 @@ process.on("message", (message) => {
     JSON.stringify({
       allowWrite,
       allowRead,
+      network: message.runtimeConfig.network,
       tmpdirEnv: process.env.PI_SANDBOX_TMPDIR ?? "",
     }),
   );

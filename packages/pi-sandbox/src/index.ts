@@ -19,6 +19,7 @@ import {
 import {
   loadPiSandboxConfig,
   type HostIPCConfig,
+  type NetworkConfig,
   type SubagentProvider,
 } from "./config.ts";
 import { runCommandWithHostIPC } from "./host-ipc.ts";
@@ -171,6 +172,7 @@ function sandboxOperations(
   ctx: ExtensionContext,
   turnIndex: () => number,
   additionalAllowRead: readonly string[],
+  network: NetworkConfig,
   hostIPC: HostIPCConfig,
   sandbox?: PiSandboxExtensionOptions["sandbox"],
 ): BashOperations {
@@ -222,7 +224,7 @@ function sandboxOperations(
             onData: options.onData,
             onStderr,
             shellPath,
-            policy: createDefaultPolicy(cwd, { additionalAllowRead }),
+            policy: createDefaultPolicy(cwd, { additionalAllowRead, network }),
             review: async (trap) => {
               const result = await approveSandboxTrap(trap, approvalContext);
               if (result.action === "deny" && result.reason) {
@@ -265,6 +267,7 @@ async function performRegistration(
     externalWorkerIsolation,
   );
   const additionalAllowRead = config.filesystem.additionalAllowRead;
+  const network = config.network;
   const hostIPC = options.hostIPC ?? config.hostIPC;
   const subagents =
     subagentProvider === "builtin"
@@ -292,6 +295,7 @@ async function performRegistration(
           ctx,
           () => currentTurn,
           additionalAllowRead,
+          network,
           hostIPC,
           options.sandbox,
         ),
@@ -380,7 +384,7 @@ async function performRegistration(
           cwd: ctx.cwd,
           model: params.model,
           tools: pi.getActiveTools().filter((name) => name !== "subagent"),
-          policy: createDefaultPolicy(ctx.cwd, { additionalAllowRead }),
+          policy: createDefaultPolicy(ctx.cwd, { additionalAllowRead, network }),
           sandbox: options.sandbox,
           review: async (trap: Parameters<typeof approveSandboxTrap>[0]) =>
             (await approveSandboxTrap(trap, approvalContext)).action,
@@ -546,6 +550,7 @@ async function performRegistration(
       ctx,
       () => currentTurn,
       additionalAllowRead,
+      network,
       hostIPC,
       options.sandbox,
     ),
@@ -606,6 +611,7 @@ async function performRegistration(
             registered: (worker) => fleetView?.registered(worker),
             unregistered: (worker) => fleetView?.unregistered(worker.id),
           },
+          network,
         );
         isolation = enableExternalWorkerIsolation(supervisor);
         externalIsolationFailure = undefined;
@@ -657,8 +663,8 @@ async function performRegistration(
     if (ctx.hasUI) {
       ctx.ui.notify(
         process.platform === "darwin"
-          ? `${EXTENSION_NAME} enabled: macOS Sandbox Runtime with static filesystem policy and per-connection network review`
-          : `${EXTENSION_NAME} enabled: Linux Sandbox Runtime with static filesystem policy and per-connection network review`,
+          ? `${EXTENSION_NAME} enabled: macOS Sandbox Runtime with static filesystem/domain policy and per-connection network review`
+          : `${EXTENSION_NAME} enabled: Linux Sandbox Runtime with static filesystem/domain policy and per-connection network review`,
         "info",
       );
     }

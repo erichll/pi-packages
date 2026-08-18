@@ -12,9 +12,10 @@ also run complete process-backed subagent trees inside independent sandboxes.
   writes outside the workspace fail closed. Runtime filesystem denials are not
   converted into dynamic grants because Sandbox Runtime does not expose a
   trustworthy filesystem ask callback.
-- Network access is denied by default. Each unmatched destination is sent to
-  `pi-auto-review` as a concrete hostname and port. An approval applies only to
-  that connection.
+- Network policy is evaluated as static deny, then static allow, then dynamic
+  review. Each unmatched public destination is sent to `pi-auto-review` as a
+  canonical hostname and concrete port. An approval applies only to that
+  connection.
 - Every Bash command and persistent subagent session owns a separate broker
   process and Sandbox Runtime manager. Concurrent workers therefore keep
   independent policy, proxy, approval, and cleanup lifecycles.
@@ -117,6 +118,53 @@ such as `return runs.run('main', { agent, task })`. The compatibility gate's
 
 The configuration parser rejects malformed JSON, unknown fields, and unknown
 providers instead of silently weakening isolation.
+
+## Network domain policy
+
+Persistent domain authorization is accepted only from the trusted global
+`~/.pi/agent/extensions/pi-sandbox/config.json` (or its legacy trusted fallback
+when the new file is absent). Project configuration cannot override it.
+
+```json
+{
+  "network": {
+    "allowedDomains": [
+      "github.com",
+      "*.github.com",
+      "registry.npmjs.org:443"
+    ],
+    "deniedDomains": [
+      "uploads.github.com",
+      "*:22"
+    ]
+  }
+}
+```
+
+Entries support exact domains, strict-subdomain wildcards such as
+`*.example.com`, and an optional `:port` restriction. A bare `*` (optionally
+with a port) is accepted only in `deniedDomains`. Values are trimmed and
+deduplicated, and malformed or unknown configuration fails closed.
+
+The precedence is deterministic:
+
+1. A matching `deniedDomains` entry rejects the connection.
+2. Otherwise, a matching `allowedDomains` entry permits it without review.
+3. Otherwise, the canonical public hostname and port enter the existing
+   one-shot auto-review or human approval flow.
+
+Both arrays default to empty. That preserves the prior behavior: no persistent
+network authorization, with every eligible public connection reviewed once.
+The same trusted arrays are copied into main-agent Bash, built-in subagents,
+and external `pi-subagents` workers when outer isolation is enforced. Missing
+or malformed external-worker policy transport hard-denies network access.
+
+Domain allowlists are not a complete data-loss-prevention boundary. A
+multi-tenant or user-uploadable destination such as `github.com` can itself be
+an exfiltration channel; grant only the narrow domains and ports you intend.
+Real package-manager traffic may require additional hosts—for example, PyPI
+downloads commonly use `files.pythonhosted.org`. `pi-sandbox` never infers or
+silently adds those domains.
 
 To opt in to outer worker isolation for the external provider, use:
 
