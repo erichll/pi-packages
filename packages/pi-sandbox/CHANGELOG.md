@@ -1,20 +1,33 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 - 2026-08-18
 
-- Add trusted global `network.allowedDomains` and `network.deniedDomains`
-  configuration, including Sandbox Runtime-compatible wildcard and optional
-  `:port` patterns. Static deny takes precedence over static allow; unmatched
-  public targets continue through the existing one-shot reviewer, and empty
-  arrays preserve the previous behavior.
-- Apply the same copied network policy to main Bash, built-in subagents, and
-  outer-isolated `pi-subagents` workers. External workers receive policy only
-  through their capability-bound supervisor registration; missing or malformed
+- **Trusted network domain policies.** Persistent `network.allowedDomains` and
+  `network.deniedDomains` arrays in the trusted global configuration
+  (`~/.pi/agent/extensions/pi-sandbox/config.json`, with legacy fallback) now
+  authorize matching connections statically, without the one-shot reviewer.
+  Entries use Sandbox Runtime-compatible patterns: exact domains,
+  strict-subdomain wildcards such as `*.example.com`, and an optional `:port`;
+  a bare `*` (optionally with a port) is accepted only in `deniedDomains`.
+  Values are trimmed and deduplicated, and malformed or unknown configuration
+  fails closed. Precedence is deterministic — deny, then allow, then the
+  existing one-shot reviewer — and empty arrays preserve the previous
+  behavior (no persistent network authorization, with every eligible public
+  connection reviewed once).
+- **Policy parity across execution surfaces.** The same copied network policy
+  is applied to main-agent Bash, built-in subagents, and outer-isolated
+  `pi-subagents` workers. External workers receive policy only through their
+  capability-bound supervisor registration; missing, malformed, or extra-field
   transport becomes deny-all without disabling dynamic review for valid
   policies.
-- Document the exfiltration risk of broad or multi-tenant allowlisted domains.
-  This new public configuration capability is intended for the next minor
-  release; no version or publication action is included here.
+- **Exfiltration-risk documentation.** The README now warns that domain
+  allowlists are not a complete data-loss-prevention boundary, that
+  multi-tenant or user-uploadable destinations (for example `github.com`) can
+  themselves be exfiltration channels, and that pi-sandbox never infers or
+  silently adds domains.
+- Pin `@anthropic-ai/sandbox-runtime` to `0.0.73` (fixed version; its
+  network-policy evaluation semantics are reused by the static allow/deny
+  matching).
 
 ## 0.7.0 - 2026-08-17
 
