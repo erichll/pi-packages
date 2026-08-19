@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.2 - 2026-08-20
+
+- Update the exact `@erichll/pi-auto-review` dependency to `0.5.0`, inheriting the
+  reviewer token-usage optimization: request-aware evidence selection, independent
+  compact reviewer requests, a tighten-only input token budget, typed bounded
+  retries, and per-attempt usage telemetry.
+- No pi-sandbox runtime or public API changes.
+
 ## 0.8.1 - 2026-08-19
 
 - Update the exact `@erichll/pi-auto-review` dependency to `0.4.0`, inheriting its
