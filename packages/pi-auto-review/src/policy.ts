@@ -298,15 +298,139 @@ export function deterministicHardDeny(
     };
   }
 
-  const credentialSource =
-    /(?:\/|~\/|\$HOME\/|\$\{HOME\}\/)(?:\.ssh\/(?:id_[A-Za-z0-9_-]+|authorized_keys)|\.aws\/credentials|\.kube\/config|\.docker\/config\.json|\.npmrc|\.netrc|\.pi\/agent\/auth\.json)|(?:^|[\/@\s])\.env(?:\s|$)/i;
-  const networkUpload =
-    /\b(?:curl\b[^;\n]*(?:--data(?:-binary|-raw|-urlencode)?|-d|--form|-F|--upload-file|-T)|wget\b[^;\n]*(?:--post-file|--post-data)|(?:nc|ncat|socat)\b)/i;
-  const credentialPipe =
-    /(?:cat|sed|awk|base64|openssl)\b[^|;\n]*(?:\.ssh|\.aws|\.kube|\.docker|\.npmrc|\.netrc|\.env|auth\.json)[^|;\n]*\|[^;\n]*\b(?:curl|wget|nc|ncat|socat)\b/i;
+  // Secret path text is only evidence when it occurs as the operand of an
+  // operation that reads a file. In particular, a slash-delimited `.env` in
+  // a URL or literal request payload is not itself a credential source.
+  const envFileName =
+    String.raw`\.env(?:\.(?!example\b|sample\b)[A-Za-z0-9_-]*)*`;
+  const envFile =
+    envFileName + String.raw`(?=[\s"'/@<>=|;&)\`]|$)`;
+  const envPath =
+    String.raw`(?:[^\s"'@<>=|;&()]+\/)*` + envFile;
+  const credentialDirectoryPath =
+    String.raw`(?:~\/|\$HOME\/|\$\{HOME\}\/|\/|\.\.?\/)?` +
+    String.raw`(?:[^\s"'@<>=|;&()\/]+\/)*` +
+    String.raw`(?:\.ssh\/(?:id_[A-Za-z0-9_-]+|authorized_keys)|\.aws\/credentials|\.kube\/config|\.docker\/config\.json|\.npmrc|\.netrc|\.pi\/agent\/auth\.json)`;
+  const credentialPath =
+    String.raw`(?:` +
+    credentialDirectoryPath +
+    String.raw`|` + envPath + String.raw`)`;
+  const directCredentialUpload = new RegExp(
+    String.raw`\b(?:curl|wget)\b[^;\n]*(?:` +
+      String.raw`(?:--data(?:-binary|-urlencode)?|-d|--form|-F)(?:=|\s+)[^;\n\s]*@\s*["']?` + credentialPath +
+      String.raw`|(?:--upload-file|--post-file)(?:=|\s+)["']?` + credentialPath +
+      String.raw`|-T(?:\s*|=)["']?` + credentialPath +
+      String.raw`)["']?`,
+    "i",
+  );
+  const redirectedCredentialUpload = new RegExp(
+    String.raw`\b(?:` +
+      String.raw`(?:curl|wget)\b[^;\n]*(?:--data(?:-binary|-raw|-urlencode)?|-d|--form|-F|--upload-file|-T|--post-file|--post-data)[^;\n]*` +
+      String.raw`|(?:nc|ncat|socat)\b[^;\n]*` +
+      String.raw`)<\s*["']?` +
+      credentialPath,
+    "i",
+  );
+  // The pipe matcher covers any content-emitting reader that names a secret
+  // file (a bare filename such as `head .env`, `dd if=.env`, or a path like
+  // ~/.aws/credentials) and feeds a network sink. The producer set is
+  // enumerated rather than derived from directCredentialUpload because a bare
+  // filename argument carries no path/@/redirect evidence; keeping the list
+  // broad is fail-closed and cheap, since a match also requires a secret-file
+  // token before the pipe and a network sink after it. This is best-effort
+  // hardening, not a completeness guarantee: readers not on the list still
+  // fall through to the contextual matchers below or the dynamic reviewer.
+  // The leading lookbehind keeps the producers from
+  // matching mid-word (star, code) so the terms stay real tool tokens.
+  const credentialPipe = new RegExp(
+    String.raw`(?<![A-Za-z0-9_])(?:cat|sed|awk|base64|openssl|head|tail|grep|dd|sort|cut|strings|rev|uniq|fold|od|xxd|hexdump|base32|uuencode|gzip|bzip2|xz|zstd|tar|zip)\b[^|;\n]*(?:\.ssh|\.aws|\.kube|\.docker|\.npmrc|\.netrc|` +
+      String.raw`(?:^|[\s"'=/@])` +
+      envFile +
+      String.raw`|auth\.json)[^|;\n]*\|[^;\n]*\b(?:curl|wget|nc|ncat|socat)\b`,
+    "i",
+  );
+  const credentialReader =
+    String.raw`(?<![A-Za-z0-9_])(?:cat|sed|awk|base64|openssl|head|tail|grep|dd|sort|cut|strings|rev|uniq|fold|od|xxd|hexdump|base32|uuencode|gzip|bzip2|xz|zstd|tar|zip)\b[^|;\n]*` +
+    credentialPath;
+  const credentialShellExpansion =
+    String.raw`(?:\$\([^)]*` +
+    credentialReader +
+    String.raw`[^)]*\)|<\([^)]*` +
+    credentialReader +
+    String.raw`[^)]*\)|\`[^\`\n]*` +
+    credentialReader +
+    String.raw`[^\`\n]*\`)`;
+  const credentialExpansionUpload = new RegExp(
+    String.raw`\b(?:curl|wget)\b[^;\n]*(?:--data(?:-binary|-raw|-urlencode)?|-d|--form|-F|--upload-file|-T|--post-file|--post-data)[^;\n]*` +
+      credentialShellExpansion,
+    "i",
+  );
+  const redirectedCredentialExpansion = new RegExp(
+    String.raw`\b(?:nc|ncat|socat)\b[^;\n]*(?:<<<|<)\s*` +
+      credentialShellExpansion,
+    "i",
+  );
+  const stagedCredentialVariableRead = new RegExp(
+    String.raw`\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*` +
+      credentialShellExpansion,
+    "gi",
+  );
+  let stagedCredentialVariableUpload = false;
+  for (const match of command.matchAll(stagedCredentialVariableRead)) {
+    const variable = match[1];
+    const suffix = command.slice((match.index ?? 0) + match[0].length);
+    const escapedVariable = variable.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const variableUpload = new RegExp(
+      String.raw`(?:\b(?:curl|wget)\b[^;\n]*(?:--data(?:-binary|-raw|-urlencode)?|-d|--form|-F|--upload-file|-T|--post-file|--post-data)[^;\n]*|\b(?:nc|ncat|socat)\b[^;\n]*<<<\s*["']?)` +
+        String.raw`(?:\$\{` +
+        escapedVariable +
+        String.raw`\}|\$` +
+        escapedVariable +
+        String.raw`(?![A-Za-z0-9_]))`,
+      "i",
+    );
+    if (variableUpload.test(suffix)) {
+      stagedCredentialVariableUpload = true;
+      break;
+    }
+  }
+  const credentialSubstitution = new RegExp(
+    String.raw`\b(?:nc|ncat|socat)\b[^;\n]*\$\([^)]*` +
+      credentialReader +
+      String.raw`[^)]*\)`,
+    "i",
+  );
+  const stagedCredentialRead = new RegExp(
+    credentialReader + String.raw`[^|;\n]*>\s*["']?([^\s"';&|]+)["']?`,
+    "gi",
+  );
+  let stagedCredentialUpload = false;
+  for (const match of command.matchAll(stagedCredentialRead)) {
+    const target = match[1];
+    const suffix = command.slice((match.index ?? 0) + match[0].length);
+    const escapedTarget = target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const targetUpload = new RegExp(
+      String.raw`\b(?:curl|wget)\b[^;\n]*(?:` +
+        String.raw`(?:--data(?:-binary|-urlencode)?|-d|--form|-F)(?:=|\s+)[^;\n\s]*@\s*["']?` + escapedTarget +
+        String.raw`|(?:--upload-file|--post-file)(?:=|\s+)["']?` + escapedTarget +
+        String.raw`|-T(?:\s*|=)["']?` + escapedTarget +
+        String.raw`)(?=[\s"']|$)`,
+      "i",
+    );
+    if (targetUpload.test(suffix)) {
+      stagedCredentialUpload = true;
+      break;
+    }
+  }
   if (
-    (credentialSource.test(command) && networkUpload.test(command)) ||
-    credentialPipe.test(command)
+    directCredentialUpload.test(command) ||
+    redirectedCredentialUpload.test(command) ||
+    credentialPipe.test(command) ||
+    credentialExpansionUpload.test(command) ||
+    redirectedCredentialExpansion.test(command) ||
+    credentialSubstitution.test(command) ||
+    stagedCredentialVariableUpload ||
+    stagedCredentialUpload
   ) {
     return {
       rule: "credential-exfiltration",

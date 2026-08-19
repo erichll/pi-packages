@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { appendFileSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -100,6 +101,16 @@ type ReviewerRuntime = {
   streamSimple?: ApiStreamSimpleFunction;
   sessionId: string;
 };
+
+// Model/stream metadata is re-resolved for every review instead of being
+// cached for the session: pi can refresh models.json or re-register a
+// provider while a session is live, and the resolved model's baseUrl, api
+// or streamSimple may have changed, so a per-session cache could keep
+// calling a stale endpoint. Authentication is also deliberately excluded
+// because pi resolves models.json auth and headers dynamically on every
+// request (including OAuth refresh); it is reacquired per model call in
+// complete().
+type ReviewerMeta = Omit<ReviewerRuntime, "auth" | "sessionId">;
 
 type ReviewResult = {
   decision: ModelDecision;
@@ -645,10 +656,50 @@ function parseModelRef(modelRef: string): {
   return { provider, modelId: idParts.join("/") };
 }
 
-async function resolveReviewer(
+function reviewerSessionId(
   ctx: ExtensionContext,
   config: Config,
-): Promise<ReviewerRuntime> {
+  model: ReviewerMeta["model"],
+  auth: ReviewerRuntime["auth"],
+): string {
+  // pi-ai reuses Codex WebSockets by session/account without comparing the
+  // socket URL or handshake headers. Bind the cache identity to endpoint and
+  // authentication metadata so a live provider/auth refresh cannot reuse the
+  // old connection. Sensitive values only feed the hash below.
+  // Hash the complete identity and keep the result below pi-ai's 64-character
+  // prompt-cache-key limit, which would otherwise be able to truncate away a
+  // distinguishing suffix on long session IDs or base URLs.
+  const identity = JSON.stringify({
+    sessionId: ctx.sessionManager.getSessionId(),
+    modelRef: config.model,
+    provider: model.provider,
+    modelId: model.id,
+    api: model.api,
+    baseUrl: model.baseUrl,
+    modelHeaders: Object.entries(model.headers ?? {}).sort(([a], [b]) =>
+      a.localeCompare(b),
+    ),
+    auth: {
+      apiKey: auth.apiKey,
+      headers: Object.entries(auth.headers ?? {}).sort(([a], [b]) =>
+        a.localeCompare(b),
+      ),
+      env: Object.entries(auth.env ?? {}).sort(([a], [b]) =>
+        a.localeCompare(b),
+      ),
+    },
+  });
+  const fingerprint = createHash("sha256")
+    .update(identity)
+    .digest("hex")
+    .slice(0, 48);
+  return `pi-auto-review-${fingerprint}`;
+}
+
+async function resolveReviewerMeta(
+  ctx: ExtensionContext,
+  config: Config,
+): Promise<ReviewerMeta> {
   const { provider, modelId } = parseModelRef(config.model);
   const available = ctx.modelRegistry.getAvailable();
   const registeredModel = provider
@@ -672,8 +723,6 @@ async function resolveReviewer(
         : `model ${config.model} is unavailable`,
     );
   }
-  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-  if (!auth.ok) throw new Error(`model authentication failed: ${auth.error}`);
 
   const registered = (
     ctx.modelRegistry as ExtensionContext["modelRegistry"] & {
@@ -690,11 +739,22 @@ async function resolveReviewer(
 
   return {
     model,
-    auth,
     streamSimple:
       registered?.api === model.api ? registered.streamSimple : undefined,
-    sessionId: `${ctx.sessionManager.getSessionId()}-codex-auto-review`,
   };
+}
+
+// pi resolves models.json auth and headers dynamically on every request;
+// reacquire authentication per model call instead of pinning it for the
+// session (rotating OAuth tokens would otherwise go stale and fail closed
+// until session restart).
+async function resolveApiKeyAndHeaders(
+  ctx: ExtensionContext,
+  model: ReviewerMeta["model"],
+): Promise<ReviewerRuntime["auth"]> {
+  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+  if (!auth.ok) throw new Error(`model authentication failed: ${auth.error}`);
+  return auth;
 }
 
 async function modelCall(
@@ -746,11 +806,17 @@ async function modelCall(
   return text;
 }
 
+type ReviewerResolver = (
+  ctx: ExtensionContext,
+  config: Config,
+) => Promise<ReviewerMeta>;
+
 async function complete(
   ctx: ExtensionContext,
   config: Config,
   request: BoundaryRequest,
   reviewerContext?: BoundaryReviewerContext,
+  resolve: ReviewerResolver = resolveReviewerMeta,
 ): Promise<ReviewResult> {
   const started = Date.now();
   const transcript = buildClassifierTranscript(
@@ -773,11 +839,17 @@ async function complete(
     if (controller.signal.aborted) {
       throw new Error("review aborted before model resolution");
     }
-    const runtime = await resolveReviewer(ctx, config);
+    const meta = await resolve(ctx, config);
     let lastError: unknown;
     const retryErrors: string[] = [];
     for (let attempt = 1; attempt <= config.retries + 1; attempt++) {
       try {
+        const auth = await resolveApiKeyAndHeaders(ctx, meta.model);
+        const runtime: ReviewerRuntime = {
+          ...meta,
+          auth,
+          sessionId: reviewerSessionId(ctx, config, meta.model, auth),
+        };
         const decision = parseDecision(
           await modelCall(
             runtime,
@@ -886,6 +958,9 @@ export function createPiAutoReviewExtension(
   let disposeBrokerService: (() => void) | undefined;
   const reviewResults = new Map<string, ReviewResult>();
   let broker: BoundaryApprovalBroker | undefined;
+  // Reviewer metadata is re-resolved per review (see ReviewerMeta above),
+  // so a models.json or provider refresh mid-session is observed on the
+  // next review instead of reusing a stale model/stream binding.
   const uiAutoConfirmer = new PermissionUiAutoConfirmer(
     () => config.autoConfirmBoundedAllows,
   );
@@ -899,6 +974,7 @@ export function createPiAutoReviewExtension(
           config,
           request,
           reviewerContext,
+          resolveReviewerMeta,
         );
         if (request.source === "permission-system") {
           reviewResults.set(request.id, result);

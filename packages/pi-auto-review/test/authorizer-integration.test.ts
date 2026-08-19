@@ -70,6 +70,9 @@ function harness(
   const modelContexts: unknown[] = [];
   const sentUserMessages: string[] = [];
   const uiDecisions: unknown[] = [];
+  const modelCallOptions: Array<Record<string, unknown>> = [];
+  let reviewerResolveCalls = 0;
+  let reviewerMetaCalls = 0;
   const service = {
     registerAuthorizer: registry.register.bind(registry),
     checkPermission: () => "ask",
@@ -100,9 +103,10 @@ function harness(
   const streamSimple = (
     _model: unknown,
     modelContext: unknown,
-    callOptions: { signal: AbortSignal },
+    callOptions: { signal: AbortSignal; sessionId?: string },
   ) => {
     modelContexts.push(modelContext);
+    modelCallOptions.push(callOptions);
     return {
     async result() {
       if (behavior instanceof Error) throw behavior;
@@ -117,6 +121,14 @@ function harness(
     },
     };
   };
+  let currentModel: Record<string, unknown> = model;
+  let currentStreamSimple: typeof streamSimple = streamSimple;
+  let currentAuth: {
+    apiKey?: string;
+    headers?: Record<string, string | null>;
+    env?: Record<string, string>;
+  } = { apiKey: "test" };
+  const seenModels: Record<string, unknown>[] = [];
   const context = {
     cwd: process.cwd(),
     signal: options.signal,
@@ -148,13 +160,20 @@ function harness(
       },
     },
     modelRegistry: {
-      find: () => (options.providerAvailable === false ? undefined : model),
-      getAvailable: () =>
-        options.providerAvailable === false ? [] : [model],
-      getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }),
+      find: () =>
+        options.providerAvailable === false ? undefined : currentModel,
+      getAvailable: () => {
+        reviewerMetaCalls++;
+        return options.providerAvailable === false ? [] : [currentModel];
+      },
+      getApiKeyAndHeaders: async (modelArg: unknown) => {
+        reviewerResolveCalls++;
+        seenModels.push(modelArg as Record<string, unknown>);
+        return { ok: true, ...currentAuth };
+      },
       getRegisteredProviderConfig: () => ({
         api: "test-api",
-        streamSimple,
+        streamSimple: currentStreamSimple,
       }),
     },
     sessionManager: {
@@ -251,7 +270,32 @@ function harness(
     modelContexts,
     sentUserMessages,
     uiDecisions,
+    modelCallOptions,
     context,
+    get reviewerResolveCalls() {
+      return reviewerResolveCalls;
+    },
+    get reviewerMetaCalls() {
+      return reviewerMetaCalls;
+    },
+    get seenModels() {
+      return seenModels;
+    },
+    // Simulate a mid-session models.json / provider refresh: re-register a
+    // different model (and optionally stream binding) so the next review
+    // must observe the new metadata instead of a stale cached object.
+    setRegistry(models: {
+      model: Record<string, unknown>;
+      streamSimple?: typeof streamSimple;
+    }) {
+      currentModel = models.model;
+      if (models.streamSimple !== undefined) {
+        currentStreamSimple = models.streamSimple;
+      }
+    },
+    setAuth(auth: typeof currentAuth) {
+      currentAuth = auth;
+    },
     dispose() {
       handlers.get("session_shutdown")?.();
       delete (globalThis as Record<symbol, unknown>)[PERMISSIONS_SERVICE_KEY];
@@ -686,6 +730,107 @@ test("real permission-system authorizer chain integration", async (t) => {
         },
       });
       assert.match(notices.at(-1) ?? "", /already approved|expired/i);
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  await t.test("reviewer metadata and auth are re-resolved per review so registry refreshes take effect", async () => {
+    const instance = harness(deny);
+    try {
+      const first = await instance.authorize("bash_escalated");
+      const second = await instance.authorize("bash_escalated");
+      assert.equal(first.decision.approved, false);
+      assert.equal(second.decision.approved, false);
+      assert.equal(
+        instance.reviewerMetaCalls,
+        2,
+        "reviewer metadata (model/stream/session) should be re-resolved per review so a mid-session registry refresh is observed",
+      );
+      assert.equal(
+        instance.reviewerResolveCalls,
+        2,
+        "authentication should be reacquired for each review so rotated OAuth tokens or dynamic model headers never go stale",
+      );
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  await t.test("reviewer uses refreshed model metadata after a mid-session registry refresh", async () => {
+    const instance = harness(deny);
+    try {
+      const first = await instance.authorize("bash_escalated");
+      assert.equal(first.decision.approved, false);
+      // A models.json / provider refresh swaps the model record (and its
+      // baseUrl/api/headers binding) while the session stays alive.
+      instance.setRegistry({
+        model: {
+          id: "codex-auto-review",
+          name: "codex-auto-review",
+          provider: "test-provider",
+          api: "test-api",
+          baseUrl: "https://refreshed.example/base",
+        },
+      });
+      const second = await instance.authorize("bash_escalated");
+      assert.equal(second.decision.approved, false);
+      assert.equal(
+        instance.reviewerMetaCalls,
+        2,
+        "metadata must be re-resolved instead of cached for the session",
+      );
+      assert.equal(instance.seenModels.length, 2);
+      assert.equal(
+        (instance.seenModels[1] as Record<string, unknown>).baseUrl,
+        "https://refreshed.example/base",
+        "the second review must talk through the refreshed model object, not the stale cached one",
+      );
+      assert.equal(instance.modelCallOptions.length, 2);
+      const firstSessionId = instance.modelCallOptions[0]?.sessionId;
+      const secondSessionId = instance.modelCallOptions[1]?.sessionId;
+      assert.equal(typeof firstSessionId, "string");
+      assert.equal(typeof secondSessionId, "string");
+      assert.notEqual(
+        secondSessionId,
+        firstSessionId,
+        "an endpoint refresh must change pi-ai's session-based WebSocket cache identity",
+      );
+      assert.ok(
+        (secondSessionId as string).length <= 64,
+        "the endpoint fingerprint must survive pi-ai's prompt-cache-key clamp",
+      );
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  await t.test("reviewer rotates the WebSocket identity when effective authentication headers refresh", async () => {
+    const instance = harness(deny);
+    try {
+      instance.setAuth({
+        apiKey: "first-token",
+        headers: { "x-reviewer-auth": "first" },
+      });
+      const first = await instance.authorize("bash_escalated");
+      assert.equal(first.decision.approved, false);
+
+      instance.setAuth({
+        apiKey: "second-token",
+        headers: { "x-reviewer-auth": "second" },
+      });
+      const second = await instance.authorize("bash_escalated");
+      assert.equal(second.decision.approved, false);
+
+      const firstOptions = instance.modelCallOptions[0];
+      const secondOptions = instance.modelCallOptions[1];
+      assert.deepEqual(firstOptions?.headers, { "x-reviewer-auth": "first" });
+      assert.deepEqual(secondOptions?.headers, { "x-reviewer-auth": "second" });
+      assert.notEqual(
+        secondOptions?.sessionId,
+        firstOptions?.sessionId,
+        "refreshed handshake authentication must not reuse pi-ai's cached WebSocket",
+      );
     } finally {
       instance.dispose();
     }
