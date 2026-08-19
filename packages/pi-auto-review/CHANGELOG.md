@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.0 - 2026-08-19
+
+- **Credential-exfiltration hardening.** Expand deterministic terminal denies to cover
+  `.env` variants, common credential files, additional file readers and encoders,
+  shell substitutions, staged variables, redirects, and multi-stage pipelines that
+  upload credentials to network sinks. Template files such as `.env.example` and
+  `.env.sample` remain reviewable.
+- **Reviewer refresh safety.** Re-resolve reviewer model/provider metadata for each
+  review, reacquire authentication for each attempt, and bind the reviewer session
+  identity to the endpoint and authentication fingerprint so provider or OAuth
+  refreshes cannot reuse a stale connection.
+- **Compatibility.** Require Pi 0.84.1+ and permission-system 25.1.0+ to match the
+  current reviewer and forwarded-permission contracts.
+
 ## 0.3.5 - 2026-08-13
 
 - Raise the default model-review `timeoutMs` from 45s to 90s and the default

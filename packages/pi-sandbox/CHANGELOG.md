@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.1 - 2026-08-19
+
+- Update the exact `@erichll/pi-auto-review` dependency to `0.4.0`, inheriting its
+  credential-exfiltration hardening and reviewer authentication-refresh safeguards.
+- No pi-sandbox runtime or public API changes.
+
 ## 0.8.0 - 2026-08-18
 
 - **Trusted network domain policies.** Persistent `network.allowedDomains` and
