@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 - 2026-08-20
 
 - **Safer evidence selection.** Review only request-linked tool calls, paired
   results, current-task user intent, and bounded security evidence. Compaction
