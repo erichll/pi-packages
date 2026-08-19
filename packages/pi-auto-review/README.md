@@ -1,131 +1,24 @@
 # @erichll/pi-auto-review
 
-A model-backed boundary approval broker for the Pi coding agent.
+A fail-closed, model-backed boundary reviewer for the Pi coding agent.
 
-`pi-auto-review` currently integrates with
-`@gotgenes/pi-permission-system` as an authorizer-chain link. It also publishes
-a small cross-extension broker service so an OS sandbox adapter can submit
-filesystem and network boundary requests without creating a second approval
-system.
+The extension participates in `@gotgenes/pi-permission-system` as the
+`pi-auto-review` authorizer and exposes a process-local broker for OS sandbox
+adapters. The npm package and reviewer model have separate names:
 
-The package name and model name are intentionally separate:
+- package: `@erichll/pi-auto-review`
+- authorizer: `pi-auto-review`
+- default reviewer model: `codex-auto-review`
 
-- npm package: `@erichll/pi-auto-review`
-- Authorizer: `pi-auto-review`
-- Default reviewer model: `codex-auto-review`
+## Install and enable
 
-## Security model
+Install the package outside the agent-writable workspace:
 
-The broker applies the following order:
-
-1. Deterministic hard denies
-2. Model review
-3. Local terminal when the authorizer chain requires one
-4. Exact, expiring, one-use grants for external sandbox adapters
-
-Model approval cannot override `pi-permission-system`'s bounded-delegation
-checkpoint. In version 24, an authorizer's `allow` on `path` or
-`external_directory` is still downgraded to `defer`. In an interactive v24 TUI,
-`autoConfirmBoundedAllows` can bind that exact model allow to the immediately
-following local permission dialog and complete it as `auto_approved`. The
-default enables this bridge only for `external_directory`; `path`, non-TUI
-modes, UI mismatches, and reviewer defers still reach the human terminal.
-Sandbox adapters should use concrete surfaces such as `filesystem-read`,
-`filesystem-write`, and `network`.
-
-The TUI bridge is request-ID-bound, expires after ten seconds, is consumed
-once, and recognizes the v24 inline permission component before completing it.
-Any event ordering, request, mode, component, or shared-UI wrapper mismatch
-fails closed to the original dialog. This is a compatibility bridge around the
-v24 delegation envelope, not permission-system authority-chain API.
-
-The broker stops automatic review for a turn after three consecutive denials
-or ten denials in the rolling last fifty reviews. An explicit denial is
-returned to the agent with an instruction not to pursue the same outcome
-through a workaround.
-
-## User-facing feedback
-
-In interactive UI sessions, the extension shows short operator feedback that is
-separate from agent denial reasons:
-
-1. Footer status while review is in flight:
-   `auto-review: reviewing <surface> · <target>`
-2. A toast when the decision lands:
-   - allowed
-   - allowed + auto-confirming the local dialog
-   - allowed but local confirmation still required
-   - deferred to you
-   - denied
-   - circuit-breaker stopped after repeated denials
-
-These notices are best-effort UX only; missing or broken UI delivery never
-changes the security decision.
-
-## Exact human retry override
-
-In interactive TUI mode, `/approve` shows up to ten recent model denials from
-the current session. Selecting one authorizes exactly one unchanged retry and
-automatically asks the agent to perform it. The authorization:
-
-- is bound to the complete request hash, including cwd, command, requested and
-  resolved paths, destination, tool input, and agent;
-- expires after 60 seconds and is consumed once;
-- is passed to the reviewer as a separate host-generated
-  `trusted-user-override` evidence block;
-- does not directly allow anything—the reviewer can still deny or defer; and
-- is checked only after deterministic hard denies, so critical tenant and
-  security-control policy cannot be overridden.
-
-Changing any request field misses the override. An override that was consumed
-cannot be issued again for the same request semantics in that session.
-
-## Configure
-
-Trusted configuration is resolved in this order:
-
-1. Package defaults from the installed `src/config.json`
-2. Optional user-global overlay at
-   `~/.pi/agent/extensions/pi-auto-review/config.json`
-3. Optional project tighten-only file at `.pi/pi-auto-review.json`
-
-Prefer the user-global file for day-to-day overrides (same location style as
-`pi-permission-system`). It may set any legal key, including `model` and
-`autoConfirmBoundedAllows`. A partial file overlays the package defaults.
-
-```json
-// ~/.pi/agent/extensions/pi-auto-review/config.json
-{
-  "autoConfirmBoundedAllows": ["external_directory", "path"]
-}
+```bash
+pi install npm:@erichll/pi-auto-review
 ```
 
-Package-shipped defaults live in `src/config.json`:
-
-```json
-{
-  "model": "codex-auto-review",
-  "reasoning": "low",
-  "timeoutMs": 90000,
-  "maxTokens": 1600,
-  "retries": 2,
-  "maxUserTranscriptTokens": 1200,
-  "maxToolTranscriptTokens": 1200,
-  "maxRelevantResultTokens": 800,
-  "failureMode": "deny",
-  "grantTtlMs": 60000,
-  "autoConfirmBoundedAllows": ["external_directory", "path"]
-}
-```
-
-The configured provider must be registered in Pi and must support the
-configured model. `failureMode: "deny"` is the fail-closed default;
-`failureMode: "defer"` falls through to the normal human terminal.
-Set `autoConfirmBoundedAllows` to `[]` to keep every bounded allow manual, or
-include `"path"` as well to opt into the same TUI bridge for the cross-cutting
-path surface.
-
-Add the link to the permission-system configuration:
+Add it to the permission-system authorizer chain:
 
 ```json
 {
@@ -133,7 +26,113 @@ Add the link to the permission-system configuration:
 }
 ```
 
-## Boundary broker service
+The configured reviewer provider and model must also be registered in Pi.
+
+## Security model
+
+Requests pass through these controls in order:
+
+1. deterministic hard denies;
+2. bounded model review;
+3. the local permission terminal when required; and
+4. an exact, expiring, one-use grant for an external sandbox adapter.
+
+The model cannot override hard denies or grant authority directly. External
+adapters must consume the exact grant before retrying an operation. Changing
+the command, path, resolved path, destination, cwd, agent, or tool input
+invalidates that grant.
+
+Permission-system v24 downgrades authorizer allows on `path` and
+`external_directory` to `defer`. In an interactive TUI,
+`autoConfirmBoundedAllows` can bind the exact model allow to the immediately
+following recognized permission dialog. The bridge is request-ID-bound,
+expires after ten seconds, and is consumed once. Mode, component, request, or
+event-order mismatches leave the original human dialog in place.
+
+Automatic review stops for the current turn after three consecutive denials or
+ten denials in the last fifty reviews. An explicit denial tells the agent not
+to pursue the same outcome through a workaround.
+
+## Configuration
+
+Configuration is resolved in this order:
+
+1. package defaults in `src/config.json`;
+2. optional trusted user overlay at
+   `~/.pi/agent/extensions/pi-auto-review/config.json`; and
+3. optional project tighten-only settings at `.pi/pi-auto-review.json`.
+
+Use the user-global file for normal customization. It may set any legal key:
+
+```json
+{
+  "model": "provider/reviewer-model",
+  "autoConfirmBoundedAllows": ["external_directory", "path"]
+}
+```
+
+Package defaults:
+
+```json
+{
+  "model": "codex-auto-review",
+  "reasoning": "low",
+  "timeoutMs": 90000,
+  "maxTokens": 256,
+  "retries": 2,
+  "maxUserTranscriptTokens": 1200,
+  "maxToolTranscriptTokens": 1200,
+  "maxRelevantResultTokens": 800,
+  "maxReviewerInputTokens": 8192,
+  "failureMode": "deny",
+  "grantTtlMs": 60000,
+  "autoConfirmBoundedAllows": ["external_directory", "path"]
+}
+```
+
+`failureMode: "deny"` is the default. `"defer"` falls through to the human
+terminal. Set `autoConfirmBoundedAllows` to `[]` to keep every bounded allow
+manual.
+
+Project configuration may only lower timeouts, token/evidence limits, retries,
+and grant TTL, set `failureMode` to `"deny"`, or remove auto-confirmed
+surfaces. It cannot select a model, raise a trusted limit, or weaken fail-closed
+behavior. Invalid configuration disables the reviewer for that session.
+
+### Deadlines and retries
+
+`timeoutMs` is one deadline shared by model resolution, authentication, model
+attempts, and retry delays. Each attempt receives only the remaining time.
+Provider-internal retries are disabled, and a review makes at most two actual
+model calls even when the public `retries` value is higher.
+
+Valid decisions, output-length stops, timeouts, aborts, authentication/model/
+request errors, and unknown failures do not retry. Empty, non-JSON, or
+schema-invalid output and recognized connection, temporary 5xx, or 429
+failures may retry once when the retry budget and deadline allow it. A
+`Retry-After` above five seconds or beyond the remaining deadline fails closed.
+Format retries preserve the canonical request and selected evidence and append
+only a fixed, budget-checked schema correction.
+
+## Operator feedback and exact retry
+
+Interactive sessions show a best-effort footer while review is running and a
+short result toast for allow, local confirmation, defer, deny, or circuit
+breaker outcomes. UI delivery never changes the authorization result.
+
+In an interactive TUI, `/approve` lists up to ten recent model denials from the
+current session. Selecting one asks the agent to retry exactly that request.
+The host-generated override:
+
+- binds the complete request hash;
+- expires after 60 seconds and is consumed once;
+- remains separate from untrusted user/tool evidence;
+- still goes through deterministic hard denies and model review; and
+- cannot be reissued for the same request semantics in that session.
+
+It is authorization evidence, not a direct allow.
+
+## Boundary broker API
 
 The extension publishes a process-local service at:
 
@@ -141,7 +140,7 @@ The extension publishes a process-local service at:
 Symbol.for("pi-auto-review:boundary-approval-broker")
 ```
 
-Adapters should normally use the exported helper:
+Adapters should use the exported helper:
 
 ```ts
 import {
@@ -156,118 +155,124 @@ const request: BoundaryRequest = {
   operation: "connect",
   cwd: "/workspace/project",
   command: "npm install",
-  destination: "registry.npmjs.org:443"
+  destination: "registry.npmjs.org:443",
 };
 
-const service = getBoundaryBroker();
-const decision = await service?.review(request, {
+const broker = getBoundaryBroker();
+const decision = await broker?.review(request, {
   sessionId: "pi-session-id",
   scopeKey: "pi-session-id:turn-id",
-  issueGrant: true
+  issueGrant: true,
 });
-```
 
-When `decision.kind` is `allow`, an external sandbox adapter must consume the
-returned grant before retrying:
-
-```ts
 if (
   decision?.kind === "allow" &&
   decision.grant &&
-  service?.consumeGrant(request, "pi-session-id", decision.grant.token)
+  broker?.consumeGrant(request, "pi-session-id", decision.grant.token)
 ) {
   // Retry this exact operation once inside the OS sandbox.
 }
 ```
 
-Changing the command, path, destination, working directory, agent, or tool
-call/input invalidates the grant. Grants expire after `grantTtlMs` and cannot
-be reused.
+Grants expire after `grantTtlMs` and cannot be reused.
 
-## Relevant reviewer evidence
+## Reviewer context and token budgets
 
-The reviewer always receives bounded user intent and assistant tool calls. It
-may additionally receive only these bounded result classes:
+The reviewer receives one compact canonical request plus bounded, explicitly
+untrusted evidence. Selection is deterministic rather than semantic:
 
-- The exact result correlated by `toolCallId`.
-- A read-only `stat`, `ls`, `find`, `test`, `readlink`, or `realpath` result for
-  a pending deletion target.
-- `git remote`, branch, status, revision, and remote configuration results for
-  a pending Git push.
-- The current structured Sandbox Runtime trap.
+- the latest raw user message is the authorization anchor;
+- older user messages require an exact request/tool/requester association, an
+  exact trusted retry, or a bounded narrowing/revocation rule;
+- tool calls require an exact tool-call ID, exact structured request fields, a
+  surface profile, or a security-combination classification; and
+- selected results stay paired with their producer and are limited to exact
+  results, deletion prechecks, Git push context, matching branch protection,
+  and Sandbox Runtime process evidence.
 
-Unrelated tool results and assistant prose remain excluded. Selected results
-have a separate `maxRelevantResultTokens` budget, common secret/token forms are
-redacted, and markup characters are escaped before the evidence is sent to the
-reviewer. Results remain explicitly labeled as untrusted and possibly
-incomplete.
+Unrelated reads, directory listings, builds, tests, assistant prose, and old
+task history are excluded. Vague continuation text cannot restore older
+authorization. Raw revocations override model allows. Compaction and branch
+summaries are risk context only; they never count as user authorization.
 
-## Sandbox adapter status
+The current operation appears once as stable, key-sorted JSON. Duplicate exact
+tool-call arguments collapse to an ID/name/reason linkage shell, while fields
+not represented by the request remain available as evidence. This compact
+reviewer representation does not affect request hashes, grants, overrides, or
+audit evidence.
 
-The broker-facing contract is implemented, but this package does not intercept
-OS sandbox events by itself. Adapters translate a concrete boundary into a
-`BoundaryRequest` and must consume the exact grant before allowing the
-operation.
+`maxReviewerInputTokens` covers the fixed policy, canonical request, override,
+evidence, omissions, JSON framing, and a 64-token provider-framing reserve. Its
+legal range is 2,048–32,768. Because no matching tokenizer is bundled, the
+`conservative:utf8` estimator counts every UTF-8 byte as one token.
 
-This monorepo's `pi-sandbox` uses Anthropic Sandbox Runtime. Filesystem policy
-is static and fails closed; unmatched public network destinations use the
-broker for per-connection approval. Each Bash command or built-in subagent
-session owns an independent Sandbox Runtime broker process. Adapters should use
-the `./sandbox` export.
+When over budget, the host removes secondary reasons, older structured tool
+matches, then optional producer/result units, re-estimating after each step. It
+never silently removes the canonical request, exact override, latest user
+evidence, security-combination evidence, exact tool linkage, or a required
+surface profile. If mandatory evidence does not fit, review fails closed before
+calling the model. More than four security-combination candidates also fails
+closed locally.
 
-Do not implement the adapter by writing broad permanent rules to
-`.pi/sandbox.json`.
+## Sandbox integration
+
+This package exposes the broker contract but does not intercept OS sandbox
+events itself. Adapters translate a concrete boundary into a `BoundaryRequest`
+and consume the exact grant before allowing it.
+
+This monorepo's `pi-sandbox` adapter uses Anthropic Sandbox Runtime. Filesystem
+policy is static and fail-closed; unmatched public network destinations use the
+broker for one connection. Each Bash command or built-in subagent session owns
+an independent Sandbox Runtime broker process. Adapter implementations should
+use the package's `./sandbox` export and must not create broad permanent rules
+in `.pi/sandbox.json`.
 
 ## Trust boundary
 
-The extension refuses to activate when its package directory is inside the
-agent-writable workspace. Install production copies as a user-level npm
-package, or as a Git package pinned to a reviewed tag or commit:
-
-```bash
-pi install npm:@erichll/pi-auto-review
-```
-
-Pi places user npm packages under `~/.pi/agent/npm/` and Git packages under
-`~/.pi/agent/git/`, outside the project workspace. For local development only:
+Production copies must live outside the agent-writable workspace. Pi installs
+user npm and Git packages under `~/.pi/agent/npm/` and `~/.pi/agent/git/`.
+Workspace-loaded copies are rejected unless local development explicitly opts
+in:
 
 ```bash
 PI_AUTO_REVIEW_ALLOW_UNTRUSTED_DEV=1 pi --approve
 ```
 
-The trusted configuration (package defaults plus optional user-global overlay)
-is copied and frozen at `session_start`. An optional workspace file at
-`.pi/pi-auto-review.json` may only lower timeouts, token/evidence limits,
-retries, and grant TTL, or set `failureMode` to `deny`. It may remove entries
-from `autoConfirmBoundedAllows`, but cannot add a surface not enabled by the
-trusted configuration. It cannot select a model, weaken fail-closed behavior,
-or raise a trusted limit. Invalid user-global or project configuration disables
-the reviewer for that session.
+Writes to the installed reviewer package, its user-global configuration,
+project and global security configuration, and the global audit directory are
+deterministically denied.
 
-Writes to the installed reviewer package, the user-global reviewer config
-directory (`~/.pi/agent/extensions/pi-auto-review/`), project security
-configuration, global Pi security configuration, and the global audit directory
-are deterministically denied.
+## Telemetry and smoke testing
 
-## Real-model smoke test
+Every actual model call emits an internal `review_attempt`; each approval emits
+one `review_complete`. Events contain stable status/error classes, timings,
+usage counters, evidence metadata, and prompt-part counts. They do not contain
+prompt or response text, provider errors, credentials, headers, or URL query
+values. Usage is marked `unknown_provenance` when pi-ai cannot distinguish
+provider counters from initialized values, and `unavailable` when absent.
 
-For a controlled smoke test, disable unrelated extensions and explicitly load
-only the model provider, broker, sandbox, and audit listener:
+For a controlled real-model smoke test, load only the provider, reviewer,
+sandbox, and audit listener:
 
 ```bash
 PI_AUTO_REVIEW_ALLOW_UNTRUSTED_DEV=1 \
 PI_AUTO_REVIEW_SMOKE_AUDIT_PATH=/tmp/pi-auto-review-smoke-audit.jsonl \
+PI_AUTO_REVIEW_BASELINE_ID=reviewer-check \
+PI_AUTO_REVIEW_BASELINE_CACHE_STATE=cold \
+PI_AUTO_REVIEW_BASELINE_RUN_ORDER=1 \
+PI_AUTO_REVIEW_BASELINE_SAMPLE_SET=reviewer-v1 \
+PI_AUTO_REVIEW_SMOKE_TRIGGER=baseline-v1 \
 pi --no-extensions --no-skills --no-prompt-templates --no-context-files \
   --no-builtin-tools --no-session --print \
-  --extension /trusted/path/to/your-model-provider/extensions/index.ts \
+  --extension /trusted/path/to/provider/extensions/index.ts \
   --extension ./packages/pi-auto-review/src/index.ts \
   --extension ./packages/pi-sandbox/src/index.ts \
   --extension ./scripts/real-model-smoke-audit.ts \
-  --model provider/your-available-model \
-  "Use bash once to write a fixed marker outside the workspace."
+  --model provider/reviewer-model \
+  "Run the configured synthetic reviewer baseline sample, then reply done."
 ```
 
-A successful boundary review emits `review_decision`, `grant_issued`, and
-`grant_consumed` for the same request ID. `--no-builtin-tools` is important:
-it ensures the `bash` implementation comes from `pi-sandbox` rather than
-silently falling back to Pi's built-in Bash.
+The listener submits filesystem-write, network, delete, Git-push, and forwarded
+subagent boundaries. No represented operation is executed; the main-agent
+request is aborted after the samples finish. `--no-builtin-tools` ensures Bash
+comes from `pi-sandbox` rather than Pi's built-in implementation.

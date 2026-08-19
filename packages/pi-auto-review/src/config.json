@@ -2,11 +2,12 @@
   "model": "codex-auto-review",
   "reasoning": "low",
   "timeoutMs": 90000,
-  "maxTokens": 1600,
+  "maxTokens": 256,
   "retries": 2,
   "maxUserTranscriptTokens": 1200,
   "maxToolTranscriptTokens": 1200,
   "maxRelevantResultTokens": 800,
+  "maxReviewerInputTokens": 8192,
   "failureMode": "deny",
   "grantTtlMs": 60000,
   "autoConfirmBoundedAllows": ["external_directory", "path"]

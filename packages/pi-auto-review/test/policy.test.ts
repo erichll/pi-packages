@@ -503,7 +503,7 @@ test("destructive Git evidence remains bounded and cannot authorize itself", () 
   );
 });
 
-test("transcript includes user intent and tool calls but excludes results/prose", () => {
+test("transcript includes user intent but excludes unrelated tool calls, results, and prose", () => {
   const transcript = buildClassifierTranscript(
     [
       {
@@ -535,36 +535,244 @@ test("transcript includes user intent and tool calls but excludes results/prose"
     { maxUserTranscriptTokens: 100, maxToolTranscriptTokens: 100 },
   );
   assert.match(transcript.text, /Deploy the staging service/);
-  assert.match(transcript.text, /bash_escalated/);
+  assert.doesNotMatch(transcript.text, /bash_escalated/);
   assert.doesNotMatch(transcript.text, /secretly do more/);
   assert.doesNotMatch(transcript.text, /SECRET_RESULT/);
 });
 
-test("transcript budgets preserve the first and newest user evidence", () => {
+test("current-task user selection keeps the latest message and drops unrelated history", () => {
   const transcript = buildClassifierTranscript(
     [
       { message: { role: "user", content: "FIRST" } },
       { message: { role: "user", content: "x".repeat(100) } },
       { message: { role: "user", content: "LATEST" } },
     ],
-    { maxUserTranscriptTokens: 5, maxToolTranscriptTokens: 5 },
+    { maxUserTranscriptTokens: 32, maxToolTranscriptTokens: 32 },
   );
-  assert.match(transcript.text, /FIRST/);
   assert.match(transcript.text, /LATEST/);
-  assert.equal(transcript.truncated, true);
+  assert.doesNotMatch(transcript.text, /FIRST/);
+  assert.doesNotMatch(transcript.text, /xxx/);
+  assert.deepEqual(
+    transcript.selectedCandidates.map((candidate) => [candidate.id, candidate.reason]),
+    [["entry-index:2:user", "latest-user"]],
+  );
 });
 
-test("a long first message cannot consume the latest-intent budget", () => {
+test("an unrelated long first message never consumes latest-intent budget", () => {
   const transcript = buildClassifierTranscript(
     [
       { message: { role: "user", content: `FIRST-${"x".repeat(200)}` } },
       { message: { role: "user", content: "LATEST-TARGET" } },
     ],
-    { maxUserTranscriptTokens: 10, maxToolTranscriptTokens: 5 },
+    { maxUserTranscriptTokens: 32, maxToolTranscriptTokens: 32 },
   );
-  assert.match(transcript.text, /FIRST-/);
   assert.match(transcript.text, /LATEST-TARGET/);
-  assert.match(transcript.text, /omitted or truncated/);
+  assert.doesNotMatch(transcript.text, /FIRST-/);
+  assert.equal(transcript.truncated, false);
+});
+
+test("latest user truncation preserves head and tail and caps authorization", () => {
+  const latest = `HEAD-AUTH ${"x".repeat(200)} TAIL-REVOKE`;
+  const transcript = buildClassifierTranscript(
+    [{ id: "latest-entry", message: { role: "user", content: latest } }],
+    { maxUserTranscriptTokens: 80, maxToolTranscriptTokens: 32 },
+    { surface: "network", destination: "example.com:443" },
+  );
+  assert.match(transcript.text, /HEAD-AUTH/);
+  assert.match(transcript.text, /TAIL-REVOKE/);
+  assert.match(transcript.text, /middle truncated/);
+  assert.equal(transcript.userAuthorizationCeiling, "medium");
+  assert.deepEqual(transcript.selectedCandidates.map((candidate) => ({
+    id: candidate.id,
+    reason: candidate.reason,
+    originalCharacters: candidate.originalCharacters,
+    selectedCharacters: candidate.selectedCharacters,
+    estimatedTokens: candidate.estimatedTokens,
+    truncated: candidate.truncated,
+  })), [{
+    id: "entry:latest-entry:user",
+    reason: "latest-user",
+    originalCharacters: latest.length,
+    selectedCharacters: 76,
+    estimatedTokens: 80,
+    truncated: true,
+  }]);
+});
+
+test("older scoped revocation is selected conservatively for the current task", () => {
+  const transcript = buildClassifierTranscript(
+    [
+      {
+        id: "constraint",
+        message: { role: "user", content: "Do not push to main." },
+      },
+      {
+        id: "latest",
+        message: { role: "user", content: "Prepare the release." },
+      },
+    ],
+    { maxUserTranscriptTokens: 100, maxToolTranscriptTokens: 400 },
+    { command: "git push origin HEAD:main" },
+  );
+  assert.match(transcript.text, /Do not push to main/);
+  assert.equal(transcript.userConstraint, "revoked");
+  assert.equal(transcript.userAuthorizationCeiling, "unknown");
+  assert.deepEqual(
+    transcript.selectedCandidates.map((candidate) => [candidate.id, candidate.reason]),
+    [
+      ["entry:constraint:user", "active-narrowing-constraint"],
+      ["entry:latest:user", "latest-user"],
+    ],
+  );
+});
+
+test("a satisfied narrow staging constraint does not block its exact scope", () => {
+  for (const [command, expected] of [
+    ["deploy staging", "none"],
+    ["deploy production", "narrowed"],
+  ] as const) {
+    const transcript = buildClassifierTranscript(
+      [
+        {
+          id: "constraint",
+          message: { role: "user", content: "Only deploy to staging." },
+        },
+        {
+          id: "latest",
+          message: { role: "user", content: "Prepare the deployment." },
+        },
+      ],
+      { maxUserTranscriptTokens: 100, maxToolTranscriptTokens: 100 },
+      { command },
+    );
+    assert.equal(transcript.userConstraint, expected);
+    assert.match(transcript.text, /Only deploy to staging/);
+  }
+});
+
+test("an older applicable constraint that cannot fit fails closed", () => {
+  const transcript = buildClassifierTranscript(
+    [
+      {
+        id: "constraint",
+        message: { role: "user", content: "Do not push to main." },
+      },
+      {
+        id: "latest",
+        message: { role: "user", content: "x".repeat(200) },
+      },
+    ],
+    { maxUserTranscriptTokens: 32, maxToolTranscriptTokens: 100 },
+    { command: "git push origin HEAD:main" },
+  );
+  assert.equal(transcript.failureCode, "required_user_constraint_overflow");
+  assert.equal(transcript.userAuthorizationCeiling, "medium");
+});
+
+test("older user evidence requires an exact request identifier", () => {
+  const transcript = buildClassifierTranscript(
+    [
+      {
+        id: "exact-reference",
+        message: { role: "user", content: "Approve only request-42." },
+      },
+      {
+        id: "unrelated",
+        message: { role: "user", content: "Approve a similar request." },
+      },
+      {
+        id: "latest",
+        message: { role: "user", content: "Continue this task." },
+      },
+    ],
+    { maxUserTranscriptTokens: 100, maxToolTranscriptTokens: 100 },
+    { id: "request-42", surface: "network", destination: "example.com:443" },
+  );
+  assert.match(transcript.text, /Approve only request-42/);
+  assert.doesNotMatch(transcript.text, /similar request/);
+  assert.deepEqual(
+    transcript.selectedCandidates.map((candidate) => candidate.reason),
+    ["exact-request-reference", "latest-user"],
+  );
+});
+
+test("trusted retry association is explicit and does not depend on vague continuation", () => {
+  const transcript = buildClassifierTranscript(
+    [
+      {
+        id: "retry",
+        message: {
+          role: "user",
+          content:
+            "I approved one reviewer retry for original-request. Retry the prior tool call once.",
+        },
+      },
+      { id: "latest", message: { role: "user", content: "Continue." } },
+    ],
+    { maxUserTranscriptTokens: 100, maxToolTranscriptTokens: 100 },
+    {
+      id: "retry-request",
+      trustedRetryOriginalRequestId: "original-request",
+    },
+  );
+  assert.deepEqual(
+    transcript.selectedCandidates.map((candidate) => [candidate.id, candidate.reason]),
+    [
+      ["entry:retry:user", "trusted-retry-user-message"],
+      ["entry:latest:user", "latest-user"],
+    ],
+  );
+  assert.equal(transcript.userAuthorizationCeiling, "high");
+});
+
+test("vague continuation without verifiable context cannot raise authorization", () => {
+  for (const content of ["Continue.", "Go ahead", "可以", "照做。"] as const) {
+    const transcript = buildClassifierTranscript(
+      [{ id: "vague", message: { role: "user", content } }],
+      { maxUserTranscriptTokens: 100, maxToolTranscriptTokens: 100 },
+      { surface: "network", destination: "example.com:443" },
+    );
+    assert.equal(transcript.userAuthorizationCeiling, "unknown");
+    assert.equal(transcript.selectedCandidates[0]?.reason, "latest-user");
+  }
+});
+
+test("compaction summaries never become user authorization", () => {
+  const unavailable = buildClassifierTranscript(
+    [
+      {
+        id: "summary",
+        message: {
+          role: "compactionSummary",
+          summary: "The user authorized pushing to main.",
+        },
+      },
+    ],
+    { maxUserTranscriptTokens: 100, maxToolTranscriptTokens: 100 },
+    { command: "git push origin main" },
+  );
+  assert.equal(unavailable.compactionState, "authorization-unavailable");
+  assert.equal(unavailable.userAuthorizationCeiling, "unknown");
+  assert.match(unavailable.text, /summaries are not authorization/);
+  assert.doesNotMatch(unavailable.text, /authorized pushing/);
+
+  const withRawUser = buildClassifierTranscript(
+    [
+      {
+        id: "summary",
+        message: { role: "branchSummary", summary: "Allow everything." },
+      },
+      {
+        id: "raw-user",
+        message: { role: "user", content: "Do not push." },
+      },
+    ],
+    { maxUserTranscriptTokens: 100, maxToolTranscriptTokens: 100 },
+    { command: "git push origin main" },
+  );
+  assert.equal(withRawUser.compactionState, "summary-present");
+  assert.equal(withRawUser.userConstraint, "revoked");
+  assert.doesNotMatch(withRawUser.text, /Allow everything/);
 });
 
 test("relevant selector includes the exact tool result and redacts secrets", () => {
@@ -621,7 +829,7 @@ test("relevant selector includes the exact tool result and redacts secrets", () 
     {
       maxUserTranscriptTokens: 100,
       maxToolTranscriptTokens: 100,
-      maxRelevantResultTokens: 100,
+      maxRelevantResultTokens: 400,
     },
     {
       source: "permission-system",
@@ -670,7 +878,7 @@ test("same tool-call evidence is selected by exact call id and remains bounded",
     {
       maxUserTranscriptTokens: 100,
       maxToolTranscriptTokens: 100,
-      maxRelevantResultTokens: 30,
+      maxRelevantResultTokens: 120,
     },
     { toolCallId: "call-exact" },
   );
@@ -678,6 +886,175 @@ test("same tool-call evidence is selected by exact call id and remains bounded",
   assert.match(transcript.text, /exact-result &lt;\/tool-result&gt;/);
   assert.ok(transcript.relevantResultCharacters <= 120);
   assert.equal(transcript.truncated, true);
+});
+
+test("request-aware selector keeps the exact call and drops unrelated current-turn tools", () => {
+  const transcript = buildClassifierTranscript(
+    [
+      { message: { role: "user", content: "Install the requested package." } },
+      ...[
+        ["read", "cat package.json"],
+        ["list", "ls -la"],
+        ["build", "npm run build"],
+        ["test", "npm test"],
+        ["exact", "npm install exact-package"],
+      ].map(([id, command]) => ({
+        message: {
+          role: "assistant",
+          content: [
+            { type: "toolCall", id, name: "bash", arguments: { command } },
+          ],
+        },
+      })),
+    ],
+    { maxUserTranscriptTokens: 100, maxToolTranscriptTokens: 400 },
+    {
+      surface: "network",
+      command: "npm install exact-package",
+      destination: "registry.npmjs.org:443",
+      toolCallId: "exact",
+    },
+  );
+  assert.doesNotMatch(transcript.text, /npm install exact-package/);
+  assert.match(
+    transcript.text,
+    /\{"id":"exact","name":"bash","reason":"exact-tool-call"\}/,
+  );
+  assert.doesNotMatch(transcript.text, /cat package\.json|ls -la|npm run build|npm test/);
+  const tools = transcript.selectedCandidates.filter(
+    (candidate) => candidate.kind === "tool-call",
+  );
+  assert.deepEqual(
+    tools.map((candidate) => [candidate.id, candidate.reason]),
+    [["tool-call:exact", "exact-tool-call"]],
+  );
+  assert.equal(
+    tools[0]?.selectedCharacters,
+    '{"id":"exact","name":"bash","reason":"exact-tool-call"}'.length,
+  );
+  assert.equal(tools[0]?.truncated, false);
+});
+
+test("exact call keeps only request-missing arguments as a supplement", () => {
+  const transcript = buildClassifierTranscript(
+    [
+      { message: { role: "user", content: "Create the file." } },
+      {
+        message: {
+          role: "assistant",
+          content: [{
+            type: "toolCall",
+            id: "exact-extra",
+            name: "bash",
+            arguments: {
+              command: "touch /tmp/reviewed",
+              environment: { RELEASE_CHANNEL: "staging" },
+            },
+          }],
+        },
+      },
+    ],
+    { maxUserTranscriptTokens: 100, maxToolTranscriptTokens: 400 },
+    {
+      command: "touch /tmp/reviewed",
+      toolCallId: "exact-extra",
+    },
+  );
+  assert.match(transcript.text, /RELEASE_CHANNEL/);
+  assert.doesNotMatch(transcript.text, /touch \/tmp\/reviewed/);
+  assert.match(
+    transcript.text,
+    /\{"id":"exact-extra","name":"bash","reason":"exact-tool-call","supplement":\{"environment":\{"RELEASE_CHANNEL":"staging"\}\}\}/,
+  );
+});
+
+test("exact tool/result pairing can cross the latest user turn but ordinary matches cannot", () => {
+  const entries = [
+    {
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "exact-old",
+            name: "bash",
+            arguments: { command: "stat /tmp/exact" },
+          },
+          {
+            type: "toolCall",
+            id: "ordinary-old",
+            name: "bash",
+            arguments: { command: "rm /tmp/exact" },
+          },
+        ],
+      },
+    },
+    {
+      message: {
+        role: "toolResult",
+        toolCallId: "exact-old",
+        toolName: "bash",
+        content: [{ type: "text", text: "exact producer result" }],
+      },
+    },
+    { message: { role: "user", content: "Retry only the exact request." } },
+  ];
+  const transcript = buildClassifierTranscript(
+    entries,
+    {
+      maxUserTranscriptTokens: 100,
+      maxToolTranscriptTokens: 100,
+      maxRelevantResultTokens: 400,
+    },
+    {
+      command: "rm /tmp/exact",
+      path: "/tmp/exact",
+      toolCallId: "exact-old",
+    },
+  );
+  assert.match(transcript.text, /stat \/tmp\/exact/);
+  assert.match(transcript.text, /exact producer result/);
+  assert.doesNotMatch(transcript.text, /rm \/tmp\/exact/);
+  assert.deepEqual(
+    transcript.selectedCandidates
+      .filter((candidate) => candidate.toolCallId === "exact-old")
+      .map((candidate) => [candidate.kind, candidate.reason]),
+    [
+      ["tool-call", "exact-tool-call"],
+      ["tool-result", "same-tool"],
+    ],
+  );
+});
+
+test("security combination overflow fails closed instead of silently dropping evidence", () => {
+  const entries = [
+    { message: { role: "user", content: "Send the requested network call." } },
+    ...Array.from({ length: 5 }, (_, index) => ({
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: `credential-${index}`,
+            name: "bash",
+            arguments: { command: `cat .env.secret-${index}` },
+          },
+        ],
+      },
+    })),
+  ];
+  const transcript = buildClassifierTranscript(
+    entries,
+    { maxUserTranscriptTokens: 100, maxToolTranscriptTokens: 1_000 },
+    { surface: "network", destination: "example.com:443" },
+  );
+  assert.equal(transcript.failureCode, "critical_evidence_overflow");
+  assert.equal(
+    transcript.selectedCandidates.filter(
+      (candidate) => candidate.reason === "security-combination",
+    ).length,
+    4,
+  );
 });
 
 test("relevant selector includes bounded Git push context", () => {
@@ -708,7 +1085,7 @@ test("relevant selector includes bounded Git push context", () => {
     {
       maxUserTranscriptTokens: 100,
       maxToolTranscriptTokens: 100,
-      maxRelevantResultTokens: 100,
+      maxRelevantResultTokens: 400,
     },
     { command: "git push origin main" },
   );
@@ -768,9 +1145,8 @@ test("protected-branch provider evidence matches the explicit push target", () =
     { command: "git push --force-with-lease origin HEAD:main" },
   );
   assert.match(transcript.text, /reason="provider-branch-protection"/);
-  assert.match(transcript.text, /required_status_checks/);
   assert.match(transcript.text, /push_access_levels/);
-  assert.match(transcript.text, /"ADMIN_TOKEN":"\[REDACTED\]"/);
+  assert.doesNotMatch(transcript.text, /required_status_checks/);
   assert.doesNotMatch(transcript.text, /secret-value/);
   assert.doesNotMatch(transcript.text, /OTHER_BRANCH/);
   assert.doesNotMatch(transcript.text, /FORGED/);
@@ -823,13 +1199,13 @@ test("provider evidence is excluded when push target is implicit or unsafe", () 
   }
 });
 
-test("Sandbox Runtime trap is explicit bounded evidence", () => {
+test("Sandbox Runtime trap supplements only process evidence missing from the request", () => {
   const transcript = buildClassifierTranscript(
     [],
     {
       maxUserTranscriptTokens: 100,
       maxToolTranscriptTokens: 100,
-      maxRelevantResultTokens: 20,
+      maxRelevantResultTokens: 100,
     },
     {
       source: "sandbox-runtime",
@@ -841,6 +1217,54 @@ test("Sandbox Runtime trap is explicit bounded evidence", () => {
     },
   );
   assert.match(transcript.text, /<sandbox-trap>/);
-  assert.match(transcript.text, /filesystem-write/);
-  assert.ok(transcript.relevantResultCharacters <= 80);
+  assert.match(transcript.text, /\{"process":"\/usr\/bin\/touch"\}/);
+  assert.doesNotMatch(
+    transcript.text,
+    /surface|operation|path|resolvedPath|destination/,
+  );
+  assert.equal(transcript.failureCode, undefined);
+  assert.equal(
+    transcript.selectedCandidates.at(-1)?.reason,
+    "sandbox-trap",
+  );
+});
+
+test("Sandbox Runtime required profile fails closed when its category budget is too small", () => {
+  const transcript = buildClassifierTranscript(
+    [],
+    {
+      maxUserTranscriptTokens: 100,
+      maxToolTranscriptTokens: 100,
+      maxRelevantResultTokens: 5,
+    },
+    {
+      source: "sandbox-runtime",
+      surface: "filesystem-write",
+      operation: "write",
+      path: "../outside",
+      resolvedPath: "/tmp/outside",
+      toolName: "/usr/bin/touch",
+    },
+  );
+  assert.equal(transcript.failureCode, "required_profile_overflow");
+  assert.doesNotMatch(transcript.text, /<sandbox-trap>/);
+});
+
+test("Sandbox Runtime adds no trap block when the canonical request is complete", () => {
+  const transcript = buildClassifierTranscript(
+    [],
+    {
+      maxUserTranscriptTokens: 100,
+      maxToolTranscriptTokens: 100,
+      maxRelevantResultTokens: 100,
+    },
+    {
+      source: "sandbox-runtime",
+      surface: "network",
+      operation: "connect",
+      destination: "example.com:443",
+    },
+  );
+  assert.doesNotMatch(transcript.text, /<sandbox-trap>/);
+  assert.equal(transcript.failureCode, undefined);
 });

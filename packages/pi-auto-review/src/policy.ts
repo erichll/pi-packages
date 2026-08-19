@@ -47,16 +47,105 @@ export type TranscriptConfig = {
 
 export type TranscriptResult = {
   text: string;
+  surfaceProfile: EvidenceSurfaceProfile;
+  reviewerEvidence: {
+    userMessages: ReviewerEvidenceItem[];
+    toolCalls: ReviewerEvidenceItem[];
+    relevantResults: ReviewerEvidenceItem[];
+  };
+  budgetRemovals: ReviewerBudgetRemoval[];
   userCharacters: number;
   toolCharacters: number;
   relevantResultCharacters: number;
   truncated: boolean;
+  selectedCandidates: EvidenceCandidateMetadata[];
+  failureCode?:
+    | "critical_evidence_overflow"
+    | "required_profile_overflow"
+    | "required_user_constraint_overflow"
+    | "reviewer_input_budget_exceeded";
+  userAuthorizationCeiling: "unknown" | "low" | "medium" | "high";
+  userConstraint: "none" | "narrowed" | "revoked";
+  compactionState: "none" | "summary-present" | "authorization-unavailable";
+};
+
+export type ReviewerBudgetRemoval = {
+  reason:
+    | "secondary-reasons"
+    | "older-structured-tool"
+    | "optional-result";
+  count: number;
+};
+
+export type ReviewerEvidenceItem = {
+  id: string;
+  reason: EvidenceSelectionReason;
+  secondaryReasons: EvidenceSelectionReason[];
+  toolCallId?: string;
+  content: string;
 };
 
 type Evidence = {
+  id: string;
   index: number;
+  entryIndex: number;
   kind: "user" | "tool";
   text: string;
+  toolCallId?: string;
+  reason: EvidenceSelectionReason;
+  secondaryReasons: EvidenceSelectionReason[];
+  sensitivity: EvidenceSensitivity;
+  originalCharacters: number;
+  preTruncated: boolean;
+  representationCharacters?: number;
+};
+
+export type EvidenceSensitivity =
+  | "user-intent"
+  | "tool-input"
+  | "tool-output"
+  | "boundary"
+  | "credential"
+  | "permission-control"
+  | "authorization-persistence"
+  | "transport-weakening"
+  | "audit-control"
+  | "security-control";
+
+export type EvidenceSelectionReason =
+  | "latest-user"
+  | "exact-request-reference"
+  | "active-narrowing-constraint"
+  | "trusted-retry-user-message"
+  | "exact-tool-call"
+  | "structured-request-match"
+  | "security-combination"
+  | "same-tool"
+  | "delete-precheck"
+  | "git-push-context"
+  | "provider-branch-protection"
+  | "sandbox-trap";
+
+export type EvidenceSurfaceProfile =
+  | "network"
+  | "delete"
+  | "git-push"
+  | "forwarded"
+  | "generic";
+
+export type EvidenceCandidateMetadata = {
+  id: string;
+  entryIndex: number;
+  kind: "user" | "tool-call" | "tool-result" | "sandbox-trap";
+  toolCallId?: string;
+  reason: EvidenceSelectionReason;
+  secondaryReasons: EvidenceSelectionReason[];
+  surfaceProfile: EvidenceSurfaceProfile;
+  originalCharacters: number;
+  selectedCharacters: number;
+  estimatedTokens: number;
+  truncated: boolean;
+  sensitivity: EvidenceSensitivity;
 };
 
 export type RelevantBoundaryRequest = {
@@ -64,15 +153,39 @@ export type RelevantBoundaryRequest = {
   source?: string;
   surface?: string;
   operation?: string;
+  cwd?: string;
   command?: string;
   path?: string;
   resolvedPath?: string;
   destination?: string;
   toolCallId?: string;
   toolName?: string;
+  toolInputPreview?: string;
+  agentName?: string;
+  requesterSessionId?: string;
+  accessIntent?: {
+    surface: string;
+    matchValues: readonly string[];
+    boundaryValue?: string;
+  };
+  trustedRetryOriginalRequestId?: string;
 };
 
 const MAX_EVIDENCE_ITEM_CHARACTERS = 4_000;
+
+/** Stable compact JSON for reviewer-only representations. */
+export function canonicalReviewerJson(value: unknown): string {
+  return JSON.stringify(value, (_key, current: unknown) => {
+    if (!current || typeof current !== "object" || Array.isArray(current)) {
+      return current;
+    }
+    return Object.fromEntries(
+      Object.keys(current as Record<string, unknown>)
+        .sort()
+        .map((key) => [key, (current as Record<string, unknown>)[key]]),
+    );
+  }) ?? "null";
+}
 
 function exactKeys(
   record: Record<string, unknown>,
@@ -492,7 +605,9 @@ function userText(message: Record<string, unknown>): string {
     .trim();
 }
 
-function toolTexts(message: Record<string, unknown>): string[] {
+function toolTexts(
+  message: Record<string, unknown>,
+): Array<{ id?: string; name: string; text: string }> {
   if (message.role !== "assistant" || !Array.isArray(message.content)) {
     return [];
   }
@@ -502,13 +617,23 @@ function toolTexts(message: Record<string, unknown>): string[] {
     if (record.type !== "toolCall" || typeof record.name !== "string") {
       return [];
     }
-    return [`${record.name} ${boundedString(record.arguments ?? {})}`];
+    const id =
+      typeof record.id === "string"
+        ? record.id
+        : typeof record.toolCallId === "string"
+          ? record.toolCallId
+          : undefined;
+    return [{
+      id,
+      name: record.name,
+      text: `${record.name} ${boundedString(record.arguments ?? {})}`,
+    }];
   });
 }
 
 function extractEvidence(entries: readonly unknown[]): Evidence[] {
   const evidence: Evidence[] = [];
-  entries.forEach((entry) => {
+  entries.forEach((entry, entryIndex) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return;
     const message = (entry as Record<string, unknown>).message;
     if (!message || typeof message !== "object" || Array.isArray(message)) {
@@ -518,13 +643,34 @@ function extractEvidence(entries: readonly unknown[]): Evidence[] {
     const user = userText(record);
     if (user) {
       evidence.push({
+        id: `${stableEntryId(entry, entryIndex)}:user`,
         index: evidence.length,
+        entryIndex,
         kind: "user",
         text: boundedString(user),
+        reason: "latest-user",
+        secondaryReasons: [],
+        sensitivity: "user-intent",
+        originalCharacters: user.length,
+        preTruncated: boundedString(user).length < user.length,
       });
     }
     for (const tool of toolTexts(record)) {
-      evidence.push({ index: evidence.length, kind: "tool", text: tool });
+      evidence.push({
+        id: tool.id
+          ? `tool-call:${tool.id}`
+          : `${stableEntryId(entry, entryIndex)}:tool-${evidence.length}`,
+        index: evidence.length,
+        entryIndex,
+        kind: "tool",
+        text: tool.text,
+        toolCallId: tool.id,
+        reason: "structured-request-match",
+        secondaryReasons: [],
+        sensitivity: "tool-input",
+        originalCharacters: tool.text.length,
+        preTruncated: false,
+      });
     }
   });
   return evidence;
@@ -535,6 +681,8 @@ type ToolCallRecord = {
   name: string;
   arguments: unknown;
   rendered: string;
+  entryIndex: number;
+  candidateId: string;
 };
 
 function messageRecord(entry: unknown): Record<string, unknown> | undefined {
@@ -542,6 +690,14 @@ function messageRecord(entry: unknown): Record<string, unknown> | undefined {
   const message = (entry as Record<string, unknown>).message;
   if (!message || typeof message !== "object" || Array.isArray(message)) return;
   return message as Record<string, unknown>;
+}
+
+function stableEntryId(entry: unknown, index: number): string {
+  if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+    const id = (entry as Record<string, unknown>).id;
+    if (typeof id === "string" && id.trim()) return `entry:${id}`;
+  }
+  return `entry-index:${index}`;
 }
 
 function redactSensitiveResult(value: string): string {
@@ -668,20 +824,6 @@ function relevanceReason(
   | "provider-branch-protection"
   | undefined {
   if (request.toolCallId && call.id === request.toolCallId) return "same-tool";
-  const callText = call.rendered.toLowerCase();
-  const needles = [
-    request.path,
-    request.resolvedPath,
-    request.destination,
-    request.command,
-  ]
-    .filter((value): value is string => Boolean(value && value.length >= 3))
-    .map((value) => value.toLowerCase());
-  const namesMatch =
-    Boolean(request.toolName) &&
-    (call.name === request.toolName ||
-      call.name.endsWith(`/${request.toolName}`) ||
-      request.toolName?.endsWith(`/${call.name}`));
   const currentCommand = request.command || "";
   const priorCommand = commandArgument(call);
   const pushedBranch = explicitPushBranch(currentCommand);
@@ -690,13 +832,19 @@ function relevanceReason(
     /\b(?:rm|rmdir|unlink|trash|delete)\b/i.test(currentCommand);
   const readOnlyCheck =
     /^\s*(?:stat|ls|find|test|readlink|realpath)\b/i.test(priorCommand);
-  const targets = [request.path, request.resolvedPath]
-    .filter((value): value is string => Boolean(value))
-    .map((value) => value.toLowerCase());
+  const priorWords = /[\n;&|`<>]|\$\(/.test(priorCommand)
+    ? []
+    : priorCommand
+        .trim()
+        .split(/\s+/)
+        .map((word) => word.replace(/^(["'])(.*)\1$/, "$2"));
+  const targets = [request.path, request.resolvedPath].filter(
+    (value): value is string => Boolean(value),
+  );
   if (
     destructive &&
     readOnlyCheck &&
-    targets.some((target) => priorCommand.toLowerCase().includes(target))
+    targets.some((target) => priorWords.includes(target))
   ) {
     return "delete-precheck";
   }
@@ -715,21 +863,40 @@ function relevanceReason(
   ) {
     return "provider-branch-protection";
   }
-  if (
-    (namesMatch || needles.length > 0) &&
-    needles.some((value) => callText.includes(value))
-  ) {
-    return "same-tool";
-  }
   return undefined;
 }
 
 function relevantResultEvidence(
   entries: readonly unknown[],
   request: RelevantBoundaryRequest,
-): Array<{ index: number; text: string }> {
+  currentTurnStart: number,
+): Array<{
+  index: number;
+  reason: Exclude<
+    EvidenceSelectionReason,
+    | "latest-user"
+    | "exact-request-reference"
+    | "active-narrowing-constraint"
+    | "trusted-retry-user-message"
+    | "exact-tool-call"
+    | "structured-request-match"
+    | "security-combination"
+    | "sandbox-trap"
+  >;
+  call: ToolCallRecord;
+  resultId: string;
+  resultText: string;
+  renderedResult: string;
+}> {
   const calls = new Map<string, ToolCallRecord>();
-  const results: Array<{ index: number; text: string }> = [];
+  const results: Array<{
+    index: number;
+    reason: "same-tool" | "delete-precheck" | "git-push-context" | "provider-branch-protection";
+    call: ToolCallRecord;
+    resultId: string;
+    resultText: string;
+    renderedResult: string;
+  }> = [];
   entries.forEach((entry, index) => {
     const message = messageRecord(entry);
     if (!message) return;
@@ -750,6 +917,8 @@ function relevantResultEvidence(
           name: record.name,
           arguments: record.arguments,
           rendered: `${record.name} ${boundedString(record.arguments ?? {})}`,
+          entryIndex: index,
+          candidateId: `tool-call:${id}`,
         });
       }
       return;
@@ -764,58 +933,728 @@ function relevantResultEvidence(
     if (!call) return;
     const reason = relevanceReason(call, request);
     const text = resultText(message);
-    if (reason && text) {
+    const crossTurnAllowed = reason === "same-tool";
+    if (reason && text && (crossTurnAllowed || call.entryIndex >= currentTurnStart)) {
       results.push({
         index,
-        text: `<tool-result reason="${reason}" tool="${escapeEvidenceMarkup(call.name)}">\n${escapeEvidenceMarkup(text)}\n</tool-result>`,
+        reason,
+        call,
+        resultId: `${stableEntryId(entry, index)}:tool-result:${message.toolCallId}`,
+        resultText: text,
+        renderedResult: `<tool-result id="${escapeEvidenceMarkup(message.toolCallId)}" reason="${reason}" tool="${escapeEvidenceMarkup(call.name)}">\n${escapeEvidenceMarkup(text)}\n</tool-result>`,
       });
     }
   });
   return results;
 }
 
-function sandboxTrapEvidence(
+function sandboxTrapSupplement(
   request: RelevantBoundaryRequest,
 ): string | undefined {
   if (request.source !== "sandbox-runtime") return;
+  const supplement = {
+    ...(request.toolName ? { process: request.toolName } : {}),
+  };
+  if (Object.keys(supplement).length === 0) return;
+  return canonicalReviewerJson(supplement);
+}
+
+function sandboxTrapEvidence(
+  request: RelevantBoundaryRequest,
+): string | undefined {
+  const supplement = sandboxTrapSupplement(request);
+  if (!supplement) return;
   return `<sandbox-trap>
-${boundedString({
-    surface: request.surface,
-    operation: request.operation,
+${supplement}
+</sandbox-trap>`;
+}
+
+function currentTurnStart(entries: readonly unknown[]): number {
+  let start = 0;
+  entries.forEach((entry, index) => {
+    if (messageRecord(entry)?.role === "user") start = index;
+  });
+  return start;
+}
+
+function surfaceProfile(
+  request: RelevantBoundaryRequest,
+): EvidenceSurfaceProfile {
+  if (request.agentName || request.requesterSessionId) return "forwarded";
+  if (request.surface === "network" || request.destination) return "network";
+  if (/\bgit\b[\s\S]*\bpush\b/i.test(request.command ?? "")) return "git-push";
+  if (/\b(?:rm|rmdir|unlink|trash|delete)\b/i.test(request.command ?? "")) {
+    return "delete";
+  }
+  return "generic";
+}
+
+function collectToolCalls(entries: readonly unknown[]): ToolCallRecord[] {
+  const calls: ToolCallRecord[] = [];
+  entries.forEach((entry, entryIndex) => {
+    const message = messageRecord(entry);
+    if (message?.role !== "assistant" || !Array.isArray(message.content)) return;
+    for (const part of message.content) {
+      if (!part || typeof part !== "object" || Array.isArray(part)) continue;
+      const value = part as Record<string, unknown>;
+      if (value.type !== "toolCall" || typeof value.name !== "string") continue;
+      const id =
+        typeof value.id === "string"
+          ? value.id
+          : typeof value.toolCallId === "string"
+            ? value.toolCallId
+            : undefined;
+      calls.push({
+        id,
+        name: value.name,
+        arguments: value.arguments,
+        rendered: `${value.name} ${boundedString(value.arguments ?? {})}`,
+        entryIndex,
+        candidateId: id
+          ? `tool-call:${id}`
+          : `${stableEntryId(entry, entryIndex)}:tool-${calls.length}`,
+      });
+    }
+  });
+  return calls;
+}
+
+function exactStructuredMatch(
+  call: ToolCallRecord,
+  request: RelevantBoundaryRequest,
+): boolean {
+  if (!call.arguments || typeof call.arguments !== "object" || Array.isArray(call.arguments)) {
+    return false;
+  }
+  const args = call.arguments as Record<string, unknown>;
+  const pairs: Array<[unknown, unknown]> = [
+    [args.command, request.command],
+    [args.path, request.path],
+    [args.resolvedPath, request.resolvedPath],
+    [args.destination, request.destination],
+    [args.agentName, request.agentName],
+    [args.requesterSessionId, request.requesterSessionId],
+    [args.target, request.destination ?? request.path],
+    [args.value, request.destination ?? request.path ?? request.command],
+  ];
+  if (pairs.some(
+    ([actual, expected]) =>
+      typeof actual === "string" &&
+      typeof expected === "string" &&
+      actual === expected,
+  )) return true;
+  const forwarding =
+    args.forwarding && typeof args.forwarding === "object" && !Array.isArray(args.forwarding)
+      ? args.forwarding as Record<string, unknown>
+      : undefined;
+  if (
+    forwarding &&
+    ((typeof forwarding.requesterAgentName === "string" &&
+      forwarding.requesterAgentName === request.agentName) ||
+      (typeof forwarding.requesterSessionId === "string" &&
+        forwarding.requesterSessionId === request.requesterSessionId))
+  ) return true;
+  const intent =
+    args.accessIntent && typeof args.accessIntent === "object" && !Array.isArray(args.accessIntent)
+      ? args.accessIntent as Record<string, unknown>
+      : undefined;
+  return Boolean(
+    intent &&
+    request.accessIntent &&
+    intent.surface === request.accessIntent.surface &&
+    Array.isArray(intent.matchValues) &&
+    intent.matchValues.length === request.accessIntent.matchValues.length &&
+    intent.matchValues.every(
+      (value, index) => value === request.accessIntent!.matchValues[index],
+    ) &&
+    intent.boundaryValue === request.accessIntent.boundaryValue,
+  );
+}
+
+function sameReviewerField(actual: unknown, expected: unknown): boolean {
+  return expected !== undefined &&
+    canonicalReviewerJson(actual) === canonicalReviewerJson(expected);
+}
+
+function toolArgumentCoveredByRequest(
+  key: string,
+  actual: unknown,
+  request: RelevantBoundaryRequest,
+): boolean {
+  if (key === "target") {
+    return sameReviewerField(actual, request.destination ?? request.path);
+  }
+  if (key === "value") {
+    return [request.command, request.path, request.destination].some(
+      (expected) => sameReviewerField(actual, expected),
+    );
+  }
+  if (key === "forwarding") {
+    if (!request.agentName && !request.requesterSessionId) return false;
+    return sameReviewerField(actual, {
+      requesterAgentName: request.agentName,
+      requesterSessionId: request.requesterSessionId,
+    });
+  }
+  const expected = ({
+    command: request.command,
     path: request.path,
     resolvedPath: request.resolvedPath,
     destination: request.destination,
-    process: request.toolName,
-  })}
-</sandbox-trap>`;
+    cwd: request.cwd,
+    agentName: request.agentName,
+    requesterSessionId: request.requesterSessionId,
+    accessIntent: request.accessIntent,
+  } as Record<string, unknown>)[key];
+  return sameReviewerField(actual, expected);
+}
+
+function exactToolCallReviewerRepresentation(
+  call: ToolCallRecord,
+  request: RelevantBoundaryRequest,
+  reason: EvidenceSelectionReason,
+): string | undefined {
+  if (
+    !call.id ||
+    call.id !== request.toolCallId ||
+    !call.arguments ||
+    typeof call.arguments !== "object" ||
+    Array.isArray(call.arguments)
+  ) {
+    return;
+  }
+  const args = call.arguments as Record<string, unknown>;
+  const serializedArgs = canonicalReviewerJson(args);
+  const previewCoversAll =
+    request.toolInputPreview === serializedArgs ||
+    request.toolInputPreview === `input ${serializedArgs}`;
+  const supplement = previewCoversAll
+    ? {}
+    : Object.fromEntries(
+        Object.entries(args).filter(
+          ([key, actual]) =>
+            !toolArgumentCoveredByRequest(key, actual, request),
+        ),
+      );
+  return canonicalReviewerJson({
+    id: call.id,
+    name: call.name,
+    reason,
+    ...(Object.keys(supplement).length > 0 ? { supplement } : {}),
+  });
+}
+
+function securityEvidenceCategory(
+  call: ToolCallRecord,
+):
+  | "credential"
+  | "permission"
+  | "authorization"
+  | "transport"
+  | "audit"
+  | "security-control"
+  | undefined {
+  const command = commandArgument(call);
+  if (!command) return;
+  if (
+    /\b(?:cat|sed|awk|base64|openssl|head|tail|grep|dd|xxd|tar|zip)\b[\s\S]*(?:\.env|\.ssh|\.aws\/credentials|\.kube\/config|\.npmrc|auth\.json)/i.test(
+      command,
+    )
+  ) return "credential";
+  if (/\b(?:chmod|chown|chgrp|setfacl)\b/i.test(command)) return "permission";
+  if (/(?:authorized_keys|\/etc\/sudoers|access[_-]?grant)/i.test(command)) {
+    return "authorization";
+  }
+  if (
+    /(?:--insecure|--no-check-certificate|sslverify\s+false|strict-ssl\s+false|NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*0|https?_proxy)/i.test(
+      command,
+    )
+  ) return "transport";
+  if (/\b(?:disable|truncate|delete|rm)\b[\s\S]*\b(?:audit|log)/i.test(command)) {
+    return "audit";
+  }
+  if (/(?:pi-auto-review|pi-sandbox|permission-system|permissions\.json|sandbox\.json)/i.test(command)) {
+    return "security-control";
+  }
+  return undefined;
+}
+
+function selectRequestAwareTools(
+  entries: readonly unknown[],
+  evidence: Evidence[],
+  request: RelevantBoundaryRequest,
+  relevant: ReturnType<typeof relevantResultEvidence>,
+  turnStart: number,
+): { selected: Evidence[]; criticalEvidenceOverflow: boolean } {
+  const calls = collectToolCalls(entries);
+  const reasons = new Map<string, EvidenceSelectionReason[]>();
+  const addReason = (call: ToolCallRecord, reason: EvidenceSelectionReason) => {
+    const current = reasons.get(call.candidateId) ?? [];
+    if (!current.includes(reason)) current.push(reason);
+    reasons.set(call.candidateId, current);
+  };
+
+  const exact = request.toolCallId
+    ? calls.find((call) => call.id === request.toolCallId)
+    : undefined;
+  if (exact) addReason(exact, "exact-tool-call");
+  for (const unit of relevant) addReason(unit.call, unit.reason);
+  for (const call of calls) {
+    if (call.entryIndex < turnStart || call === exact) continue;
+    if (exactStructuredMatch(call, request)) {
+      addReason(call, "structured-request-match");
+    }
+  }
+  const profile = surfaceProfile(request);
+  const securityCalls = calls.filter(
+    (call) =>
+      call.entryIndex >= turnStart &&
+      securityEvidenceCategory(call) !== undefined &&
+      ["network", "git-push", "forwarded"].includes(profile),
+  );
+  for (const call of securityCalls.slice(-4)) {
+    addReason(call, "security-combination");
+  }
+
+  const priority: EvidenceSelectionReason[] = [
+    "exact-tool-call",
+    "same-tool",
+    "delete-precheck",
+    "git-push-context",
+    "provider-branch-protection",
+    "security-combination",
+    "structured-request-match",
+  ];
+  const selected = evidence
+    .filter((item) => item.kind === "tool" && reasons.has(item.id))
+    .map((item) => {
+      const matched = reasons.get(item.id)!;
+      const ordered = [...matched].sort(
+        (left, right) => priority.indexOf(left) - priority.indexOf(right),
+      );
+      const call = calls.find((candidate) => candidate.candidateId === item.id)!;
+      const linkage = exactToolCallReviewerRepresentation(
+        call,
+        request,
+        ordered[0],
+      );
+      return {
+        ...item,
+        ...(linkage
+          ? { text: linkage, representationCharacters: linkage.length }
+          : {}),
+        reason: ordered[0],
+        secondaryReasons: ordered.slice(1),
+        sensitivity:
+          ordered.includes("security-combination")
+            ? ({
+                credential: "credential",
+                permission: "permission-control",
+                authorization: "authorization-persistence",
+                transport: "transport-weakening",
+                audit: "audit-control",
+                "security-control": "security-control",
+              } as const)[
+                securityEvidenceCategory(
+                  calls.find((call) => call.candidateId === item.id)!,
+                )!
+              ]
+            : item.sensitivity,
+      };
+    });
+  return {
+    selected,
+    criticalEvidenceOverflow: securityCalls.length > 4,
+  };
+}
+
+function capRelevantUnits(
+  units: ReturnType<typeof relevantResultEvidence>,
+  profile: EvidenceSurfaceProfile,
+): ReturnType<typeof relevantResultEvidence> {
+  const newest = [...units].sort((left, right) => right.index - left.index);
+  const selected: typeof units = [];
+  const take = (
+    reason: (typeof units)[number]["reason"],
+    limit: number,
+    predicate: (unit: (typeof units)[number]) => boolean = () => true,
+  ) => {
+    for (const unit of newest) {
+      if (
+        selected.length >= units.length ||
+        selected.includes(unit) ||
+        unit.reason !== reason ||
+        !predicate(unit) ||
+        selected.filter(
+          (candidate) => candidate.reason === reason && predicate(candidate),
+        ).length >= limit
+      ) {
+        continue;
+      }
+      selected.push(unit);
+    }
+  };
+  take("same-tool", 1);
+  if (profile === "delete") take("delete-precheck", 2);
+  if (profile === "git-push") {
+    take("git-push-context", 1, (unit) =>
+      /^\s*git\s+(?:remote|config\s+--get\s+remote)/i.test(
+        commandArgument(unit.call),
+      ),
+    );
+    take("git-push-context", 1, (unit) =>
+      /^\s*git\s+(?:branch|status|rev-parse)/i.test(
+        commandArgument(unit.call),
+      ),
+    );
+    take("provider-branch-protection", 1);
+  }
+  if (profile === "generic") {
+    for (const unit of newest) {
+      if (!selected.includes(unit) && selected.length < 4) selected.push(unit);
+    }
+  }
+  return selected.sort((left, right) => left.index - right.index);
+}
+
+function selectedMetadata(
+  item: Evidence,
+  original: Evidence,
+  profile: EvidenceSurfaceProfile,
+): EvidenceCandidateMetadata {
+  return {
+    id: item.id,
+    entryIndex: item.entryIndex,
+    kind: item.kind === "user" ? "user" : "tool-call",
+    ...(item.toolCallId ? { toolCallId: item.toolCallId } : {}),
+    reason: item.reason,
+    secondaryReasons: [...item.secondaryReasons],
+    surfaceProfile: profile,
+    originalCharacters: original.originalCharacters,
+    selectedCharacters: item.text.length,
+    estimatedTokens: Buffer.byteLength(item.text, "utf8"),
+    truncated:
+      original.preTruncated ||
+      item.text.length <
+        (item.representationCharacters ?? original.originalCharacters),
+    sensitivity: item.sensitivity,
+  };
+}
+
+type UserSelection = {
+  selected: Evidence[];
+  truncated: boolean;
+  authorizationCeiling: TranscriptResult["userAuthorizationCeiling"];
+  constraint: TranscriptResult["userConstraint"];
+  compactionState: TranscriptResult["compactionState"];
+  constraintOverflow: boolean;
+};
+
+function utf8Prefix(value: string, maxBytes: number): string {
+  if (maxBytes <= 0) return "";
+  let bytes = 0;
+  let result = "";
+  for (const character of value) {
+    const size = Buffer.byteLength(character, "utf8");
+    if (bytes + size > maxBytes) break;
+    result += character;
+    bytes += size;
+  }
+  return result;
+}
+
+function utf8Suffix(value: string, maxBytes: number): string {
+  if (maxBytes <= 0) return "";
+  let bytes = 0;
+  const characters = [...value];
+  let result = "";
+  for (let index = characters.length - 1; index >= 0; index--) {
+    const character = characters[index];
+    const size = Buffer.byteLength(character, "utf8");
+    if (bytes + size > maxBytes) break;
+    result = character + result;
+    bytes += size;
+  }
+  return result;
+}
+
+function headTail(value: string, limit: number): string {
+  if (Buffer.byteLength(value, "utf8") <= limit) return value;
+  const marker = "\n…[middle truncated]…\n";
+  const markerBytes = Buffer.byteLength(marker, "utf8");
+  if (limit <= markerBytes) return utf8Prefix(marker, limit);
+  const available = limit - markerBytes;
+  const head = Math.ceil(available / 2);
+  return `${utf8Prefix(value, head)}${marker}${utf8Suffix(value, available - head)}`;
+}
+
+function summaryEntryIndices(entries: readonly unknown[]): number[] {
+  const indices: number[] = [];
+  entries.forEach((entry, index) => {
+    const role = messageRecord(entry)?.role;
+    if (role === "compactionSummary" || role === "branchSummary") {
+      indices.push(index);
+    }
+  });
+  return indices;
+}
+
+function containsExactIdentifier(text: string, value: string): boolean {
+  const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^A-Za-z0-9_-])${escaped}(?=$|[^A-Za-z0-9_-])`).test(
+    text,
+  );
+}
+
+function exactUserReference(
+  text: string,
+  request: RelevantBoundaryRequest,
+): boolean {
+  return [
+    request.id,
+    request.toolCallId,
+    request.requesterSessionId,
+    request.agentName,
+  ].some((value) => {
+    if (typeof value !== "string" || value.length === 0) return false;
+    return containsExactIdentifier(text, value);
+  });
+}
+
+function constraintEffect(text: string): "narrowed" | "revoked" | undefined {
+  if (
+    /(?:\b(?:do not|don't|never|must not|forbid|forbidden|revoke|cancel)\b|不要|不得|禁止|撤销|取消|不能|别)/i.test(
+      text,
+    )
+  ) return "revoked";
+  if (/(?:\b(?:only|except|staging only|not main)\b|只允许|仅允许|仅限|只能)/i.test(text)) {
+    return "narrowed";
+  }
+  return undefined;
+}
+
+function vagueContinuation(text: string): boolean {
+  return /^\s*(?:continue|proceed|go ahead|do it|yes|ok(?:ay)?|继续|照做|可以|好的?|行)[.!。！\s]*$/i.test(
+    text,
+  );
+}
+
+function constraintMatchesProfile(
+  text: string,
+  profile: EvidenceSurfaceProfile,
+): boolean {
+  const patterns: Record<EvidenceSurfaceProfile, RegExp> = {
+    network: /(?:\b(?:network|connect|domain|upload|download|http)\b|网络|联网|域名|上传|下载)/i,
+    delete: /(?:\b(?:delete|remove|unlink|rmdir|\brm\b)\b|删除|移除)/i,
+    "git-push": /(?:\b(?:git\s+push|push|branch|main)\b|推送|分支|主分支)/i,
+    forwarded: /(?:\b(?:agent|subagent|forward|worker)\b|代理|子代理|转发)/i,
+    generic: /(?:\b(?:execute|run|write|file|path|permission|deploy)\b|执行|运行|写入|文件|路径|权限|部署)/i,
+  };
+  return patterns[profile].test(text);
+}
+
+function constraintConflictsOrIsUncertain(
+  text: string,
+  effect: "narrowed" | "revoked",
+  request: RelevantBoundaryRequest,
+): boolean {
+  const representation = [
+    request.command,
+    request.path,
+    request.resolvedPath,
+    request.destination,
+    request.agentName,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(" ")
+    .toLowerCase();
+  if (/\bmain\b|主分支/i.test(text)) {
+    return effect === "revoked"
+      ? /\bmain\b/.test(representation)
+      : /\bmain\b/.test(representation);
+  }
+  if (/\bstaging\b|预发布|测试环境/i.test(text)) {
+    const targetsStaging = /\bstaging\b/.test(representation);
+    return effect === "revoked" ? targetsStaging : !targetsStaging;
+  }
+  return true;
+}
+
+function selectUserEvidence(
+  entries: readonly unknown[],
+  evidence: Evidence[],
+  request: RelevantBoundaryRequest,
+  profile: EvidenceSurfaceProfile,
+  budgetTokens: number,
+): UserSelection {
+  const users = evidence.filter((item) => item.kind === "user");
+  const summaries = summaryEntryIndices(entries);
+  const lastSummary = summaries.at(-1) ?? -1;
+  const rawAfterSummary = users.filter((item) => item.entryIndex > lastSummary);
+  const eligibleUsers = lastSummary >= 0 ? rawAfterSummary : users;
+  const latest = eligibleUsers.at(-1);
+  const compactionState: TranscriptResult["compactionState"] =
+    summaries.length === 0
+      ? "none"
+      : latest
+        ? "summary-present"
+        : "authorization-unavailable";
+  if (!latest || budgetTokens <= 0) {
+    return {
+      selected: [],
+      truncated: users.length > 0,
+      authorizationCeiling: request.trustedRetryOriginalRequestId
+        ? "high"
+        : "unknown",
+      constraint: "none",
+      compactionState,
+      constraintOverflow: false,
+    };
+  }
+
+  let remaining = budgetTokens;
+  const latestText = headTail(latest.text, remaining);
+  const latestTrustedRetry = Boolean(
+    request.trustedRetryOriginalRequestId &&
+      latest.text.includes("I approved one reviewer retry") &&
+      containsExactIdentifier(
+        latest.text,
+        request.trustedRetryOriginalRequestId,
+      ),
+  );
+  const latestExactReference = exactUserReference(latest.text, request);
+  const latestEffect = constraintEffect(latest.text);
+  const latestActiveConstraint = Boolean(
+    latestEffect && constraintMatchesProfile(latest.text, profile),
+  );
+  const latestConstraintConflict = Boolean(
+    latestEffect &&
+      latestActiveConstraint &&
+      constraintConflictsOrIsUncertain(latest.text, latestEffect, request),
+  );
+  const selected: Evidence[] = [{
+    ...latest,
+    text: latestText,
+    reason: "latest-user",
+    secondaryReasons: [
+      ...(latestTrustedRetry ? ["trusted-retry-user-message" as const] : []),
+      ...(latestExactReference ? ["exact-request-reference" as const] : []),
+      ...(latestActiveConstraint ? ["active-narrowing-constraint" as const] : []),
+    ],
+  }];
+  remaining -= Buffer.byteLength(latestText, "utf8");
+  let constraint: TranscriptResult["userConstraint"] =
+    latestConstraintConflict ? latestEffect! : "none";
+
+  const older = eligibleUsers.slice(0, -1).reverse();
+  for (const candidate of older) {
+    if (remaining <= 0) break;
+    const trustedRetry =
+      request.trustedRetryOriginalRequestId &&
+      candidate.text.includes("I approved one reviewer retry") &&
+      containsExactIdentifier(
+        candidate.text,
+        request.trustedRetryOriginalRequestId,
+      );
+    const exactReference = exactUserReference(candidate.text, request);
+    const effect = constraintEffect(candidate.text);
+    const activeConstraint = effect && constraintMatchesProfile(candidate.text, profile);
+    if (!trustedRetry && !exactReference && !activeConstraint) continue;
+    const reason: EvidenceSelectionReason = trustedRetry
+      ? "trusted-retry-user-message"
+      : exactReference
+        ? "exact-request-reference"
+        : "active-narrowing-constraint";
+    const text = headTail(candidate.text, remaining);
+    if (!text) continue;
+    selected.push({
+      ...candidate,
+      text,
+      reason,
+      secondaryReasons: [
+        ...(trustedRetry && exactReference ? ["exact-request-reference" as const] : []),
+        ...(activeConstraint && reason !== "active-narrowing-constraint"
+          ? ["active-narrowing-constraint" as const]
+          : []),
+      ],
+    });
+    remaining -= Buffer.byteLength(text, "utf8");
+    if (
+      activeConstraint &&
+      constraintConflictsOrIsUncertain(candidate.text, effect, request)
+    ) {
+      constraint = effect === "revoked" ? "revoked" : constraint === "none" ? "narrowed" : constraint;
+    }
+  }
+  selected.sort((left, right) => left.entryIndex - right.entryIndex);
+  const selectedIds = new Set(selected.map((item) => item.id));
+  const constraintOverflow = older.some((candidate) => {
+    const effect = constraintEffect(candidate.text);
+    if (!effect || !constraintMatchesProfile(candidate.text, profile)) return false;
+    const chosen = selected.find((item) => item.id === candidate.id);
+    return (
+      !selectedIds.has(candidate.id) ||
+      !chosen ||
+      chosen.text.length < candidate.originalCharacters ||
+      candidate.preTruncated
+    );
+  });
+  const latestTruncated = latestText.length < latest.originalCharacters || latest.preTruncated;
+  const hasExactAuthorizationLink = selected.some(
+    (item) =>
+      item.reason === "exact-request-reference" ||
+      item.reason === "trusted-retry-user-message" ||
+      item.secondaryReasons.includes("exact-request-reference") ||
+      item.secondaryReasons.includes("trusted-retry-user-message"),
+  );
+  const authorizationCeiling: TranscriptResult["userAuthorizationCeiling"] =
+    request.trustedRetryOriginalRequestId && constraint !== "revoked"
+      ? "high"
+      : compactionState === "authorization-unavailable" || constraint === "revoked"
+      ? "unknown"
+      : latestTruncated
+        ? "medium"
+        : vagueContinuation(latest.text) && !hasExactAuthorizationLink
+          ? "unknown"
+        : "high";
+  return {
+    selected,
+    truncated:
+      latestTruncated ||
+      selected.some((item) => item.text.length < item.originalCharacters),
+    authorizationCeiling,
+    constraint,
+    compactionState,
+    constraintOverflow,
+  };
 }
 
 function selectEvidence(
   evidence: Evidence[],
   kind: Evidence["kind"],
-  budgetCharacters: number,
+  budgetTokens: number,
 ): { selected: Evidence[]; truncated: boolean } {
   const candidates = evidence.filter((item) => item.kind === kind);
-  if (candidates.length === 0 || budgetCharacters <= 0) {
+  if (candidates.length === 0 || budgetTokens <= 0) {
     return { selected: [], truncated: candidates.length > 0 };
   }
 
   const selected = new Map<number, Evidence>();
-  let remaining = budgetCharacters;
+  let remaining = budgetTokens;
   const add = (item: Evidence, limit = remaining): void => {
     if (selected.has(item.index) || remaining <= 0) return;
-    const text = item.text.slice(0, Math.min(remaining, limit));
+    const text = utf8Prefix(item.text, Math.min(remaining, limit));
     if (!text) return;
     selected.set(item.index, { ...item, text });
-    remaining -= text.length;
+    remaining -= Buffer.byteLength(text, "utf8");
   };
 
   // Keep the original user intent as an anchor, then fill from newest to oldest.
   if (kind === "user") {
     const firstBudget =
       candidates.length > 1
-        ? Math.max(1, Math.floor(budgetCharacters / 2))
-        : budgetCharacters;
+        ? Math.max(1, Math.floor(budgetTokens / 2))
+        : budgetTokens;
     add(candidates[0], firstBudget);
     if (candidates.length > 1) add(candidates[candidates.length - 1]);
   }
@@ -841,68 +1680,229 @@ export function buildClassifierTranscript(
   request: RelevantBoundaryRequest = {},
 ): TranscriptResult {
   const evidence = extractEvidence(entries);
-  const users = selectEvidence(
+  const profile = surfaceProfile(request);
+  const turnStart = currentTurnStart(entries);
+  const relevantUnits = capRelevantUnits(
+    relevantResultEvidence(entries, request, turnStart),
+    profile,
+  );
+  const users = selectUserEvidence(
+    entries,
     evidence,
-    "user",
-    config.maxUserTranscriptTokens * 4,
+    request,
+    profile,
+    config.maxUserTranscriptTokens,
+  );
+  const requestAwareTools = selectRequestAwareTools(
+    entries,
+    evidence,
+    request,
+    relevantUnits,
+    turnStart,
   );
   const tools = selectEvidence(
-    evidence,
+    requestAwareTools.selected,
     "tool",
-    config.maxToolTranscriptTokens * 4,
+    config.maxToolTranscriptTokens,
   );
-  const selected = [...users.selected, ...tools.selected].sort(
+  const relevantBudget =
+    config.maxRelevantResultTokens ?? config.maxToolTranscriptTokens;
+  const sandboxSupplement = sandboxTrapSupplement(request);
+  const sandboxEvidence = sandboxTrapEvidence(request);
+  const relevantCandidates = [
+    ...(sandboxEvidence && sandboxSupplement
+      ? [{
+          index: Number.MAX_SAFE_INTEGER - 1,
+          id: `sandbox-trap:${request.id ?? "request"}`,
+          reason: "sandbox-trap" as const,
+          toolCallId: undefined,
+          text: sandboxEvidence,
+          content: sandboxSupplement,
+          rawCharacters: sandboxEvidence.length,
+          sensitivity: "boundary" as const,
+        }]
+      : []),
+    ...relevantUnits
+      .filter((unit) =>
+        tools.selected.some((tool) => tool.id === unit.call.candidateId),
+      )
+      .map((unit) => ({
+        index: unit.index,
+        id: unit.resultId,
+        reason: unit.reason,
+        toolCallId: unit.call.id,
+        text: unit.renderedResult,
+        content: unit.resultText,
+        rawCharacters: unit.renderedResult.length,
+        sensitivity: "tool-output" as const,
+      })),
+  ];
+  let relevantRemaining = relevantBudget;
+  let requiredProfileOverflow = false;
+  const relevantSelected: Array<
+    (typeof relevantCandidates)[number] & { selectedText: string }
+  > = [];
+  const relevantSelectionOrder = [
+    ...relevantCandidates.filter((candidate) => candidate.reason === "sandbox-trap"),
+    ...relevantCandidates
+      .filter((candidate) => candidate.reason !== "sandbox-trap")
+      .sort((left, right) => right.index - left.index),
+  ];
+  for (const candidate of relevantSelectionOrder) {
+    if (relevantRemaining <= 0) break;
+    if (
+      candidate.reason === "sandbox-trap" &&
+      Buffer.byteLength(candidate.text, "utf8") > relevantRemaining
+    ) {
+      requiredProfileOverflow = true;
+      break;
+    }
+    const text = utf8Prefix(candidate.text, relevantRemaining);
+    if (text) {
+      relevantSelected.push({ ...candidate, selectedText: text });
+      relevantRemaining -= Buffer.byteLength(text, "utf8");
+    }
+  }
+  relevantSelected.sort((left, right) => left.index - right.index);
+  const pairedToolCallIds = new Set(
+    relevantSelected
+      .map((candidate) => candidate.toolCallId)
+      .filter((id): id is string => Boolean(id)),
+  );
+  const resultReasons = new Set<EvidenceSelectionReason>([
+    "same-tool",
+    "delete-precheck",
+    "git-push-context",
+    "provider-branch-protection",
+  ]);
+  const finalTools = tools.selected.filter((tool) => {
+    if (!resultReasons.has(tool.reason)) return true;
+    if (tool.toolCallId && pairedToolCallIds.has(tool.toolCallId)) return true;
+    return tool.secondaryReasons.some((reason) => !resultReasons.has(reason));
+  });
+  const selected = [...users.selected, ...finalTools].sort(
     (left, right) => left.index - right.index,
   );
   const baseRendered = selected
-    .map(
-      (item) =>
-        `<${item.kind}>\n${escapeEvidenceMarkup(item.text)}\n</${item.kind}>`,
-    )
+    .map((item) => {
+      const attributes = item.kind === "tool"
+        ? ` id="${escapeEvidenceMarkup(item.toolCallId ?? item.id)}" reason="${item.reason}"`
+        : ` reason="${item.reason}"`;
+      return `<${item.kind}${attributes}>\n${escapeEvidenceMarkup(item.text)}\n</${item.kind}>`;
+    })
     .join("\n\n");
-  const relevantBudget =
-    (config.maxRelevantResultTokens ?? config.maxToolTranscriptTokens) * 4;
-  const relevantCandidates = [
-    ...(sandboxTrapEvidence(request)
-      ? [{ index: Number.MAX_SAFE_INTEGER - 1, text: sandboxTrapEvidence(request)! }]
-      : []),
-    ...relevantResultEvidence(entries, request),
-  ];
-  let relevantRemaining = relevantBudget;
-  const relevantSelected: string[] = [];
-  for (let index = relevantCandidates.length - 1; index >= 0; index--) {
-    if (relevantRemaining <= 0) break;
-    const text = relevantCandidates[index].text.slice(0, relevantRemaining);
-    if (text) {
-      relevantSelected.unshift(text);
-      relevantRemaining -= text.length;
-    }
-  }
-  const rendered = [baseRendered, ...relevantSelected]
+  const authorizationNotice =
+    users.compactionState === "authorization-unavailable"
+      ? "[Original user authorization is unavailable after compaction. Agent-generated summaries are not authorization.]"
+      : users.compactionState === "summary-present"
+        ? "[A compaction/branch summary exists but is not user authorization.]"
+        : "";
+  const rendered = [
+    authorizationNotice,
+    baseRendered,
+    ...relevantSelected.map((candidate) => candidate.selectedText),
+  ]
     .filter(Boolean)
     .join("\n\n");
   const relevantTruncated =
     relevantSelected.length < relevantCandidates.length ||
-    relevantSelected.reduce((total, value) => total + value.length, 0) <
+    relevantSelected.reduce(
+      (total, value) => total + value.selectedText.length,
+      0,
+    ) <
       relevantCandidates.reduce((total, value) => total + value.text.length, 0);
-  const truncated = users.truncated || tools.truncated || relevantTruncated;
+  const truncated =
+    users.truncated ||
+    tools.truncated ||
+    finalTools.length < tools.selected.length ||
+    relevantTruncated;
   const text = truncated
     ? `[Some transcript evidence was omitted or truncated.]\n\n${rendered}`
     : rendered;
   return {
     text: text || "(no eligible transcript evidence)",
+    surfaceProfile: profile,
+    reviewerEvidence: {
+      userMessages: users.selected.map((item) => ({
+        id: item.id,
+        reason: item.reason,
+        secondaryReasons: [...item.secondaryReasons],
+        content: item.text,
+      })),
+      toolCalls: finalTools.map((item) => ({
+        id: item.id,
+        reason: item.reason,
+        secondaryReasons: [...item.secondaryReasons],
+        ...(item.toolCallId ? { toolCallId: item.toolCallId } : {}),
+        content: item.text,
+      })),
+      relevantResults: relevantSelected.map((item) => ({
+        id: item.id,
+        reason: item.reason,
+        secondaryReasons: [],
+        ...(item.toolCallId ? { toolCallId: item.toolCallId } : {}),
+        content: item.selectedText === item.text
+          ? item.content
+          : item.selectedText,
+      })),
+    },
+    budgetRemovals: [],
     userCharacters: users.selected.reduce(
       (total, item) => total + item.text.length,
       0,
     ),
-    toolCharacters: tools.selected.reduce(
+    toolCharacters: finalTools.reduce(
       (total, item) => total + item.text.length,
       0,
     ),
     relevantResultCharacters: relevantSelected.reduce(
-      (total, item) => total + item.length,
+      (total, item) =>
+        total +
+        (item.selectedText === item.text
+          ? item.content.length
+          : item.selectedText.length),
       0,
     ),
     truncated,
+    selectedCandidates: [
+      ...users.selected.map((item) =>
+        selectedMetadata(
+          item,
+          evidence.find((candidate) => candidate.id === item.id)!,
+          profile,
+        ),
+      ),
+      ...finalTools.map((item) =>
+        selectedMetadata(
+          item,
+          evidence.find((candidate) => candidate.id === item.id)!,
+          profile,
+        ),
+      ),
+      ...relevantSelected.map((item) => ({
+        id: item.id,
+        entryIndex: item.index,
+        kind: item.sensitivity === "boundary" ? "sandbox-trap" as const : "tool-result" as const,
+        ...(item.toolCallId ? { toolCallId: item.toolCallId } : {}),
+        reason: item.reason,
+        secondaryReasons: [],
+        surfaceProfile: profile,
+        originalCharacters: item.rawCharacters,
+        selectedCharacters: item.selectedText.length,
+        estimatedTokens: Buffer.byteLength(item.selectedText, "utf8"),
+        truncated: item.selectedText.length < item.rawCharacters,
+        sensitivity: item.sensitivity,
+      })),
+    ].sort((left, right) => left.entryIndex - right.entryIndex),
+    ...(requestAwareTools.criticalEvidenceOverflow
+      ? { failureCode: "critical_evidence_overflow" as const }
+      : requiredProfileOverflow
+        ? { failureCode: "required_profile_overflow" as const }
+        : users.constraintOverflow
+          ? { failureCode: "required_user_constraint_overflow" as const }
+        : {}),
+    userAuthorizationCeiling: users.authorizationCeiling,
+    userConstraint: users.constraint,
+    compactionState: users.compactionState,
   };
 }

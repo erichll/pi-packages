@@ -110,11 +110,11 @@ export class BoundaryApprovalBroker {
     let review: BoundaryReview;
     try {
       review = await this.#reviewer(request, { userOverride });
-    } catch (error) {
-      const reason = `Automatic review is unavailable: ${
-        error instanceof Error ? error.message : String(error)
-      }`;
-      this.audit("review_failure", request, { reason });
+    } catch {
+      const reason = "Automatic review is unavailable.";
+      this.audit("review_failure", request, {
+        errorClass: "reviewer_unavailable",
+      });
       if (this.#failureMode === "defer") {
         this.#breaker.record(context.scopeKey, false);
         return {

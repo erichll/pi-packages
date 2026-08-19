@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+- **Safer evidence selection.** Review only request-linked tool calls, paired
+  results, current-task user intent, and bounded security evidence. Compaction
+  summaries cannot restore authorization, raw revocations override model
+  allows, and missing mandatory evidence fails closed before a model call.
+- **Independent, smaller reviewer requests.** Use one compact canonical request
+  envelope and a byte-stable policy prefix, reducing fixed input from 2,011 to
+  1,396 characters. Independent SSE calls prevent prior review state from
+  carrying into later approvals while preserving cache/routing identity.
+- **Explicit token limits.** Add tighten-only `maxReviewerInputTokens` with an
+  8,192 default and conservative UTF-8 accounting across the complete prompt.
+  Lower the default `maxTokens` from 1,600 to 256 after sequential real-model
+  validation at 384 and 256; the legal range remains 256–4,096.
+- **Typed, bounded retries.** Share one deadline across each review, disable
+  provider-internal retries, and allow at most two actual model calls. Only
+  format errors, recognized connection/5xx failures, and bounded 429 responses
+  retry; deterministic and unknown failures remain terminal and fail closed.
+- **Privacy-bounded telemetry.** Record per-attempt usage and per-review
+  summaries for both reviewer entry points using stable status/error codes and
+  prompt-part counts, without logging evidence text, provider errors,
+  credentials, headers, or URL query values.
+
 ## 0.4.0 - 2026-08-19
 
 - **Credential-exfiltration hardening.** Expand deterministic terminal denies to cover

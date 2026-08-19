@@ -27,11 +27,13 @@ test("project config can only tighten trusted settings and is frozen", () => {
   const effective = applyProjectConfig(trusted, {
     timeoutMs: 10_000,
     retries: 0,
+    maxReviewerInputTokens: 4_096,
     failureMode: "deny",
     autoConfirmBoundedAllows: [],
   });
   assert.equal(effective.timeoutMs, 10_000);
   assert.equal(effective.retries, 0);
+  assert.equal(effective.maxReviewerInputTokens, 4_096);
   assert.equal(effective.model, trusted.model);
   assert.deepEqual(effective.autoConfirmBoundedAllows, []);
   assert.equal(Object.isFrozen(effective), true);
@@ -42,6 +44,11 @@ test("project config can only tighten trusted settings and is frozen", () => {
   );
   assert.throws(() =>
     applyProjectConfig(trusted, { grantTtlMs: trusted.grantTtlMs + 1 }),
+  );
+  assert.throws(() =>
+    applyProjectConfig(trusted, {
+      maxReviewerInputTokens: trusted.maxReviewerInputTokens + 1,
+    }),
   );
   assert.throws(() =>
     applyProjectConfig(trusted, { failureMode: "defer" }),
@@ -57,6 +64,8 @@ test("project config can only tighten trusted settings and is frozen", () => {
 test("user config can fully overlay package trusted settings", () => {
   const packageConfig = loadConfig();
   assert.equal(packageConfig.model, "codex-auto-review");
+  assert.equal(packageConfig.maxTokens, 256);
+  assert.equal(packageConfig.maxReviewerInputTokens, 8_192);
   const effective = applyUserConfig(packageConfig, {
     model: "user-provider/other-reviewer",
     autoConfirmBoundedAllows: ["external_directory", "path"],
@@ -78,6 +87,12 @@ test("user config can fully overlay package trusted settings", () => {
   assert.equal(bareModel.model, "codex-auto-review");
 
   assert.throws(() => applyUserConfig(packageConfig, { model: "" }));
+  assert.throws(() =>
+    applyUserConfig(packageConfig, { maxReviewerInputTokens: 2_047 }),
+  );
+  assert.throws(() =>
+    applyUserConfig(packageConfig, { maxReviewerInputTokens: 32_769 }),
+  );
   // Multi-segment model ids (provider/group/model) are valid and resolve like
   // parseModelRef: first segment is the provider, the rest is the model id.
   const nestedModel = applyUserConfig(packageConfig, {
