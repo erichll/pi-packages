@@ -50,8 +50,14 @@ expires after ten seconds, and is consumed once. Mode, component, request, or
 event-order mismatches leave the original human dialog in place.
 
 Automatic review stops for the current turn after three consecutive denials or
-ten denials in the last fifty reviews. An explicit denial tells the agent not
-to pursue the same outcome through a workaround.
+ten denials in the last fifty reviews. An explicit denial tells the agent that
+automatic policy denied the request (not a human click), not to rephrase or
+circumvent the same action, and to point the user to `/approve` for one exact
+retry when they already requested it.
+
+Deterministic hard denies cover recursive forced wipes of `/`, `~`, and
+`$HOME`. A named path under `/home/...` is reviewed by the model as high-risk,
+not treated as a home-directory wipe.
 
 ## Configuration
 

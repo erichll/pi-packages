@@ -6,6 +6,7 @@ import { AuthorizerRegistry } from "../../../node_modules/@gotgenes/pi-permissio
 import { composeAuthorizerChain } from "../../../node_modules/@gotgenes/pi-permission-system/src/authority/authorizer-chain.ts";
 import { encloseInDelegationEnvelope } from "../../../node_modules/@gotgenes/pi-permission-system/src/authority/delegation-envelope.ts";
 import {
+  REVIEWER_DENY_AGENT_INSTRUCTION,
   createPiAutoReviewExtension,
   loadConfig,
   type Config,
@@ -406,6 +407,28 @@ test("real permission-system authorizer chain integration", async (t) => {
     }
   });
 
+  await t.test("model deny is not a human click and points to /approve", async () => {
+    const instance = harness(deny);
+    try {
+      const result = await instance.authorize("bash_escalated");
+      assert.equal(result.decision.approved, false);
+      assert.equal(result.terminalCalls, 0);
+      assert.equal(result.decision.state, "denied_with_reason");
+      assert.equal(
+        result.decision.denialReason,
+        `Authorization is insufficient. ${REVIEWER_DENY_AGENT_INSTRUCTION}`,
+      );
+      assert.match(result.decision.denialReason ?? "", /not a human click/);
+      assert.match(result.decision.denialReason ?? "", /\/approve/);
+      assert.doesNotMatch(
+        result.decision.denialReason ?? "",
+        /Do not retry this outcome through a workaround/,
+      );
+    } finally {
+      instance.dispose();
+    }
+  });
+
   await t.test("forwarded v24 evidence reaches reviewer and audit records", async () => {
     const instance = harness(allow);
     try {
@@ -472,6 +495,19 @@ test("real permission-system authorizer chain integration", async (t) => {
       assert.equal(context.messages.length, 1);
       assert.ok(context.systemPrompt.length < 2_011);
       assert.equal(context.systemPrompt.match(/"outcome"/g)?.length, 1);
+      assert.match(context.systemPrompt, /\$HOME/);
+      assert.match(
+        context.systemPrompt,
+        /Named \/home\/\.\.\. paths are not a home wipe/,
+      );
+      assert.match(
+        context.systemPrompt,
+        /Allow high only with medium\/high user\s+authorization and narrow scope; else defer/,
+      );
+      assert.doesNotMatch(
+        context.systemPrompt,
+        /destructive\s+root\/home operations/,
+      );
       const prompt = context.messages[0].content;
       const envelope = JSON.parse(prompt) as Record<string, unknown>;
       assert.deepEqual(Object.keys(envelope), [

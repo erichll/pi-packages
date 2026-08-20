@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- **Named `/home` paths are not a home wipe.** The reviewer prompt now matches
+  the deterministic hard-deny: recursive forced wipe of `/`, `~`, `$HOME`, or
+  the home directory itself remains forbidden. A narrow, user-requested delete
+  of named files or directories under `/home/...` is high-risk, not critical.
+  High risk without medium/high user authorization defers to the human instead
+  of denying as if it were a hard deny. The fixed prompt is compacted without
+  changing those rules.
+- **Clearer agent-facing denials.** Authorizer denies still fail closed, but the
+  teaching reason now states that automatic policy denied the request (not a
+  human click), forbids rephrasing or circumvention, and points to `/approve`
+  for one exact retry when the user already requested that action. The
+  permission-system wrapper may still say `User denied`; the reason suffix is
+  the correction this package can own.
+
 ## 0.6.0 - 2026-08-20
 
 - **Remove host user-constraint overlay.** Stop rewriting model allows from

@@ -422,6 +422,37 @@ test("deterministic hard deny catches narrow unconditional hazards", () => {
     }),
     undefined,
   );
+  assert.equal(
+    deterministicHardDeny({
+      surface: "bash_escalated",
+      command:
+        "find /home/fio_test/db-81 /home/fio_logs/db-81 -xdev -depth -delete",
+    }),
+    undefined,
+  );
+  assert.equal(
+    deterministicHardDeny({
+      surface: "bash_escalated",
+      command: "rm -rf -- /home/fio_test/db-81 /home/fio_logs/db-81",
+    }),
+    undefined,
+  );
+  assert.equal(
+    deterministicHardDeny({
+      surface: "bash_escalated",
+      command:
+        "rm -f -- /home/fio_logs/db-81/seqwrite1m.json /home/fio_logs/db-81/environment.txt",
+    }),
+    undefined,
+  );
+  assert.equal(
+    deterministicHardDeny({
+      surface: "bash_escalated",
+      command:
+        "printf '%s' 'find /home/fio_test/db-81 -xdev -depth -delete' | bash /tmp/send-text.sh -t epro-0:0.0 --enter",
+    }),
+    undefined,
+  );
 });
 
 test("prompt-injection markup cannot escape transcript evidence tags", () => {
