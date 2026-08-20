@@ -182,8 +182,8 @@ The reviewer receives one compact canonical request plus bounded, explicitly
 untrusted evidence. Selection is deterministic rather than semantic:
 
 - the latest raw user message is the authorization anchor;
-- older user messages require an exact request/tool/requester association, an
-  exact trusted retry, or a bounded narrowing/revocation rule;
+- older user messages require an exact request/tool/requester association or an
+  exact trusted retry;
 - tool calls require an exact tool-call ID, exact structured request fields, a
   surface profile, or a security-combination classification; and
 - selected results stay paired with their producer and are limited to exact
@@ -191,9 +191,11 @@ untrusted evidence. Selection is deterministic rather than semantic:
   and Sandbox Runtime process evidence.
 
 Unrelated reads, directory listings, builds, tests, assistant prose, and old
-task history are excluded. Vague continuation text cannot restore older
-authorization. Raw revocations override model allows. Compaction and branch
-summaries are risk context only; they never count as user authorization.
+task history are excluded. Compaction and branch summaries are labeled as
+non-authorization context and are never injected as user intent. The host does
+not rewrite a model allow from regex matches on user text, vague continuations,
+or a computed authorization ceiling; those judgments stay with the reviewer
+model. Hard denies still terminate before the model.
 
 The current operation appears once as stable, key-sorted JSON. Duplicate exact
 tool-call arguments collapse to an ID/name/reason linkage shell, while fields

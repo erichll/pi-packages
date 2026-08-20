@@ -475,7 +475,6 @@ test("real permission-system authorizer chain integration", async (t) => {
       const prompt = context.messages[0].content;
       const envelope = JSON.parse(prompt) as Record<string, unknown>;
       assert.deepEqual(Object.keys(envelope), [
-        "authorizationLimits",
         "evidence",
         "omissions",
         "profile",
@@ -1262,7 +1261,7 @@ test("real permission-system authorizer chain integration", async (t) => {
     }
   });
 
-  await t.test("raw current-task revocation cannot be turned into an allow", async () => {
+  await t.test("host no longer rewrites a model allow from user-constraint text", async () => {
     const instance = harness(allow, {
       contextEntries: [
         {
@@ -1276,50 +1275,62 @@ test("real permission-system authorizer chain integration", async (t) => {
         requestId: "revoked-network",
         value: "example.com:443",
       });
-      assert.equal(result.decision.approved, false);
+      assert.equal(result.decision.approved, true);
       assert.equal(result.terminalCalls, 0);
-      assert.equal(instance.reviews.at(-1)?.data.reviewerOutcome, "deny");
-      assert.equal(instance.reviews.at(-1)?.data.userAuthorization, "unknown");
+      assert.equal(instance.reviews.at(-1)?.data.reviewerOutcome, "allow");
       const completion = instance.telemetry.find(
         (event) => event.type === "review_complete",
       );
-      assert.equal(completion?.outcome, "deny");
+      assert.equal(completion?.outcome, "allow");
       assert.equal(
         (completion?.transcript as Record<string, unknown>).userConstraint,
-        "revoked",
+        "none",
       );
     } finally {
       instance.dispose();
     }
   });
 
-  await t.test("an uncertain narrowing constraint converts model allow to defer", async () => {
+  await t.test("older prohibition text does not enter evidence or rewrite allow", async () => {
     const instance = harness(allow, {
       contextEntries: [
         {
-          id: "scope",
-          message: { role: "user", content: "Only deploy to staging." },
+          id: "constraint",
+          message: { role: "user", content: "不要改这些文件" },
         },
         {
           id: "latest",
-          message: { role: "user", content: "Prepare the deployment." },
+          message: {
+            role: "user",
+            content:
+              "先看当前已摄入的 diff 和原文，再把当时漏掉的图片逐张解析补进 wiki。",
+          },
         },
       ],
     });
     try {
       const result = await instance.authorize("bash_escalated", {
-        requestId: "production-deploy",
-        command: "deploy production",
+        requestId: "inspect-git-status",
+        command:
+          "rtk git status && echo '======= DIFF STAT =======' && rtk git diff --stat",
       });
-      assert.equal(result.decision.approved, false);
-      assert.equal(result.terminalCalls, 1);
-      assert.equal(instance.reviews.at(-1)?.data.reviewerOutcome, "defer");
+      assert.equal(result.decision.approved, true);
+      const rendered = JSON.stringify(instance.modelContexts.at(-1));
+      assert.doesNotMatch(rendered, /不要改这些文件/);
+      assert.match(rendered, /漏掉的图片/);
+      const completion = instance.telemetry.find(
+        (event) => event.type === "review_complete",
+      );
+      assert.equal(
+        (completion?.transcript as Record<string, unknown>).userConstraint,
+        "none",
+      );
     } finally {
       instance.dispose();
     }
   });
 
-  await t.test("compaction-only authorization defers a high-risk allow", async () => {
+  await t.test("compaction summaries stay out of evidence while model allow stands", async () => {
     const instance = harness(highRiskAllow, {
       contextEntries: [
         {
@@ -1336,10 +1347,9 @@ test("real permission-system authorizer chain integration", async (t) => {
         requestId: "compacted-push",
         command: "git push origin main",
       });
-      assert.equal(result.decision.approved, false);
-      assert.equal(result.terminalCalls, 1);
-      assert.equal(instance.reviews.at(-1)?.data.reviewerOutcome, "defer");
-      assert.equal(instance.reviews.at(-1)?.data.userAuthorization, "unknown");
+      assert.equal(result.decision.approved, true);
+      assert.equal(result.terminalCalls, 0);
+      assert.equal(instance.reviews.at(-1)?.data.reviewerOutcome, "allow");
       const rendered = JSON.stringify(instance.modelContexts.at(-1));
       assert.match(rendered, /agentGeneratedSummaryExcludedFromAuthorization/);
       assert.match(rendered, /rawUserAuthorizationUnavailable/);
@@ -1349,7 +1359,7 @@ test("real permission-system authorizer chain integration", async (t) => {
     }
   });
 
-  await t.test("truncated latest user evidence cannot produce high authorization", async () => {
+  await t.test("truncated latest user evidence does not cap a model allow", async () => {
     const instance = harness(highRiskAllow, {
       config: config({ maxUserTranscriptTokens: 32 }),
       contextEntries: [
@@ -1368,14 +1378,14 @@ test("real permission-system authorizer chain integration", async (t) => {
         command: "git push origin HEAD:review",
       });
       assert.equal(result.decision.approved, true);
-      assert.equal(instance.reviews.at(-1)?.data.userAuthorization, "medium");
+      assert.equal(instance.reviews.at(-1)?.data.userAuthorization, "high");
       const completion = instance.telemetry.find(
         (event) => event.type === "review_complete",
       );
       assert.equal(
         (completion?.transcript as Record<string, unknown>)
           .userAuthorizationCeiling,
-        "medium",
+        "high",
       );
     } finally {
       instance.dispose();

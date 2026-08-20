@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.3 - 2026-08-20
+
+- Update the exact `@erichll/pi-auto-review` dependency to `0.6.0`, inheriting
+  the reviewer change to drop the host-side user-constraint overlay (allow/
+  defer/deny judgments stay with the reviewer model).
+- Update the dev-only `pi-subagents` baseline to `0.52.0`.
+- No pi-sandbox runtime or public API changes.
+
 ## 0.8.2 - 2026-08-20
 
 - Update the exact `@erichll/pi-auto-review` dependency to `0.5.0`, inheriting the

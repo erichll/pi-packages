@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0 - 2026-08-20
+
+- **Remove host user-constraint overlay.** Stop rewriting model allows from
+  regex matches on user text (`constraintEffect` / `vagueContinuation` /
+  authorization ceilings). Older messages enter evidence only via an exact
+  request reference or trusted `/approve` retry. Compaction summaries remain
+  excluded from user intent. Hard denies, grant hashing, and the reviewer
+  model are unchanged.
+
 ## 0.5.0 - 2026-08-20
 
 - **Safer evidence selection.** Review only request-linked tool calls, paired

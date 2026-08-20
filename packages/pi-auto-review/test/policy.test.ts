@@ -571,7 +571,7 @@ test("an unrelated long first message never consumes latest-intent budget", () =
   assert.equal(transcript.truncated, false);
 });
 
-test("latest user truncation preserves head and tail and caps authorization", () => {
+test("latest user truncation preserves head and tail", () => {
   const latest = `HEAD-AUTH ${"x".repeat(200)} TAIL-REVOKE`;
   const transcript = buildClassifierTranscript(
     [{ id: "latest-entry", message: { role: "user", content: latest } }],
@@ -581,7 +581,7 @@ test("latest user truncation preserves head and tail and caps authorization", ()
   assert.match(transcript.text, /HEAD-AUTH/);
   assert.match(transcript.text, /TAIL-REVOKE/);
   assert.match(transcript.text, /middle truncated/);
-  assert.equal(transcript.userAuthorizationCeiling, "medium");
+  assert.equal(transcript.userAuthorizationCeiling, "high");
   assert.deepEqual(transcript.selectedCandidates.map((candidate) => ({
     id: candidate.id,
     reason: candidate.reason,
@@ -599,7 +599,7 @@ test("latest user truncation preserves head and tail and caps authorization", ()
   }]);
 });
 
-test("older scoped revocation is selected conservatively for the current task", () => {
+test("older prohibition text is not selected without an exact request reference", () => {
   const transcript = buildClassifierTranscript(
     [
       {
@@ -614,59 +614,13 @@ test("older scoped revocation is selected conservatively for the current task", 
     { maxUserTranscriptTokens: 100, maxToolTranscriptTokens: 400 },
     { command: "git push origin HEAD:main" },
   );
-  assert.match(transcript.text, /Do not push to main/);
-  assert.equal(transcript.userConstraint, "revoked");
-  assert.equal(transcript.userAuthorizationCeiling, "unknown");
+  assert.doesNotMatch(transcript.text, /Do not push to main/);
+  assert.equal(transcript.userConstraint, "none");
+  assert.equal(transcript.userAuthorizationCeiling, "high");
   assert.deepEqual(
     transcript.selectedCandidates.map((candidate) => [candidate.id, candidate.reason]),
-    [
-      ["entry:constraint:user", "active-narrowing-constraint"],
-      ["entry:latest:user", "latest-user"],
-    ],
+    [["entry:latest:user", "latest-user"]],
   );
-});
-
-test("a satisfied narrow staging constraint does not block its exact scope", () => {
-  for (const [command, expected] of [
-    ["deploy staging", "none"],
-    ["deploy production", "narrowed"],
-  ] as const) {
-    const transcript = buildClassifierTranscript(
-      [
-        {
-          id: "constraint",
-          message: { role: "user", content: "Only deploy to staging." },
-        },
-        {
-          id: "latest",
-          message: { role: "user", content: "Prepare the deployment." },
-        },
-      ],
-      { maxUserTranscriptTokens: 100, maxToolTranscriptTokens: 100 },
-      { command },
-    );
-    assert.equal(transcript.userConstraint, expected);
-    assert.match(transcript.text, /Only deploy to staging/);
-  }
-});
-
-test("an older applicable constraint that cannot fit fails closed", () => {
-  const transcript = buildClassifierTranscript(
-    [
-      {
-        id: "constraint",
-        message: { role: "user", content: "Do not push to main." },
-      },
-      {
-        id: "latest",
-        message: { role: "user", content: "x".repeat(200) },
-      },
-    ],
-    { maxUserTranscriptTokens: 32, maxToolTranscriptTokens: 100 },
-    { command: "git push origin HEAD:main" },
-  );
-  assert.equal(transcript.failureCode, "required_user_constraint_overflow");
-  assert.equal(transcript.userAuthorizationCeiling, "medium");
 });
 
 test("older user evidence requires an exact request identifier", () => {
@@ -725,14 +679,15 @@ test("trusted retry association is explicit and does not depend on vague continu
   assert.equal(transcript.userAuthorizationCeiling, "high");
 });
 
-test("vague continuation without verifiable context cannot raise authorization", () => {
+test("vague continuation remains ordinary latest-user evidence", () => {
   for (const content of ["Continue.", "Go ahead", "可以", "照做。"] as const) {
     const transcript = buildClassifierTranscript(
       [{ id: "vague", message: { role: "user", content } }],
       { maxUserTranscriptTokens: 100, maxToolTranscriptTokens: 100 },
       { surface: "network", destination: "example.com:443" },
     );
-    assert.equal(transcript.userAuthorizationCeiling, "unknown");
+    assert.equal(transcript.userAuthorizationCeiling, "high");
+    assert.equal(transcript.userConstraint, "none");
     assert.equal(transcript.selectedCandidates[0]?.reason, "latest-user");
   }
 });
@@ -771,7 +726,9 @@ test("compaction summaries never become user authorization", () => {
     { command: "git push origin main" },
   );
   assert.equal(withRawUser.compactionState, "summary-present");
-  assert.equal(withRawUser.userConstraint, "revoked");
+  assert.equal(withRawUser.userConstraint, "none");
+  assert.equal(withRawUser.userAuthorizationCeiling, "high");
+  assert.match(withRawUser.text, /Do not push/);
   assert.doesNotMatch(withRawUser.text, /Allow everything/);
 });
 

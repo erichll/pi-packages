@@ -143,7 +143,6 @@ type ReviewErrorClass =
   | "circuit_breaker"
   | "critical_evidence_overflow"
   | "required_profile_overflow"
-  | "required_user_constraint_overflow"
   | "reviewer_input_budget_exceeded"
   | "unknown";
 
@@ -771,11 +770,6 @@ function sharedReviewContext(
   reviewerContext?: BoundaryReviewerContext,
 ): string {
   return canonicalReviewerJson({
-    authorizationLimits: {
-      compactionState: transcript.compactionState,
-      userAuthorizationCeiling: transcript.userAuthorizationCeiling,
-      userConstraint: transcript.userConstraint,
-    },
     evidence: {
       relevantResults: {
         items: transcript.reviewerEvidence.relevantResults,
@@ -1405,48 +1399,6 @@ function parseModelRef(modelRef: string): {
   return { provider, modelId: idParts.join("/") };
 }
 
-function applyUserAuthorizationLimits(
-  decision: ModelDecision,
-  transcript: TranscriptResult,
-): ModelDecision {
-  const levels = ["unknown", "low", "medium", "high"] as const;
-  const ceilingIndex = levels.indexOf(transcript.userAuthorizationCeiling);
-  const modelIndex = levels.indexOf(decision.user_authorization);
-  const userAuthorization = levels[Math.min(modelIndex, ceilingIndex)];
-  if (transcript.userConstraint === "revoked" && decision.outcome === "allow") {
-    return {
-      ...decision,
-      outcome: "deny",
-      user_authorization: "unknown",
-      rationale: "A current raw user constraint revokes this operation.",
-    };
-  }
-  if (transcript.userConstraint === "narrowed" && decision.outcome === "allow") {
-    return {
-      ...decision,
-      outcome: "defer",
-      user_authorization: userAuthorization,
-      rationale:
-        "The requested operation may exceed a current raw user scope constraint.",
-    };
-  }
-  if (
-    decision.outcome === "allow" &&
-    decision.risk_level === "high" &&
-    !["medium", "high"].includes(userAuthorization)
-  ) {
-    return {
-      ...decision,
-      outcome: "defer",
-      user_authorization: userAuthorization,
-      rationale:
-        transcript.compactionState === "authorization-unavailable"
-          ? "Original user authorization is unavailable after compaction."
-          : "Available raw user evidence cannot authorize this high-risk operation.",
-    };
-  }
-  return { ...decision, user_authorization: userAuthorization };
-}
 
 function reviewerSessionId(
   ctx: ExtensionContext,
@@ -1762,10 +1714,7 @@ async function complete(
           throw new Error("reviewer returned empty output");
         }
         try {
-          decision = applyUserAuthorizationLimits(
-            parseDecision(text),
-            transcript,
-          );
+          decision = parseDecision(text);
         } catch (error) {
           status = "format_error";
           errorClass = parseErrorClass(error);

@@ -62,7 +62,6 @@ export type TranscriptResult = {
   failureCode?:
     | "critical_evidence_overflow"
     | "required_profile_overflow"
-    | "required_user_constraint_overflow"
     | "reviewer_input_budget_exceeded";
   userAuthorizationCeiling: "unknown" | "low" | "medium" | "high";
   userConstraint: "none" | "narrowed" | "revoked";
@@ -115,7 +114,6 @@ export type EvidenceSensitivity =
 export type EvidenceSelectionReason =
   | "latest-user"
   | "exact-request-reference"
-  | "active-narrowing-constraint"
   | "trusted-retry-user-message"
   | "exact-tool-call"
   | "structured-request-match"
@@ -876,7 +874,6 @@ function relevantResultEvidence(
     EvidenceSelectionReason,
     | "latest-user"
     | "exact-request-reference"
-    | "active-narrowing-constraint"
     | "trusted-retry-user-message"
     | "exact-tool-call"
     | "structured-request-match"
@@ -1347,7 +1344,6 @@ type UserSelection = {
   authorizationCeiling: TranscriptResult["userAuthorizationCeiling"];
   constraint: TranscriptResult["userConstraint"];
   compactionState: TranscriptResult["compactionState"];
-  constraintOverflow: boolean;
 };
 
 function utf8Prefix(value: string, maxBytes: number): string {
@@ -1421,70 +1417,11 @@ function exactUserReference(
   });
 }
 
-function constraintEffect(text: string): "narrowed" | "revoked" | undefined {
-  if (
-    /(?:\b(?:do not|don't|never|must not|forbid|forbidden|revoke|cancel)\b|不要|不得|禁止|撤销|取消|不能|别)/i.test(
-      text,
-    )
-  ) return "revoked";
-  if (/(?:\b(?:only|except|staging only|not main)\b|只允许|仅允许|仅限|只能)/i.test(text)) {
-    return "narrowed";
-  }
-  return undefined;
-}
-
-function vagueContinuation(text: string): boolean {
-  return /^\s*(?:continue|proceed|go ahead|do it|yes|ok(?:ay)?|继续|照做|可以|好的?|行)[.!。！\s]*$/i.test(
-    text,
-  );
-}
-
-function constraintMatchesProfile(
-  text: string,
-  profile: EvidenceSurfaceProfile,
-): boolean {
-  const patterns: Record<EvidenceSurfaceProfile, RegExp> = {
-    network: /(?:\b(?:network|connect|domain|upload|download|http)\b|网络|联网|域名|上传|下载)/i,
-    delete: /(?:\b(?:delete|remove|unlink|rmdir|\brm\b)\b|删除|移除)/i,
-    "git-push": /(?:\b(?:git\s+push|push|branch|main)\b|推送|分支|主分支)/i,
-    forwarded: /(?:\b(?:agent|subagent|forward|worker)\b|代理|子代理|转发)/i,
-    generic: /(?:\b(?:execute|run|write|file|path|permission|deploy)\b|执行|运行|写入|文件|路径|权限|部署)/i,
-  };
-  return patterns[profile].test(text);
-}
-
-function constraintConflictsOrIsUncertain(
-  text: string,
-  effect: "narrowed" | "revoked",
-  request: RelevantBoundaryRequest,
-): boolean {
-  const representation = [
-    request.command,
-    request.path,
-    request.resolvedPath,
-    request.destination,
-    request.agentName,
-  ]
-    .filter((value): value is string => Boolean(value))
-    .join(" ")
-    .toLowerCase();
-  if (/\bmain\b|主分支/i.test(text)) {
-    return effect === "revoked"
-      ? /\bmain\b/.test(representation)
-      : /\bmain\b/.test(representation);
-  }
-  if (/\bstaging\b|预发布|测试环境/i.test(text)) {
-    const targetsStaging = /\bstaging\b/.test(representation);
-    return effect === "revoked" ? targetsStaging : !targetsStaging;
-  }
-  return true;
-}
 
 function selectUserEvidence(
   entries: readonly unknown[],
   evidence: Evidence[],
   request: RelevantBoundaryRequest,
-  profile: EvidenceSurfaceProfile,
   budgetTokens: number,
 ): UserSelection {
   const users = evidence.filter((item) => item.kind === "user");
@@ -1508,7 +1445,6 @@ function selectUserEvidence(
         : "unknown",
       constraint: "none",
       compactionState,
-      constraintOverflow: false,
     };
   }
 
@@ -1523,15 +1459,6 @@ function selectUserEvidence(
       ),
   );
   const latestExactReference = exactUserReference(latest.text, request);
-  const latestEffect = constraintEffect(latest.text);
-  const latestActiveConstraint = Boolean(
-    latestEffect && constraintMatchesProfile(latest.text, profile),
-  );
-  const latestConstraintConflict = Boolean(
-    latestEffect &&
-      latestActiveConstraint &&
-      constraintConflictsOrIsUncertain(latest.text, latestEffect, request),
-  );
   const selected: Evidence[] = [{
     ...latest,
     text: latestText,
@@ -1539,32 +1466,26 @@ function selectUserEvidence(
     secondaryReasons: [
       ...(latestTrustedRetry ? ["trusted-retry-user-message" as const] : []),
       ...(latestExactReference ? ["exact-request-reference" as const] : []),
-      ...(latestActiveConstraint ? ["active-narrowing-constraint" as const] : []),
     ],
   }];
   remaining -= Buffer.byteLength(latestText, "utf8");
-  let constraint: TranscriptResult["userConstraint"] =
-    latestConstraintConflict ? latestEffect! : "none";
 
   const older = eligibleUsers.slice(0, -1).reverse();
   for (const candidate of older) {
     if (remaining <= 0) break;
-    const trustedRetry =
+    const trustedRetry = Boolean(
       request.trustedRetryOriginalRequestId &&
-      candidate.text.includes("I approved one reviewer retry") &&
-      containsExactIdentifier(
-        candidate.text,
-        request.trustedRetryOriginalRequestId,
-      );
+        candidate.text.includes("I approved one reviewer retry") &&
+        containsExactIdentifier(
+          candidate.text,
+          request.trustedRetryOriginalRequestId,
+        ),
+    );
     const exactReference = exactUserReference(candidate.text, request);
-    const effect = constraintEffect(candidate.text);
-    const activeConstraint = effect && constraintMatchesProfile(candidate.text, profile);
-    if (!trustedRetry && !exactReference && !activeConstraint) continue;
+    if (!trustedRetry && !exactReference) continue;
     const reason: EvidenceSelectionReason = trustedRetry
       ? "trusted-retry-user-message"
-      : exactReference
-        ? "exact-request-reference"
-        : "active-narrowing-constraint";
+      : "exact-request-reference";
     const text = headTail(candidate.text, remaining);
     if (!text) continue;
     selected.push({
@@ -1572,60 +1493,24 @@ function selectUserEvidence(
       text,
       reason,
       secondaryReasons: [
-        ...(trustedRetry && exactReference ? ["exact-request-reference" as const] : []),
-        ...(activeConstraint && reason !== "active-narrowing-constraint"
-          ? ["active-narrowing-constraint" as const]
+        ...(trustedRetry && exactReference
+          ? ["exact-request-reference" as const]
           : []),
       ],
     });
     remaining -= Buffer.byteLength(text, "utf8");
-    if (
-      activeConstraint &&
-      constraintConflictsOrIsUncertain(candidate.text, effect, request)
-    ) {
-      constraint = effect === "revoked" ? "revoked" : constraint === "none" ? "narrowed" : constraint;
-    }
   }
   selected.sort((left, right) => left.entryIndex - right.entryIndex);
-  const selectedIds = new Set(selected.map((item) => item.id));
-  const constraintOverflow = older.some((candidate) => {
-    const effect = constraintEffect(candidate.text);
-    if (!effect || !constraintMatchesProfile(candidate.text, profile)) return false;
-    const chosen = selected.find((item) => item.id === candidate.id);
-    return (
-      !selectedIds.has(candidate.id) ||
-      !chosen ||
-      chosen.text.length < candidate.originalCharacters ||
-      candidate.preTruncated
-    );
-  });
-  const latestTruncated = latestText.length < latest.originalCharacters || latest.preTruncated;
-  const hasExactAuthorizationLink = selected.some(
-    (item) =>
-      item.reason === "exact-request-reference" ||
-      item.reason === "trusted-retry-user-message" ||
-      item.secondaryReasons.includes("exact-request-reference") ||
-      item.secondaryReasons.includes("trusted-retry-user-message"),
-  );
-  const authorizationCeiling: TranscriptResult["userAuthorizationCeiling"] =
-    request.trustedRetryOriginalRequestId && constraint !== "revoked"
-      ? "high"
-      : compactionState === "authorization-unavailable" || constraint === "revoked"
-      ? "unknown"
-      : latestTruncated
-        ? "medium"
-        : vagueContinuation(latest.text) && !hasExactAuthorizationLink
-          ? "unknown"
-        : "high";
+  const latestTruncated =
+    latestText.length < latest.originalCharacters || latest.preTruncated;
   return {
     selected,
     truncated:
       latestTruncated ||
       selected.some((item) => item.text.length < item.originalCharacters),
-    authorizationCeiling,
-    constraint,
+    authorizationCeiling: "high",
+    constraint: "none",
     compactionState,
-    constraintOverflow,
   };
 }
 
@@ -1690,7 +1575,6 @@ export function buildClassifierTranscript(
     entries,
     evidence,
     request,
-    profile,
     config.maxUserTranscriptTokens,
   );
   const requestAwareTools = selectRequestAwareTools(
@@ -1898,8 +1782,6 @@ export function buildClassifierTranscript(
       ? { failureCode: "critical_evidence_overflow" as const }
       : requiredProfileOverflow
         ? { failureCode: "required_profile_overflow" as const }
-        : users.constraintOverflow
-          ? { failureCode: "required_user_constraint_overflow" as const }
         : {}),
     userAuthorizationCeiling: users.authorizationCeiling,
     userConstraint: users.constraint,
