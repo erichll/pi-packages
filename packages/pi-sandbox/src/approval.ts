@@ -124,10 +124,17 @@ async function approveBoundaryRequest(
   }
 
   if (decision.kind === "deny") {
+    const recoveryCommand =
+      decision.recoveryCommand ?? "/auto-review-approve";
+    const recovery =
+      recoveryCommand === false
+        ? " This local safety denial cannot be overridden."
+        : ` Use ${recoveryCommand} for one exact retry.`;
     return {
       action: "deny",
-      source: "reviewer",
-      reason: decision.review.rationale,
+      source:
+        decision.denialSource === "hard-deny" ? "hard-deny" : "reviewer",
+      reason: `${decision.review.rationale}${recovery}`,
     };
   }
   if (decision.kind === "defer") {
