@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.1 - 2026-08-21
 
 - Restore TUI auto-confirm for capped `path` / `external_directory` allows on
   permission-system 26.x. `permissions:ui_prompt` no longer carries `message`;

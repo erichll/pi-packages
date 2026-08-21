@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.6 - 2026-08-21
+
+- Update the exact `@erichll/pi-auto-review` dependency to `0.8.1`, inheriting
+  permission-system 26.x compatibility: pi-auto-review now requires
+  `@gotgenes/pi-permission-system` `^26.0.0` and restores TUI auto-confirm for
+  capped `path` / `external_directory` allows (binding the live dialog via
+  `requestId` plus `request.value`). No pi-sandbox runtime or public API
+  changes.
+
 ## 0.8.5 - 2026-08-21
 
 - Update the exact `@erichll/pi-auto-review` dependency to `0.8.0`, inheriting
