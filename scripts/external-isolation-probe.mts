@@ -17,6 +17,16 @@ const require = createRequire(import.meta.url);
 // not the root package.json (which reports the monorepo version 0.1.0).
 const pkg = require(resolve("packages/pi-sandbox/package.json"));
 const piSubagentsVersion = require(resolve("node_modules/pi-subagents/package.json")).version;
+const PI_SUBAGENTS_BASELINE = { major: 0, minor: 53, patch: 0 };
+
+function versionAtLeast(value, required) {
+  if (typeof value !== "string") return false;
+  const [major, minor, patch] = value.split(".").map((part) => Number.parseInt(part, 10));
+  if (![major, minor, patch].every(Number.isInteger)) return false;
+  return major > required.major ||
+    (major === required.major && (minor > required.minor ||
+      (minor === required.minor && patch >= required.patch)));
+}
 
 const { createJiti } = require("jiti");
 const jiti = createJiti(resolve(".") + "/", {
@@ -47,7 +57,16 @@ function check(label, cond, detail = "") {
 }
 
 console.log(`pi-subagents version under test: ${piSubagentsVersion}`);
+console.log(
+  "required compatibility baseline:",
+  `${PI_SUBAGENTS_BASELINE.major}.${PI_SUBAGENTS_BASELINE.minor}.${PI_SUBAGENTS_BASELINE.patch}`,
+);
 console.log("pi-sandbox package version:", pkg.version);
+check(
+  "installed pi-subagents meets the 0.53.0 compatibility baseline",
+  versionAtLeast(piSubagentsVersion, PI_SUBAGENTS_BASELINE),
+  `got ${JSON.stringify(piSubagentsVersion)}`,
+);
 console.log("launcher:", launcherPath);
 console.log("");
 

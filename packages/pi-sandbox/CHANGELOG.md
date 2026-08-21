@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.4 - 2026-08-20
+
+- Update the dev-only `pi-subagents` compatibility baseline to `0.53.0`.
+- Extend the external-isolation compatibility gate to require and report the
+  `0.53.0`-or-newer baseline. No pi-sandbox runtime or public API changes.
+
 ## 0.8.3 - 2026-08-20
 
 - Update the exact `@erichll/pi-auto-review` dependency to `0.6.0`, inheriting

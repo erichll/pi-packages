@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 - 2026-08-20
 
 - **Named `/home` paths are not a home wipe.** The reviewer prompt now matches
   the deterministic hard-deny: recursive forced wipe of `/`, `~`, `$HOME`, or
