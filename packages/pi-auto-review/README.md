@@ -4,7 +4,8 @@ A fail-closed, model-backed boundary reviewer for the Pi coding agent.
 
 The extension participates in `@gotgenes/pi-permission-system` as the
 `pi-auto-review` authorizer and exposes a process-local broker for OS sandbox
-adapters. The npm package and reviewer model have separate names:
+adapters. It is an authorizer *inside* the permission system, so installing
+that dependency is a hard prerequisite (see [Install and enable](#install-and-enable)). The npm package and reviewer model have separate names:
 
 - package: `@erichll/pi-auto-review`
 - authorizer: `pi-auto-review`
@@ -12,11 +13,17 @@ adapters. The npm package and reviewer model have separate names:
 
 ## Install and enable
 
-Install the package outside the agent-writable workspace:
+> **Prerequisite:** pi-auto-review is an authorizer inside
+> `@gotgenes/pi-permission-system`. Pi does not auto-install peer packages, so
+> install the permission system separately (once per machine) before this
+> extension:
 
 ```bash
+pi install npm:@gotgenes/pi-permission-system
 pi install npm:@erichll/pi-auto-review
 ```
+
+Install the package outside the agent-writable workspace:
 
 Add it to the permission-system authorizer chain:
 

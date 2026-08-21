@@ -49,12 +49,12 @@
   "peerDependencies": {
     "@earendil-works/pi-ai": "^0.84.1",
     "@earendil-works/pi-coding-agent": "^0.84.1",
-    "@gotgenes/pi-permission-system": "^25.1.0"
+    "@gotgenes/pi-permission-system": "^26.0.0"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "^0.84.1",
     "@earendil-works/pi-coding-agent": "^0.84.1",
-    "@gotgenes/pi-permission-system": "^25.1.0",
+    "@gotgenes/pi-permission-system": "^26.0.0",
     "@types/node": "^26.2.0",
     "typescript": "^6.0.3"
   }
