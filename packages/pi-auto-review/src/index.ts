@@ -37,12 +37,17 @@ import {
 } from "./broker/index.ts";
 import { PermissionUiAutoConfirmer } from "./ui-auto-confirm.ts";
 import {
+  buildUserReviewEntryData,
   buildUserReviewNotice,
   buildUserReviewStatus,
   notifyUserReview,
+  presentUserReview,
+  renderUserReviewEntry,
   reviewTargetFromRequest,
   setUserReviewStatus,
+  USER_REVIEW_ENTRY_TYPE,
   type UserReviewOutcome,
+  type UserReviewUsage,
 } from "./user-feedback.ts";
 
 export {
@@ -1330,6 +1335,33 @@ function aggregateUsage(attempts: readonly ReviewAttemptObservation[]): {
   return { availability, usage };
 }
 
+function userReviewMetaFromResult(
+  result: ReviewResult | undefined,
+  fallbackModel: string,
+): {
+  model?: string;
+  usage?: UserReviewUsage;
+  durationMs?: number;
+  attempts?: number;
+} {
+  if (!result) return {};
+  const attempts = result.summary.attempts;
+  const aggregate = aggregateUsage(attempts);
+  return {
+    ...(attempts.length > 0
+      ? {
+          model: attempts.at(-1)?.model ?? fallbackModel,
+          usage: {
+            availability: aggregate.availability,
+            ...aggregate.usage,
+          },
+        }
+      : {}),
+    durationMs: result.durationMs,
+    attempts: result.attempts,
+  };
+}
+
 function completeTelemetry(
   request: BoundaryRequest,
   config: Readonly<Config>,
@@ -1885,6 +1917,11 @@ export function createPiAutoReviewExtension(
     process.env.PI_AUTO_REVIEW_ALLOW_UNTRUSTED_DEV === "1";
 
   return (pi: ExtensionAPI): void => {
+  try {
+    pi.registerEntryRenderer(USER_REVIEW_ENTRY_TYPE, renderUserReviewEntry);
+  } catch {
+    // Renderer registration is observational.
+  }
   let context: ExtensionContext | undefined;
   let config: Readonly<Config> = trustedConfig;
   let disposeAuthorizer: (() => void) | undefined;
@@ -1938,6 +1975,23 @@ export function createPiAutoReviewExtension(
           const execution = error instanceof ReviewExecutionError
             ? error
             : new ReviewExecutionError("unknown", noModelSummary());
+          if (request.source === "permission-system") {
+            reviewResults.set(request.id, {
+              decision: {
+                outcome: config.failureMode,
+                risk_level: "high",
+                user_authorization: "unknown",
+                rationale: "Automatic review is unavailable.",
+              },
+              attempts: execution.summary.attempts.length,
+              retryErrors: execution.summary.attempts
+                .map((attempt) => attempt.errorClass)
+                .filter((errorClass) => errorClass !== "none"),
+              durationMs: execution.summary.durationMs,
+              transcript: execution.summary.transcript,
+              summary: execution.summary,
+            });
+          }
           emitTelemetry(
             completeTelemetry(
               request,
@@ -2263,13 +2317,16 @@ export function createPiAutoReviewExtension(
               surface,
               reason,
             });
-            notifyUserReview(
+            const unavailable = {
+              outcome: "unavailable" as const,
+              surface,
+              rationale: reason,
+            };
+            presentUserReview(
+              pi,
               context,
-              buildUserReviewNotice({
-                outcome: "unavailable",
-                surface,
-                rationale: reason,
-              }),
+              buildUserReviewNotice(unavailable),
+              buildUserReviewEntryData(unavailable),
             );
             return { kind: "deny", reason };
           }
@@ -2310,24 +2367,30 @@ export function createPiAutoReviewExtension(
             } else {
               userOutcome = "deny";
             }
-            notifyUserReview(
+            const reviewMeta = userReviewMetaFromResult(result, config.model);
+            const noticeInput = {
+              outcome: userOutcome,
+              surface,
+              target,
+              rationale: decision.review.rationale,
+              recoveryCommand:
+                decision.kind === "deny"
+                  ? decision.recoveryCommand
+                  : undefined,
+              ...reviewMeta,
+            };
+            presentUserReview(
+              pi,
               context,
-              buildUserReviewNotice({
-                outcome: userOutcome,
-                surface,
-                target,
-                rationale: decision.review.rationale,
-                recoveryCommand:
-                  decision.kind === "deny"
-                    ? decision.recoveryCommand
-                    : undefined,
-              }),
+              buildUserReviewNotice(noticeInput),
+              buildUserReviewEntryData(noticeInput),
             );
 
             log.review("pi_auto_review_decision", {
               requestId: request.id,
               surface,
               model: config.model,
+              reviewerModel: reviewMeta.model,
               outcome: allowCapped ? "defer" : decision.kind,
               reviewerOutcome: decision.review.outcome,
               riskLevel: decision.review.riskLevel,
@@ -2343,6 +2406,8 @@ export function createPiAutoReviewExtension(
               attempts: result?.attempts ?? 0,
               retryErrors: result?.retryErrors ?? [],
               durationMs: result?.durationMs,
+              usageAvailability: reviewMeta.usage?.availability,
+              usage: reviewMeta.usage,
               transcriptUserCharacters: result?.transcript.userCharacters,
               transcriptToolCharacters: result?.transcript.toolCharacters,
               transcriptRelevantResultCharacters:

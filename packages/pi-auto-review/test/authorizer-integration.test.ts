@@ -711,6 +711,19 @@ test("real permission-system authorizer chain integration", async (t) => {
         completions.map((event) => event.requestId),
         samples.map(([, overrides]) => overrides.requestId),
       );
+      const decisionLogs = instance.reviews.filter(
+        (entry) => entry.event === "pi_auto_review_decision",
+      );
+      assert.equal(decisionLogs.length, samples.length);
+      for (const entry of decisionLogs) {
+        assert.equal(entry.data.reviewerModel, "test-provider/codex-auto-review");
+        assert.equal(entry.data.usageAvailability, "unknown_provenance");
+        assert.deepEqual(entry.data.usage, {
+          availability: "unknown_provenance",
+          ...usage,
+          observedInputTokens: 127,
+        });
+      }
     } finally {
       instance.dispose();
     }
@@ -746,7 +759,10 @@ test("real permission-system authorizer chain integration", async (t) => {
       assert.equal(completion?.usageAvailability, "unavailable");
       assert.doesNotMatch(JSON.stringify(instance.telemetry), /audit-secret|query-secret/);
       assert.doesNotMatch(JSON.stringify(instance.reviews), /audit-secret|query-secret/);
-      assert.deepEqual(instance.reviews.at(-1)?.data.retryErrors, []);
+      assert.deepEqual(instance.reviews.at(-1)?.data.retryErrors, [
+        "transient_connection",
+        "transient_connection",
+      ]);
     } finally {
       instance.dispose();
     }

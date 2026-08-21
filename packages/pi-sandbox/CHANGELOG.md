@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.7 - 2026-08-21
+
+- Update the exact `@erichll/pi-auto-review` dependency to `0.8.2`, inheriting
+  structured interactive review results: the TUI now renders allow/confirm/
+  defer/deny/stopper outcomes with the reviewer model name, input/output token
+  counts, and duration as markdown-style quote rows. No pi-sandbox runtime or
+  public API changes.
+
 ## 0.8.6 - 2026-08-21
 
 - Update the exact `@erichll/pi-auto-review` dependency to `0.8.1`, inheriting

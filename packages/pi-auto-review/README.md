@@ -133,8 +133,12 @@ only a fixed, budget-checked schema correction.
 ## Operator feedback and exact retry
 
 Interactive sessions show a best-effort footer while review is running and a
-short result toast for allow, local confirmation, defer, deny, or circuit
-breaker outcomes. UI delivery never changes the authorization result.
+structured result row for allow, local confirmation, defer, deny, or circuit
+breaker outcomes. In the TUI this is a quote-style entry (`│`, muted quote
+color) that separates the outcome and surface from the target and rationale,
+then shows the reviewer model name (without provider prefix), input/output
+tokens, and duration when a model call ran. UI delivery never changes the
+authorization result.
 
 In an interactive TUI, `/auto-review-approve` lists up to ten recent
 non-critical model denials from the current session. Selecting one asks the

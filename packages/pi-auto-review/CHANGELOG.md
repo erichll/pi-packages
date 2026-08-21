@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.2 - 2026-08-21
+
+- Structure interactive review results as headline, target, rationale, and a
+  meta line with the reviewer model name, input/output tokens, duration, and extra
+  calls. The TUI renders them as markdown-style quote rows (`│` + `mdQuote`),
+  with allow/deny verbs and token counts tinted from the theme. The model id is
+  shown without a provider prefix; audit still records the full `provider/id`.
+  Local hard denies omit model and token fields because no model ran.
+
 ## 0.8.1 - 2026-08-21
 
 - Restore TUI auto-confirm for capped `path` / `external_directory` allows on
