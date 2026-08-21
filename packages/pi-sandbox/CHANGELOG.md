@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.5 - 2026-08-21
+
+- Update the exact `@erichll/pi-auto-review` dependency to `0.8.0`, inheriting
+  the break-glass recovery feature: deny results now carry a `denialSource` and
+  a `recoveryCommand` naming `/auto-review-approve` or
+  `/auto-review-break-glass`, or stating that a local hard deny cannot be
+  overridden.
+
 ## 0.8.4 - 2026-08-20
 
 - Update the dev-only `pi-subagents` compatibility baseline to `0.53.0`.

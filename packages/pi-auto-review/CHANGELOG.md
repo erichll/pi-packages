@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 - 2026-08-21
 
 - Add `/auto-review-approve` for exact non-critical denial retries and remove
   the unprefixed `/approve` command without a compatibility alias.
