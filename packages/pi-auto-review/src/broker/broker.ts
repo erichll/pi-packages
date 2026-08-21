@@ -19,6 +19,7 @@ export type BoundaryApprovalBrokerOptions = {
   grants?: OneShotGrantStore;
   breaker?: DenialCircuitBreaker;
   denials?: RecentDenialStore;
+  breakGlassEnabled?: boolean;
   audit?: (event: BoundaryAuditEvent) => void;
 };
 
@@ -50,6 +51,7 @@ export class BoundaryApprovalBroker {
   readonly #grants: OneShotGrantStore;
   readonly #breaker: DenialCircuitBreaker;
   readonly #denials: RecentDenialStore;
+  readonly #breakGlassEnabled: boolean;
   readonly #audit?: (event: BoundaryAuditEvent) => void;
 
   constructor(options: BoundaryApprovalBrokerOptions) {
@@ -59,6 +61,7 @@ export class BoundaryApprovalBroker {
     this.#grants = options.grants ?? new OneShotGrantStore();
     this.#breaker = options.breaker ?? new DenialCircuitBreaker();
     this.#denials = options.denials ?? new RecentDenialStore();
+    this.#breakGlassEnabled = options.breakGlassEnabled ?? true;
     this.#audit = options.audit;
   }
 
@@ -87,6 +90,40 @@ export class BoundaryApprovalBroker {
         kind: "deny",
         review,
         circuitBreakerTripped: breaker.tripped,
+        denialSource: "hard-deny",
+        recoveryCommand: false,
+      };
+    }
+
+    const breakGlass = this.#breakGlassEnabled
+      ? this.#denials.consumeCritical(request, context)
+      : undefined;
+    if (breakGlass) {
+      const review: BoundaryReview = {
+        outcome: "allow",
+        riskLevel: "critical",
+        userAuthorization: "high",
+        rationale: "A human completed break-glass confirmation for this exact request.",
+      };
+      const grant = context.issueGrant
+        ? this.#grants.issue(request, context.sessionId)
+        : undefined;
+      this.audit("break_glass_consumed", request, {
+        originalRequestId: breakGlass.originalRequestId,
+        confirmedAt: breakGlass.confirmedAt,
+        scopeKey: context.scopeKey,
+      });
+      if (grant) {
+        this.audit("grant_issued", request, {
+          requestHash: grant.requestHash,
+          expiresAt: grant.expiresAt,
+        });
+      }
+      return {
+        kind: "allow",
+        review,
+        grant,
+        authorization: { kind: "break-glass", ...breakGlass },
       };
     }
 
@@ -104,7 +141,13 @@ export class BoundaryApprovalBroker {
           "Automatic review stopped after repeated denials in this turn.",
       };
       this.audit("circuit_breaker", request, { scopeKey: context.scopeKey });
-      return { kind: "deny", review, circuitBreakerTripped: true };
+      return {
+        kind: "deny",
+        review,
+        circuitBreakerTripped: true,
+        denialSource: "circuit-breaker",
+        recoveryCommand: "/auto-review-approve",
+      };
     }
 
     let review: BoundaryReview;
@@ -127,6 +170,8 @@ export class BoundaryApprovalBroker {
         kind: "deny",
         review: { ...FAILURE_REVIEW, rationale: reason },
         circuitBreakerTripped: breaker.tripped,
+        denialSource: "reviewer",
+        recoveryCommand: "/auto-review-approve",
       };
     }
 
@@ -141,6 +186,13 @@ export class BoundaryApprovalBroker {
         kind: "deny",
         review,
         circuitBreakerTripped: breaker.tripped,
+        denialSource: "reviewer",
+        recoveryCommand:
+          review.riskLevel === "critical"
+            ? this.#breakGlassEnabled
+              ? "/auto-review-break-glass"
+              : false
+            : "/auto-review-approve",
       };
     }
 
@@ -175,6 +227,66 @@ export class BoundaryApprovalBroker {
     sessionId: string,
   ): RecentBoundaryDenial[] {
     return this.#denials.list(sessionId);
+  }
+
+  recentCriticalDenials(
+    sessionId: string,
+    scopeKey?: string,
+  ): RecentBoundaryDenial[] {
+    if (!this.#breakGlassEnabled) return [];
+    return this.#denials.listCritical(sessionId, scopeKey);
+  }
+
+  startBreakGlassChallenge(
+    requestId: string,
+    sessionId: string,
+    scopeKey: string,
+  ): RecentBoundaryDenial | undefined {
+    if (!this.#breakGlassEnabled) return;
+    const denial = this.#denials
+      .listCritical(sessionId, scopeKey)
+      .find((entry) => entry.requestId === requestId);
+    if (denial) {
+      this.audit("break_glass_challenge_started", denial.request, {
+        scopeKey,
+        deniedAt: denial.deniedAt,
+        requestHash: denial.requestHash,
+      });
+    }
+    return denial;
+  }
+
+  rejectBreakGlassChallenge(
+    denial: RecentBoundaryDenial,
+    reason: string,
+  ): void {
+    this.audit("break_glass_rejected", denial.request, {
+      scopeKey: denial.scopeKey,
+      reason,
+      requestHash: denial.requestHash,
+    });
+  }
+
+  authorizeCriticalDenial(
+    requestId: string,
+    sessionId: string,
+    scopeKey: string,
+  ): RecentBoundaryDenial | undefined {
+    if (!this.#breakGlassEnabled) return;
+    const result = this.#denials.authorizeCritical(
+      requestId,
+      sessionId,
+      scopeKey,
+    );
+    if (result) {
+      this.audit("break_glass_authorized", result.denial.request, {
+        scopeKey,
+        deniedAt: result.denial.deniedAt,
+        requestHash: result.denial.requestHash,
+        confirmedAt: result.authorization.confirmedAt,
+      });
+    }
+    return result?.denial;
   }
 
   authorizeRecentDenial(

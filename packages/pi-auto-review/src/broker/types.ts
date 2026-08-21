@@ -62,11 +62,21 @@ export type BoundaryDecision =
       kind: "allow";
       review: BoundaryReview;
       grant?: BoundaryGrant;
+      authorization?: {
+        kind: "break-glass";
+        originalRequestId: string;
+        confirmedAt: number;
+      };
     }
   | {
       kind: "deny";
       review: BoundaryReview;
       circuitBreakerTripped: boolean;
+      denialSource?: "hard-deny" | "reviewer" | "circuit-breaker";
+      recoveryCommand?:
+        | "/auto-review-approve"
+        | "/auto-review-break-glass"
+        | false;
     }
   | {
       kind: "defer";
@@ -82,6 +92,11 @@ export type BoundaryReviewContext = {
 export type BoundaryUserOverride = {
   originalRequestId: string;
   approvedAt: number;
+};
+
+export type BoundaryBreakGlassAuthorization = {
+  originalRequestId: string;
+  confirmedAt: number;
 };
 
 export type BoundaryReviewerContext = {
@@ -108,7 +123,11 @@ export type BoundaryAuditEvent = {
     | "grant_consumed"
     | "grant_rejected"
     | "override_authorized"
-    | "override_consumed";
+    | "override_consumed"
+    | "break_glass_challenge_started"
+    | "break_glass_authorized"
+    | "break_glass_consumed"
+    | "break_glass_rejected";
   requestId: string;
   surface: string;
   details: Record<string, unknown>;

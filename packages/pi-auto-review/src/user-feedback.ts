@@ -65,6 +65,7 @@ export function buildUserReviewNotice(input: {
   surface: string;
   target?: string;
   rationale?: string;
+  recoveryCommand?: "/auto-review-approve" | "/auto-review-break-glass" | false;
 }): UserReviewNotice {
   const target = compactReviewText(input.target, 70);
   const rationale = compactReviewText(input.rationale, 120);
@@ -95,13 +96,19 @@ export function buildUserReviewNotice(input: {
     case "deny":
       return {
         type: "warning",
-        message: `Auto-review denied ${subject}${why}`,
+        message: `Auto-review denied ${subject}${why}${
+          input.recoveryCommand === false
+            ? " — local safety denials cannot be overridden"
+            : input.recoveryCommand
+              ? ` — use ${input.recoveryCommand} for one exact retry`
+              : ""
+        }`,
       };
     case "circuit_breaker":
       return {
         type: "warning",
         message: `Auto-review stopped after repeated denials this turn${
-          why || " — use /approve for one exact retry"
+          why || " — use /auto-review-approve for one exact retry"
         }`,
       };
     case "unavailable":

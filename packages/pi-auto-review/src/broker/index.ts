@@ -12,6 +12,7 @@ export type {
 } from "./service.ts";
 export type {
   BoundaryAuditEvent,
+  BoundaryBreakGlassAuthorization,
   BoundaryDecision,
   BoundaryGrant,
   BoundaryHardDeny,

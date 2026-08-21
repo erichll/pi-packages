@@ -52,8 +52,9 @@ event-order mismatches leave the original human dialog in place.
 Automatic review stops for the current turn after three consecutive denials or
 ten denials in the last fifty reviews. An explicit denial tells the agent that
 automatic policy denied the request (not a human click), not to rephrase or
-circumvent the same action, and to point the user to `/approve` for one exact
-retry when they already requested it.
+circumvent the same action, and points to `/auto-review-approve` for an exact
+non-critical reviewer retry or `/auto-review-break-glass` for a critical model
+denial. Local deterministic hard denies never offer an override command.
 
 Deterministic hard denies cover recursive forced wipes of `/`, `~`, and
 `$HOME`. A named path under `/home/...` is reviewed by the model as high-risk,
@@ -90,6 +91,7 @@ Package defaults:
   "maxToolTranscriptTokens": 1200,
   "maxRelevantResultTokens": 800,
   "maxReviewerInputTokens": 8192,
+  "breakGlassEnabled": true,
   "failureMode": "deny",
   "grantTtlMs": 60000,
   "autoConfirmBoundedAllows": ["external_directory", "path"]
@@ -101,9 +103,10 @@ terminal. Set `autoConfirmBoundedAllows` to `[]` to keep every bounded allow
 manual.
 
 Project configuration may only lower timeouts, token/evidence limits, retries,
-and grant TTL, set `failureMode` to `"deny"`, or remove auto-confirmed
-surfaces. It cannot select a model, raise a trusted limit, or weaken fail-closed
-behavior. Invalid configuration disables the reviewer for that session.
+and grant TTL, set `failureMode` to `"deny"`, set `breakGlassEnabled` to
+`false`, or remove auto-confirmed surfaces. It cannot re-enable break glass,
+select a model, raise a trusted limit, or weaken fail-closed behavior. Invalid
+configuration disables the reviewer for that session.
 
 ### Deadlines and retries
 
@@ -126,8 +129,10 @@ Interactive sessions show a best-effort footer while review is running and a
 short result toast for allow, local confirmation, defer, deny, or circuit
 breaker outcomes. UI delivery never changes the authorization result.
 
-In an interactive TUI, `/approve` lists up to ten recent model denials from the
-current session. Selecting one asks the agent to retry exactly that request.
+In an interactive TUI, `/auto-review-approve` lists up to ten recent
+non-critical model denials from the current session. Selecting one asks the
+agent to retry exactly that request. The old `/approve` command is not
+registered.
 The host-generated override:
 
 - binds the complete request hash;
@@ -137,6 +142,18 @@ The host-generated override:
 - cannot be reissued for the same request semantics in that session.
 
 It is authorization evidence, not a direct allow.
+
+`/auto-review-break-glass` is a separate, high-friction path for model denials
+whose risk level is `critical`. It lists only critical model denials from the
+same session made in the last five minutes. After showing the rationale,
+surface, cwd, command or target summary, and request-hash fingerprint, it
+requires an explicit confirmation and a random `BREAK-GLASS <CODE>` phrase
+within 60 seconds. Successful confirmation creates a 60-second, one-use
+authorization bound to the complete request hash, session, scope, and original
+request ID. The exact retry reruns local hard-deny checks, then allows directly
+without calling the reviewer and, for sandbox adapters, still issues the normal
+one-shot grant. Break glass does not reset circuit-breaker history and can be
+disabled in trusted or project configuration with `breakGlassEnabled: false`.
 
 ## Boundary broker API
 
@@ -170,6 +187,13 @@ const decision = await broker?.review(request, {
   scopeKey: "pi-session-id:turn-id",
   issueGrant: true,
 });
+
+// A break-glass allow includes structured provenance:
+// decision.authorization = {
+//   kind: "break-glass",
+//   originalRequestId: "...",
+//   confirmedAt: 0,
+// };
 
 if (
   decision?.kind === "allow" &&

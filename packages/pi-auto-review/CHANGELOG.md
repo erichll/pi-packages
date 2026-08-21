@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Add `/auto-review-approve` for exact non-critical denial retries and remove
+  the unprefixed `/approve` command without a compatibility alias.
+- Add interactive `/auto-review-break-glass` for a recent critical model deny.
+  The high-friction confirmation is bound to the full request hash, session,
+  scope, and original request ID, expires after 60 seconds, permits one direct
+  retry, and never bypasses deterministic or protected-write hard denies.
+- Add tighten-only `breakGlassEnabled` (default `true`), structured break-glass
+  allow provenance, and challenge/authorization/consumption/rejection audit
+  events. Challenge phrases are never included in audit events.
+
 ## 0.7.0 - 2026-08-20
 
 - **Named `/home` paths are not a home wipe.** The reviewer prompt now matches
@@ -11,7 +23,8 @@
   changing those rules.
 - **Clearer agent-facing denials.** Authorizer denies still fail closed, but the
   teaching reason now states that automatic policy denied the request (not a
-  human click), forbids rephrasing or circumvention, and points to `/approve`
+  human click), forbids rephrasing or circumvention, and points to the exact
+  retry command
   for one exact retry when the user already requested that action. The
   permission-system wrapper may still say `User denied`; the reason suffix is
   the correction this package can own.
@@ -21,7 +34,7 @@
 - **Remove host user-constraint overlay.** Stop rewriting model allows from
   regex matches on user text (`constraintEffect` / `vagueContinuation` /
   authorization ceilings). Older messages enter evidence only via an exact
-  request reference or trusted `/approve` retry. Compaction summaries remain
+  request reference or trusted exact retry. Compaction summaries remain
   excluded from user intent. Hard denies, grant hashing, and the reviewer
   model are unchanged.
 

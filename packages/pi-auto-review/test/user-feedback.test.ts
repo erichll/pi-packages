@@ -102,7 +102,7 @@ test("buildUserReviewNotice covers decisive user outcomes", () => {
   });
   assert.equal(breaker.type, "warning");
   assert.match(breaker.message, /repeated denials/);
-  assert.match(breaker.message, /\/approve/);
+  assert.match(breaker.message, /\/auto-review-approve/);
 
   const unavailable = buildUserReviewNotice({
     outcome: "unavailable",

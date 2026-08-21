@@ -28,12 +28,14 @@ test("project config can only tighten trusted settings and is frozen", () => {
     timeoutMs: 10_000,
     retries: 0,
     maxReviewerInputTokens: 4_096,
+    breakGlassEnabled: false,
     failureMode: "deny",
     autoConfirmBoundedAllows: [],
   });
   assert.equal(effective.timeoutMs, 10_000);
   assert.equal(effective.retries, 0);
   assert.equal(effective.maxReviewerInputTokens, 4_096);
+  assert.equal(effective.breakGlassEnabled, false);
   assert.equal(effective.model, trusted.model);
   assert.deepEqual(effective.autoConfirmBoundedAllows, []);
   assert.equal(Object.isFrozen(effective), true);
@@ -55,6 +57,12 @@ test("project config can only tighten trusted settings and is frozen", () => {
   );
   assert.throws(() =>
     applyProjectConfig(
+      { ...trusted, breakGlassEnabled: false },
+      { breakGlassEnabled: true },
+    ),
+  );
+  assert.throws(() =>
+    applyProjectConfig(
       { ...trusted, autoConfirmBoundedAllows: [] },
       { autoConfirmBoundedAllows: ["external_directory"] },
     ),
@@ -66,6 +74,7 @@ test("user config can fully overlay package trusted settings", () => {
   assert.equal(packageConfig.model, "codex-auto-review");
   assert.equal(packageConfig.maxTokens, 256);
   assert.equal(packageConfig.maxReviewerInputTokens, 8_192);
+  assert.equal(packageConfig.breakGlassEnabled, true);
   const effective = applyUserConfig(packageConfig, {
     model: "user-provider/other-reviewer",
     autoConfirmBoundedAllows: ["external_directory", "path"],

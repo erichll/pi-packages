@@ -8,6 +8,7 @@
   "maxToolTranscriptTokens": 1200,
   "maxRelevantResultTokens": 800,
   "maxReviewerInputTokens": 8192,
+  "breakGlassEnabled": true,
   "failureMode": "deny",
   "grantTtlMs": 60000,
   "autoConfirmBoundedAllows": ["external_directory", "path"]

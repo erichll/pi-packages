@@ -6,7 +6,7 @@ import { AuthorizerRegistry } from "../../../node_modules/@gotgenes/pi-permissio
 import { composeAuthorizerChain } from "../../../node_modules/@gotgenes/pi-permission-system/src/authority/authorizer-chain.ts";
 import { encloseInDelegationEnvelope } from "../../../node_modules/@gotgenes/pi-permission-system/src/authority/delegation-envelope.ts";
 import {
-  REVIEWER_DENY_AGENT_INSTRUCTION,
+  REVIEWER_NONCRITICAL_DENY_AGENT_INSTRUCTION,
   createPiAutoReviewExtension,
   loadConfig,
   type Config,
@@ -367,6 +367,8 @@ function connectionError(message: string): Error {
 }
 const deny =
   '{"outcome":"deny","risk_level":"high","user_authorization":"unknown","rationale":"Authorization is insufficient."}';
+const criticalDeny =
+  '{"outcome":"deny","risk_level":"critical","user_authorization":"unknown","rationale":"The requested action is critically dangerous."}';
 const defer =
   '{"outcome":"defer","risk_level":"medium","user_authorization":"unknown","rationale":"Human confirmation is required."}';
 const highRiskAllow =
@@ -407,7 +409,7 @@ test("real permission-system authorizer chain integration", async (t) => {
     }
   });
 
-  await t.test("model deny is not a human click and points to /approve", async () => {
+  await t.test("model deny is not a human click and points to the prefixed command", async () => {
     const instance = harness(deny);
     try {
       const result = await instance.authorize("bash_escalated");
@@ -416,10 +418,13 @@ test("real permission-system authorizer chain integration", async (t) => {
       assert.equal(result.decision.state, "denied_with_reason");
       assert.equal(
         result.decision.denialReason,
-        `Authorization is insufficient. ${REVIEWER_DENY_AGENT_INSTRUCTION}`,
+        `Authorization is insufficient. ${REVIEWER_NONCRITICAL_DENY_AGENT_INSTRUCTION}`,
       );
       assert.match(result.decision.denialReason ?? "", /not a human click/);
-      assert.match(result.decision.denialReason ?? "", /\/approve/);
+      assert.match(
+        result.decision.denialReason ?? "",
+        /\/auto-review-approve/,
+      );
       assert.doesNotMatch(
         result.decision.denialReason ?? "",
         /Do not retry this outcome through a workaround/,
@@ -1807,20 +1812,23 @@ test("real permission-system authorizer chain integration", async (t) => {
         },
       );
       assert.equal(result.action, "deny");
-      assert.equal(result.source, "reviewer");
+      assert.equal(result.source, "hard-deny");
       assert.match(result.reason ?? "", /security|configuration|forbidden/i);
+      assert.match(result.reason ?? "", /cannot be overridden/i);
+      assert.doesNotMatch(result.reason ?? "", /auto-review-(?:approve|break-glass)/);
     } finally {
       instance.dispose();
     }
   });
 
-  await t.test("/approve selects one denial and injects trusted retry evidence", async () => {
+  await t.test("/auto-review-approve selects one non-critical denial and injects trusted retry evidence", async () => {
     const instance = harness(deny);
     const notices: string[] = [];
     try {
       const first = await instance.authorize("bash_escalated");
       assert.equal(first.decision.approved, false);
-      const command = instance.commands.get("approve");
+      assert.equal(instance.commands.has("approve"), false);
+      const command = instance.commands.get("auto-review-approve");
       assert.ok(command);
       await command.handler("", {
         ...instance.context,
@@ -1900,7 +1908,7 @@ test("real permission-system authorizer chain integration", async (t) => {
     try {
       const first = await instance.authorize("bash_escalated");
       assert.equal(first.decision.approved, false);
-      const command = instance.commands.get("approve");
+      const command = instance.commands.get("auto-review-approve");
       assert.ok(command);
       await command.handler("", {
         ...instance.context,
@@ -1925,6 +1933,169 @@ test("real permission-system authorizer chain integration", async (t) => {
           .userAuthorizationCeiling,
         "high",
       );
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  await t.test("critical deny requires break glass and exact retry bypasses the reviewer once", async () => {
+    const instance = harness(criticalDeny);
+    const notices: string[] = [];
+    try {
+      assert.equal(instance.commands.has("approve"), false);
+      assert.equal(instance.commands.has("auto-review-approve"), true);
+      assert.equal(instance.commands.has("auto-review-break-glass"), true);
+      const first = await instance.authorize("bash_escalated");
+      assert.equal(first.decision.approved, false);
+      assert.match(
+        first.decision.denialReason ?? "",
+        /\/auto-review-break-glass/,
+      );
+      assert.doesNotMatch(
+        first.decision.denialReason ?? "",
+        /\/auto-review-approve/,
+      );
+
+      const approve = instance.commands.get("auto-review-approve");
+      assert.ok(approve);
+      await approve.handler("", {
+        ...instance.context,
+        hasUI: true,
+        mode: "tui",
+        isIdle: () => true,
+        ui: {
+          async select() {
+            throw new Error("critical denial must not appear in normal approve");
+          },
+          notify(message: string) {
+            notices.push(message);
+          },
+        },
+      });
+      assert.match(notices.at(-1) ?? "", /No reviewer denial/i);
+
+      const breakGlass = instance.commands.get("auto-review-break-glass");
+      assert.ok(breakGlass);
+      await breakGlass.handler("", {
+        ...instance.context,
+        hasUI: true,
+        mode: "tui",
+        isIdle: () => true,
+        ui: {
+          async select(_title: string, choices: string[]) {
+            assert.equal(choices.length, 1);
+            return choices[0];
+          },
+          async confirm(_title: string, message: string) {
+            assert.match(message, /Risk: critical/);
+            assert.match(message, /critically dangerous/);
+            assert.match(message, /Surface: bash_escalated/);
+            assert.match(message, /Working directory:/);
+            assert.match(message, /Request fingerprint: [a-f0-9]{12}/);
+            return true;
+          },
+          async input(title: string) {
+            const match = title.match(/Type (BREAK-GLASS [A-F0-9]+) within/);
+            assert.ok(match);
+            return match[1];
+          },
+          notify(message: string) {
+            notices.push(message);
+          },
+        },
+      });
+      assert.match(notices.at(-1) ?? "", /authorized once/i);
+      assert.match(
+        instance.sentUserMessages.at(-1) ?? "",
+        /completed break-glass confirmation/i,
+      );
+      const callsBeforeRetry = instance.modelContexts.length;
+      const retry = await instance.authorize("bash_escalated");
+      assert.equal(retry.decision.approved, true);
+      assert.equal(instance.modelContexts.length, callsBeforeRetry);
+      const authorization = instance.reviews.at(-1)?.data
+        .authorization as Record<string, unknown>;
+      assert.equal(authorization.kind, "break-glass");
+      assert.equal(
+        authorization.originalRequestId,
+        "request-bash_escalated",
+      );
+      assert.equal(typeof authorization.confirmedAt, "number");
+      const breakGlassEvents = instance.telemetry
+        .filter((event) => String(event.type).startsWith("break_glass"))
+        .map((event) => event.type);
+      assert.deepEqual(breakGlassEvents, [
+        "break_glass_challenge_started",
+        "break_glass_authorized",
+        "break_glass_consumed",
+      ]);
+      assert.doesNotMatch(JSON.stringify(instance.telemetry), /BREAK-GLASS/);
+
+      const secondRetry = await instance.authorize("bash_escalated");
+      assert.equal(secondRetry.decision.approved, false);
+      assert.equal(instance.modelContexts.length, callsBeforeRetry + 1);
+      assert.match(
+        secondRetry.decision.denialReason ?? "",
+        /\/auto-review-break-glass/,
+      );
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  await t.test("break-glass cancellation and a wrong phrase fail closed", async () => {
+    const instance = harness(criticalDeny);
+    try {
+      await instance.authorize("bash_escalated");
+      const command = instance.commands.get("auto-review-break-glass");
+      assert.ok(command);
+      const base = {
+        ...instance.context,
+        hasUI: true,
+        mode: "tui",
+        isIdle: () => true,
+      };
+      await command.handler("", {
+        ...base,
+        ui: {
+          async select(_title: string, choices: string[]) {
+            return choices[0];
+          },
+          async confirm() {
+            return false;
+          },
+          notify() {},
+        },
+      });
+      await command.handler("", {
+        ...base,
+        ui: {
+          async select(_title: string, choices: string[]) {
+            return choices[0];
+          },
+          async confirm() {
+            return true;
+          },
+          async input() {
+            return "BREAK-GLASS WRONG";
+          },
+          notify() {},
+        },
+      });
+      const rejected = instance.telemetry.filter(
+        (event) => event.type === "break_glass_rejected",
+      );
+      assert.deepEqual(
+        rejected.map((event) =>
+          (event.details as Record<string, unknown>).reason
+        ),
+        ["confirmation_cancelled", "challenge_mismatch"],
+      );
+      assert.doesNotMatch(JSON.stringify(rejected), /BREAK-GLASS/);
+      const calls = instance.modelContexts.length;
+      const retry = await instance.authorize("bash_escalated");
+      assert.equal(retry.decision.approved, false);
+      assert.equal(instance.modelContexts.length, calls + 1);
     } finally {
       instance.dispose();
     }
