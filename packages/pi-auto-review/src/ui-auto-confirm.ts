@@ -7,8 +7,14 @@ type UiCustom = ExtensionUIContext["custom"];
 
 type PermissionUiPromptEvent = {
   requestId: string;
-  message: string;
+  /** Value the live dialog is expected to show (command, path, or legacy message). */
+  fingerprint: string;
+  /** Gate surface from `request.surface`, when the 26.x payload carries it. */
+  gateSurface?: string;
 };
+
+/** Prefix length that survives the default 400-char prompt field cap. */
+const FINGERPRINT_PREFIX = 80;
 
 type PendingApproval = {
   surface: string;
@@ -79,6 +85,9 @@ export class PermissionUiAutoConfirmer {
     this.pending.delete(event.requestId);
 
     if (!this.enabledSurfaces().includes(pending.surface)) return;
+    // Top-level event.surface is the display tool name (e.g. bash), not the
+    // gate. Only request.surface is comparable to the staged allow.
+    if (event.gateSurface && event.gateSurface !== pending.surface) return;
     this.settleActiveForConflict();
 
     const attempt: PromptAttempt = {
@@ -258,13 +267,24 @@ function parsePermissionUiPromptEvent(
   raw: unknown,
 ): PermissionUiPromptEvent | undefined {
   if (!isRecord(raw)) return;
-  if (
-    typeof raw.requestId !== "string" ||
-    typeof raw.message !== "string"
-  ) {
-    return;
-  }
-  return { requestId: raw.requestId, message: raw.message };
+  const requestId = nonemptyString(raw.requestId);
+  if (!requestId) return;
+
+  const request = isRecord(raw.request) ? raw.request : undefined;
+  // permission-system 26+ removed `message`. Prefer the structured value the
+  // dialog actually renders, then the display projection, then the legacy
+  // assembled sentence.
+  const fingerprint =
+    nonemptyString(request?.value) ??
+    nonemptyString(raw.value) ??
+    nonemptyString(raw.message);
+  if (!fingerprint) return;
+
+  return {
+    requestId,
+    fingerprint,
+    gateSurface: nonemptyString(request?.surface),
+  };
 }
 
 function isPermissionPromptComponent(
@@ -280,15 +300,21 @@ function isPermissionPromptComponent(
     const rendered = value.render(2_000);
     if (!Array.isArray(rendered)) return false;
     const plain = normalizeWhitespace(stripAnsi(rendered.join("\n")));
-    const messagePrefix = normalizeWhitespace(event.message).slice(0, 120);
+    const needle = event.fingerprint.slice(0, FINGERPRINT_PREFIX);
     return (
       plain.includes("Permission Required") &&
-      messagePrefix.length > 0 &&
-      plain.includes(messagePrefix)
+      needle.length > 0 &&
+      plain.includes(needle)
     );
   } catch {
     return false;
   }
+}
+
+function nonemptyString(value: unknown): string | undefined {
+  if (typeof value !== "string") return;
+  const compact = normalizeWhitespace(value);
+  return compact || undefined;
 }
 
 function invokeUiCustom(

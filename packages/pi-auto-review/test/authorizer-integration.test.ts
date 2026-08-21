@@ -48,11 +48,11 @@ type ModelResponse = {
 
 class PermissionPromptComponent {
   constructor(
-    private readonly message: string,
+    private readonly value: string,
   ) {}
 
   render(): string[] {
-    return ["Permission Required", this.message];
+    return ["Permission Required", `path : ${this.value}`];
   }
 }
 
@@ -275,21 +275,51 @@ function harness(
           async authorize(details) {
             terminalCalls++;
             if (options.interactiveTui) {
+              const promptValue =
+                (typeof details.path === "string" && details.path) ||
+                (typeof details.command === "string" && details.command) ||
+                (typeof details.value === "string" && details.value) ||
+                "/tmp/reviewed";
+              const gateSurface =
+                (details.accessIntent &&
+                typeof details.accessIntent === "object" &&
+                details.accessIntent !== null &&
+                "surface" in details.accessIntent &&
+                typeof details.accessIntent.surface === "string"
+                  ? details.accessIntent.surface
+                  : undefined) ??
+                (typeof details.surface === "string"
+                  ? details.surface
+                  : "external_directory");
               events.emit("permissions:ui_prompt", {
                 requestId:
                   options.uiPromptRequestId ?? details.requestId,
-                source: details.source,
-                surface: details.surface ?? null,
-                value: details.value ?? null,
+                source: "tool_call",
+                surface: details.surface ?? details.toolName ?? null,
+                value: promptValue,
                 agentName: details.agentName ?? null,
-                message: details.message,
+                request: {
+                  requester: {
+                    agentName: details.agentName ?? null,
+                    forwarded: Boolean(details.forwarding),
+                    sessionId:
+                      details.forwarding?.requesterSessionId ?? null,
+                  },
+                  surface: gateSurface,
+                  toolName: details.toolName ?? "bash",
+                  invokedToolName: null,
+                  value: promptValue,
+                  matchedPattern: "*",
+                  commandContext: null,
+                  executedUnit: null,
+                },
                 forwarding: details.forwarding ?? null,
               });
               return context.ui.custom(
                 (_tui, _theme, _keybindings, _done) =>
                   options.recognizePermissionComponent === false
                     ? new UnrelatedPromptComponent()
-                    : new PermissionPromptComponent(details.message),
+                    : new PermissionPromptComponent(promptValue),
                 { overlay: false },
               ) as never;
             }
@@ -1523,7 +1553,7 @@ test("real permission-system authorizer chain integration", async (t) => {
     }
   });
 
-  await t.test("model allow auto-confirms external_directory in the v24 TUI terminal", async () => {
+  await t.test("model allow auto-confirms external_directory from a 26.x ui_prompt", async () => {
     const instance = harness(allow, { interactiveTui: true });
     try {
       const result = await instance.authorize("external_directory");

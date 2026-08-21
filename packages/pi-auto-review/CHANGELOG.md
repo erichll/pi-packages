@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Restore TUI auto-confirm for capped `path` / `external_directory` allows on
+  permission-system 26.x. `permissions:ui_prompt` no longer carries `message`;
+  the bridge now binds `requestId` plus `request.value` (falling back to the
+  display `value`, then the legacy `message`) and fingerprints the live dialog
+  with those fields. Top-level display `surface` is not treated as the gate.
+
 ## 0.8.0 - 2026-08-21
 
 - Add `/auto-review-approve` for exact non-critical denial retries and remove
