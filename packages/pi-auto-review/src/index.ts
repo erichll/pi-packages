@@ -38,15 +38,13 @@ import {
 } from "./broker/index.ts";
 import { PermissionUiAutoConfirmer } from "./ui-auto-confirm.ts";
 import {
-  buildUserReviewEntryData,
   buildUserReviewNotice,
   buildUserReviewStatus,
+  buildUserReviewWidgetData,
   notifyUserReview,
-  presentUserReview,
-  ReviewEntryBatcher,
   renderUserReviewEntry,
   reviewTargetFromRequest,
-  setUserReviewStatus,
+  UserReviewWidgetController,
   USER_REVIEW_ENTRY_TYPE,
   type UserReviewOutcome,
   type UserReviewUsage,
@@ -253,6 +251,7 @@ type ReviewResult = {
   durationMs: number;
   transcript: TranscriptResult;
   summary: ReviewExecutionSummary;
+  unavailable?: boolean;
 };
 
 class ReviewExecutionError extends Error {
@@ -726,52 +725,6 @@ type PermissionsService = {
     ) => Promise<AuthorizerVerdict>,
   ): () => void;
 };
-
-function promptPayloadRecord(
-  details: PromptPermissionDetails,
-): Record<string, unknown> | undefined {
-  const payload = (details as unknown as Record<string, unknown>).payload;
-  return payload && typeof payload === "object" && !Array.isArray(payload)
-    ? payload as Record<string, unknown>
-    : undefined;
-}
-
-function promptIsForwarded(details: PromptPermissionDetails): boolean {
-  if ((details as unknown as Record<string, unknown>).forwarding) return true;
-  const request = promptPayloadRecord(details)?.request;
-  if (!request || typeof request !== "object" || Array.isArray(request)) {
-    return false;
-  }
-  const requester = (request as Record<string, unknown>).requester;
-  return Boolean(
-    requester && typeof requester === "object" && !Array.isArray(requester) &&
-    (requester as Record<string, unknown>).forwarded === true
-  );
-}
-
-function reliableFullCommand(
-  details: PromptPermissionDetails,
-): string | undefined {
-  const payload = promptPayloadRecord(details);
-  const evidence = payload?.evidence;
-  if (Array.isArray(evidence)) {
-    for (const item of evidence) {
-      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
-      const entry = item as Record<string, unknown>;
-      if (entry.label === "full command" && typeof entry.text === "string" &&
-          entry.text.trim()) {
-        return entry.text;
-      }
-    }
-  }
-  if (payload?.kind !== "bash_external_directory") return undefined;
-  const request = payload.request;
-  if (!request || typeof request !== "object" || Array.isArray(request)) {
-    return undefined;
-  }
-  const value = (request as Record<string, unknown>).value;
-  return typeof value === "string" && value.trim() ? value : undefined;
-}
 
 function boundaryRequest(
   ctx: ExtensionContext,
@@ -1977,7 +1930,7 @@ export function createPiAutoReviewExtension(
   const uiAutoConfirmer = new PermissionUiAutoConfirmer(
     () => config.autoConfirmBoundedAllows,
   );
-  const reviewEntryBatcher = new ReviewEntryBatcher(pi);
+  const reviewWidget = new UserReviewWidgetController();
 
   const emitTelemetry = (event: ReviewerTelemetryEvent): void => {
     writeOptionalAuditFile(event);
@@ -2033,6 +1986,7 @@ export function createPiAutoReviewExtension(
               durationMs: execution.summary.durationMs,
               transcript: execution.summary.transcript,
               summary: execution.summary,
+              unavailable: true,
             });
           }
           emitTelemetry(
@@ -2315,7 +2269,7 @@ export function createPiAutoReviewExtension(
     disposeAuthorizer?.();
     disposeAuthorizer = undefined;
     registeredSessionId = undefined;
-    reviewEntryBatcher.flushAll();
+    reviewWidget.clear(context ?? ctx);
     disposeBrokerService?.();
     broker?.clear();
     reviewResults.clear();
@@ -2360,18 +2314,8 @@ export function createPiAutoReviewExtension(
   });
 
   pi.events.on("permissions:decision", (event) => {
-    reviewEntryBatcher.permissionDecision(event);
+    reviewWidget.permissionDecision(event);
   });
-
-  pi.on("tool_execution_start", (event, ctx) => {
-    reviewEntryBatcher.toolExecutionStarted(
-      ctx.sessionManager.getSessionId(),
-      event.toolCallId,
-      event.args,
-    );
-  });
-  pi.on("turn_end", () => reviewEntryBatcher.flushAll());
-  pi.on("agent_end", () => reviewEntryBatcher.flushAll());
 
   pi.events.on("permissions:ready", (event) => {
     const ready = event && typeof event === "object" && !Array.isArray(event)
@@ -2425,149 +2369,125 @@ export function createPiAutoReviewExtension(
               surface,
               rationale: reason,
             };
-            presentUserReview(
-              pi,
-              context,
-              buildUserReviewNotice(unavailable),
-              buildUserReviewEntryData(unavailable),
-            );
+            notifyUserReview(context, buildUserReviewNotice(unavailable));
             return { kind: "deny", reason };
           }
 
           const request = boundaryRequest(context, details, query);
           const target = reviewTargetFromRequest(request);
-          setUserReviewStatus(
-            context,
-            buildUserReviewStatus(surface, target),
-          );
-          try {
-            const decision = await broker.review(request, {
-              sessionId: context.sessionManager.getSessionId(),
-              scopeKey: currentTurnScope(context),
-              issueGrant: false,
-            });
-            const result = reviewResults.get(request.id);
-            reviewResults.delete(request.id);
-            const allowCapped =
-              decision.kind === "allow" && boundedRequest(surface);
-            const autoConfirmQueued =
-              allowCapped &&
-              context.mode === "tui" &&
-              context.hasUI &&
-              uiAutoConfirmer.stage(request.id, surface);
+          const reviewContext = context;
+          const widgetGeneration = reviewWidget.begin(request.id, reviewContext, {
+            surface,
+            target,
+            model: config.model,
+          });
+          const decision = await broker.review(request, {
+            sessionId: reviewContext.sessionManager.getSessionId(),
+            scopeKey: currentTurnScope(reviewContext),
+            issueGrant: false,
+          });
+          const result = reviewResults.get(request.id);
+          reviewResults.delete(request.id);
+          const allowCapped =
+            decision.kind === "allow" && boundedRequest(surface);
+          const autoConfirmQueued =
+            allowCapped &&
+            reviewContext.mode === "tui" &&
+            reviewContext.hasUI &&
+            uiAutoConfirmer.stage(request.id, surface);
 
-            let userOutcome: UserReviewOutcome;
-            if (decision.kind === "deny" && decision.circuitBreakerTripped) {
-              userOutcome = "circuit_breaker";
-            } else if (allowCapped && autoConfirmQueued) {
-              userOutcome = "auto_confirm";
-            } else if (allowCapped) {
-              userOutcome = "needs_confirmation";
-            } else if (decision.kind === "allow") {
-              userOutcome = "allow";
-            } else if (decision.kind === "defer") {
-              userOutcome = "defer";
-            } else {
-              userOutcome = "deny";
-            }
-            const reviewMeta = userReviewMetaFromResult(result, config.model);
-            const noticeInput = {
-              outcome: userOutcome,
-              surface,
-              target,
-              rationale: decision.review.rationale,
-              recoveryCommand:
-                decision.kind === "deny"
-                  ? decision.recoveryCommand
-                  : undefined,
-              ...reviewMeta,
-            };
-            const notice = buildUserReviewNotice(noticeInput);
-            const entryData = buildUserReviewEntryData(noticeInput);
-            const localSessionId = context.sessionManager.getSessionId();
-            if (
-              context.mode === "tui" &&
-              context.hasUI &&
-              request.toolCallId &&
-              localSessionId &&
-              !promptIsForwarded(details)
-            ) {
-              reviewEntryBatcher.enqueue({
-                sessionId: localSessionId,
-                toolCallId: request.toolCallId,
-                fullCommand: reliableFullCommand(details),
-                member: {
-                  requestId: request.id,
-                  ...noticeInput,
-                },
-                notice,
-                data: entryData,
-                ctx: context,
-              });
-            } else {
-              presentUserReview(pi, context, notice, entryData);
-            }
-
-            log.review("pi_auto_review_decision", {
-              requestId: request.id,
-              toolCallId: request.toolCallId,
-              surface,
-              model: config.model,
-              reviewerModel: reviewMeta.model,
-              outcome: allowCapped ? "defer" : decision.kind,
-              reviewerOutcome: decision.review.outcome,
-              riskLevel: decision.review.riskLevel,
-              userAuthorization: decision.review.userAuthorization,
-              rationale: decision.review.rationale,
-              allowCapped,
-              autoConfirmQueued,
-              userOutcome,
-              circuitBreakerTripped:
-                decision.kind === "deny"
-                  ? decision.circuitBreakerTripped
-                  : false,
-              attempts: result?.attempts ?? 0,
-              retryErrors: result?.retryErrors ?? [],
-              durationMs: result?.durationMs,
-              usageAvailability: reviewMeta.usage?.availability,
-              usage: reviewMeta.usage,
-              transcriptUserCharacters: result?.transcript.userCharacters,
-              transcriptToolCharacters: result?.transcript.toolCharacters,
-              transcriptRelevantResultCharacters:
-                result?.transcript.relevantResultCharacters,
-              transcriptTruncated: result?.transcript.truncated,
-              command: request.command,
-              path: request.path,
-              resolvedPath: request.resolvedPath,
-              destination: request.destination,
-              agentName: request.agentName,
-              requesterSessionId: request.requesterSessionId,
-              accessIntent: request.accessIntent,
-              authorization:
-                decision.kind === "allow"
-                  ? decision.authorization
-                  : undefined,
-            });
-
-            if (allowCapped || decision.kind === "defer") {
-              return { kind: "defer" };
-            }
-            if (decision.kind === "allow") return { kind: "allow" };
-            const denyInstruction =
-              decision.denialSource === "hard-deny"
-                ? LOCAL_HARD_DENY_AGENT_INSTRUCTION
-                : decision.recoveryCommand === "/auto-review-break-glass"
-                  ? REVIEWER_CRITICAL_DENY_AGENT_INSTRUCTION
-                  : decision.recoveryCommand === "/auto-review-approve"
-                    ? REVIEWER_NONCRITICAL_DENY_AGENT_INSTRUCTION
-                    : "Automatic policy critically denied this action and break-glass authorization is disabled. Do not retry, rephrase, or circumvent it.";
-            return {
-              kind: "deny",
-              reason: `${decision.review.rationale} ${denyInstruction}`,
-            };
-          } finally {
-            setUserReviewStatus(context, undefined);
+          let userOutcome: UserReviewOutcome;
+          if (decision.kind === "deny" && decision.circuitBreakerTripped) {
+            userOutcome = "circuit_breaker";
+          } else if (allowCapped && autoConfirmQueued) {
+            userOutcome = "auto_confirm";
+          } else if (allowCapped) {
+            userOutcome = "needs_confirmation";
+          } else if (decision.kind === "allow") {
+            userOutcome = "allow";
+          } else if (decision.kind === "defer") {
+            userOutcome = "defer";
+          } else {
+            userOutcome = "deny";
           }
+          const reviewMeta = userReviewMetaFromResult(result, config.model);
+          const noticeInput = {
+            outcome: result?.unavailable ? "unavailable" as const : userOutcome,
+            surface,
+            target,
+            rationale: decision.review.rationale,
+            recoveryCommand:
+              decision.kind === "deny"
+                ? decision.recoveryCommand
+                : undefined,
+            ...reviewMeta,
+          };
+          const notice = buildUserReviewNotice(noticeInput);
+          reviewWidget.complete(
+            request.id,
+            widgetGeneration,
+            reviewContext,
+            notice,
+            buildUserReviewWidgetData(noticeInput),
+          );
+
+          log.review("pi_auto_review_decision", {
+            requestId: request.id,
+            toolCallId: request.toolCallId,
+            surface,
+            model: config.model,
+            reviewerModel: reviewMeta.model,
+            outcome: allowCapped ? "defer" : decision.kind,
+            reviewerOutcome: decision.review.outcome,
+            riskLevel: decision.review.riskLevel,
+            userAuthorization: decision.review.userAuthorization,
+            rationale: decision.review.rationale,
+            allowCapped,
+            autoConfirmQueued,
+            userOutcome,
+            circuitBreakerTripped:
+              decision.kind === "deny"
+                ? decision.circuitBreakerTripped
+                : false,
+            attempts: result?.attempts ?? 0,
+            retryErrors: result?.retryErrors ?? [],
+            durationMs: result?.durationMs,
+            usageAvailability: reviewMeta.usage?.availability,
+            usage: reviewMeta.usage,
+            transcriptUserCharacters: result?.transcript.userCharacters,
+            transcriptToolCharacters: result?.transcript.toolCharacters,
+            transcriptRelevantResultCharacters:
+              result?.transcript.relevantResultCharacters,
+            transcriptTruncated: result?.transcript.truncated,
+            command: request.command,
+            path: request.path,
+            resolvedPath: request.resolvedPath,
+            destination: request.destination,
+            agentName: request.agentName,
+            requesterSessionId: request.requesterSessionId,
+            accessIntent: request.accessIntent,
+            authorization:
+              decision.kind === "allow"
+                ? decision.authorization
+                : undefined,
+          });
+
+          if (allowCapped || decision.kind === "defer") {
+            return { kind: "defer" };
+          }
+          if (decision.kind === "allow") return { kind: "allow" };
+          const denyInstruction =
+            decision.denialSource === "hard-deny"
+              ? LOCAL_HARD_DENY_AGENT_INSTRUCTION
+              : decision.recoveryCommand === "/auto-review-break-glass"
+                ? REVIEWER_CRITICAL_DENY_AGENT_INSTRUCTION
+                : decision.recoveryCommand === "/auto-review-approve"
+                  ? REVIEWER_NONCRITICAL_DENY_AGENT_INSTRUCTION
+                  : "Automatic policy critically denied this action and break-glass authorization is disabled. Do not retry, rephrase, or circumvent it.";
+          return {
+            kind: "deny",
+            reason: `${decision.review.rationale} ${denyInstruction}`,
+          };
         },
       );
       if (shuttingDown || epoch !== registrationEpoch || !context) {
@@ -2594,8 +2514,7 @@ export function createPiAutoReviewExtension(
   pi.on("session_shutdown", () => {
     shuttingDown = true;
     registrationEpoch++;
-    setUserReviewStatus(context, undefined);
-    reviewEntryBatcher.flushAll();
+    reviewWidget.clear(context);
     disposeAuthorizer?.();
     disposeAuthorizer = undefined;
     registeredSessionId = undefined;

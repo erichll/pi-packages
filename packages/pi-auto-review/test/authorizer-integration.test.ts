@@ -110,6 +110,9 @@ function harness(
   const modelCallOptions: Array<Record<string, unknown>> = [];
   const telemetry: Array<Record<string, unknown>> = [];
   const appendedEntries: Array<{ type: string; data: unknown }> = [];
+  const widgets: Array<{ key: string; content: unknown; options: unknown }> = [];
+  const statusCalls: Array<{ key: string; text: unknown }> = [];
+  const notifications: Array<{ message: string; type: unknown }> = [];
   let reviewerResolveCalls = 0;
   let reviewerMetaCalls = 0;
   let registrationCalls = 0;
@@ -209,6 +212,15 @@ function harness(
     mode: options.interactiveTui ? "tui" : "rpc",
     hasUI: options.interactiveTui === true,
     ui: {
+      notify(message: string, type: unknown) {
+        notifications.push({ message, type });
+      },
+      setWidget(key: string, content: unknown, widgetOptions: unknown) {
+        widgets.push({ key, content, options: widgetOptions });
+      },
+      setStatus(key: string, text: unknown) {
+        statusCalls.push({ key, text });
+      },
       custom(
         factory: (
           tui: unknown,
@@ -387,6 +399,9 @@ function harness(
     modelCallOptions,
     telemetry,
     appendedEntries,
+    widgets,
+    statusCalls,
+    notifications,
     events,
     context,
     get reviewerResolveCalls() {
@@ -424,6 +439,23 @@ function harness(
       unpublishPermissionsService(harnessSessionId, service as never);
     },
   };
+}
+
+function renderedWidgetLines(widget: { content: unknown } | undefined): string[] {
+  assert.equal(typeof widget?.content, "function");
+  const theme = {
+    fg(_color: string, text: string) {
+      return text;
+    },
+    italic(text: string) {
+      return text;
+    },
+    getFgAnsi(color: string) {
+      return `[${color}]`;
+    },
+  };
+  const component = (widget.content as Function)({}, theme);
+  return component.render(120) as string[];
 }
 
 const allow =
@@ -590,7 +622,7 @@ test("real permission-system authorizer chain integration", async (t) => {
     }
   });
 
-  await t.test("two local asks keep separate reviews and audit but append one TUI group", async () => {
+  await t.test("two local asks independently replace one above-editor widget", async () => {
     const instance = harness(allow, { interactiveTui: true });
     const command = "d=$(mktemp -d /tmp/demo.XXXXXX) && printf hi > $d/out";
     try {
@@ -628,36 +660,27 @@ test("real permission-system authorizer chain integration", async (t) => {
           .every((entry) => entry.data.toolCallId === "call-shared"),
       );
       assert.equal(instance.appendedEntries.length, 0);
-      instance.handlers.get("tool_execution_start")?.(
-        {
-          type: "tool_execution_start",
-          toolCallId: "call-shared",
-          toolName: "bash",
-          args: { command },
-        },
-        instance.context,
+      assert.equal(instance.statusCalls.length, 0);
+      assert.equal(instance.widgets.length, 4);
+      assert.ok(instance.widgets.every((widget) =>
+        widget.key === "pi-auto-review" &&
+        JSON.stringify(widget.options) === JSON.stringify({ placement: "aboveEditor" })
+      ));
+      assert.ok(instance.widgets.every((widget) =>
+        typeof widget.content === "function"
+      ));
+      assert.match(
+        renderedWidgetLines(instance.widgets.at(-1)).join("\n"),
+        /Auto-review.*allowed.*bash/,
       );
-      assert.equal(instance.appendedEntries.length, 1);
-      const data = instance.appendedEntries[0]?.data as {
-        kind: string;
-        fullCommand: string;
-        members: Array<{ requestId: string; surface: string }>;
-      };
-      assert.equal(data.kind, "group");
-      assert.equal(data.fullCommand, command);
-      assert.deepEqual(
-        data.members.map(({ requestId, surface }) => ({ requestId, surface })),
-        [
-          { requestId: "request-path", surface: "external_directory" },
-          { requestId: "request-bash", surface: "bash" },
-        ],
-      );
+      instance.handlers.get("session_shutdown")?.();
+      assert.equal(instance.widgets.at(-1)?.content, undefined);
     } finally {
       instance.dispose();
     }
   });
 
-  await t.test("forwarded and uncorrelated asks remain immediate TUI entries", async () => {
+  await t.test("forwarded and uncorrelated asks also use the same widget", async () => {
     const instance = harness(allow, { interactiveTui: true });
     try {
       await instance.authorize("bash", {
@@ -673,17 +696,16 @@ test("real permission-system authorizer chain integration", async (t) => {
         requestId: "request-no-call",
         command: "printf direct",
       });
-      assert.equal(instance.appendedEntries.length, 2);
-      assert.ok(instance.appendedEntries.every((entry) =>
-        !(entry.data as { kind?: string }).kind
-      ));
+      assert.equal(instance.appendedEntries.length, 0);
+      assert.equal(instance.statusCalls.length, 0);
+      assert.equal(instance.widgets.length, 4);
     } finally {
       instance.dispose();
     }
   });
 
   await t.test("model deny is not a human click and points to the prefixed command", async () => {
-    const instance = harness(deny);
+    const instance = harness(deny, { interactiveTui: true });
     try {
       const result = await instance.authorize("bash_escalated");
       assert.equal(result.decision.approved, false);
@@ -701,6 +723,10 @@ test("real permission-system authorizer chain integration", async (t) => {
       assert.doesNotMatch(
         result.decision.denialReason ?? "",
         /Do not retry this outcome through a workaround/,
+      );
+      assert.match(
+        renderedWidgetLines(instance.widgets.at(-1)).join("\n"),
+        /Auto-review.*denied.*bash_escalated/,
       );
     } finally {
       instance.dispose();
@@ -1830,6 +1856,10 @@ test("real permission-system authorizer chain integration", async (t) => {
         instance.reviews.at(-1)?.data.autoConfirmQueued,
         true,
       );
+      assert.match(
+        renderedWidgetLines(instance.widgets.at(-1)).join("\n"),
+        /allowed.*auto-confirm.*external_directory/,
+      );
     } finally {
       instance.dispose();
     }
@@ -1847,6 +1877,10 @@ test("real permission-system authorizer chain integration", async (t) => {
       assert.equal(
         instance.reviews.at(-1)?.data.autoConfirmQueued,
         false,
+      );
+      assert.match(
+        renderedWidgetLines(instance.widgets.at(-1)).join("\n"),
+        /allowed.*confirm locally.*external_directory/,
       );
     } finally {
       instance.dispose();
@@ -1871,6 +1905,14 @@ test("real permission-system authorizer chain integration", async (t) => {
         assert.deepEqual(instance.uiDecisions, [
           { approved: false, state: "denied" },
         ]);
+        instance.events.emit("permissions:decision", {
+          requestId: "request-external_directory",
+          result: "deny",
+        });
+        assert.match(
+          renderedWidgetLines(instance.widgets.at(-1)).join("\n"),
+          /Local confirmation.*denied/,
+        );
       } finally {
         instance.dispose();
       }
@@ -1879,14 +1921,18 @@ test("real permission-system authorizer chain integration", async (t) => {
 
   await t.test("provider missing and malformed JSON fail closed", async () => {
     for (const createInstance of [
-      () => harness(allow, { providerAvailable: false }),
-      () => harness('{"outcome":"allow","extra":true}'),
+      () => harness(allow, { providerAvailable: false, interactiveTui: true }),
+      () => harness('{"outcome":"allow","extra":true}', { interactiveTui: true }),
     ]) {
       const instance = createInstance();
       try {
         const result = await instance.authorize("bash_escalated");
         assert.equal(result.decision.approved, false);
         assert.equal(result.terminalCalls, 0);
+        assert.match(
+          renderedWidgetLines(instance.widgets.at(-1)).join("\n"),
+          /Auto-review.*unavailable.*bash_escalated/,
+        );
       } finally {
         instance.dispose();
       }

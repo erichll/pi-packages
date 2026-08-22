@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.0 - 2026-08-22
+
+- Align the package version with `@erichll/pi-auto-review` `0.10.0` and update
+  the exact dependency. This inherits the new single above-editor review widget,
+  its stale-concurrency guard, and the removal of tool-call grouping and
+  transcript auto-append; the sandbox's network, filesystem, grant, and
+  external-worker security behavior is unchanged.
+
 ## 0.9.0 - 2026-08-22
 
 - Align the planned package version with `@erichll/pi-auto-review` `0.9.0` and

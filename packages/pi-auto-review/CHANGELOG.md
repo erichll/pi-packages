@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.10.0 - 2026-08-22
+
+- Replace the review footer and newly appended transcript entries with one
+  above-editor `pi-auto-review` widget. Each permission check independently
+  replaces the previous display, shows the configured reviewer model while it
+  runs, and updates in place with its final outcome and metadata. The latest
+  result remains until the next check and is cleared on session change or
+  shutdown.
+- Prevent late concurrent completions and permission decisions from overwriting
+  a newer check. A current local denial adds `Local confirmation · denied` to
+  that result only. Widget failures fall back to notifications without changing
+  authorization behavior.
+- Remove tool-call grouping, timers, capacity eviction, and tool/turn flush
+  wiring for new feedback while retaining the historical entry renderer. Bound
+  target and rationale text with visible ellipses, preserve width-aware wrapping,
+  and keep token, duration, and call-count numbers in the normal metadata color.
+
 ## 0.9.0 - 2026-08-22
 
 - Require `@gotgenes/pi-permission-system` `^27.0.0` and register through the

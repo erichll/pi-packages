@@ -11,15 +11,23 @@ import {
   formatReviewTokenCount,
   formatReviewUsage,
   formatUserReviewQuoteMessage,
-  ReviewEntryBatcher,
+  buildUserReviewWidgetData,
   buildUserReviewGroupLines,
   renderUserReviewQuoteLines,
+  renderUserReviewWidgetLines,
   reviewTargetFromRequest,
+  truncateReviewText,
+  UserReviewWidgetController,
 } from "../src/user-feedback.ts";
 
 test("compactReviewText collapses whitespace and bounds length", () => {
   assert.equal(compactReviewText("  a\n\tb  "), "a b");
   assert.equal(compactReviewText("x".repeat(20), 8), "xxxxxxxx");
+});
+
+test("truncateReviewText uses an ellipsis when widget text is bounded", () => {
+  assert.equal(truncateReviewText("  a\n b  ", 8), "a b");
+  assert.equal(truncateReviewText("abcdefghij", 6), "abcde…");
 });
 
 test("reviewTargetFromRequest prefers resolved path then path/command", () => {
@@ -241,105 +249,129 @@ test("review formatting has no left bar and combines target with rationale", () 
   }
   assert.match(rendered[1] ?? "", /ls · read-only listing/);
   assert.match(rendered[0] ?? "", /\[success\]allowed/);
-  assert.match(rendered.at(-1) ?? "", /\[success\]2\.1k/);
+  assert.doesNotMatch(rendered.at(-1) ?? "", /\[success\]/);
+  assert.match(rendered.at(-1) ?? "", /2\.1k toks in/);
 });
 
-function batchHarness(options: ConstructorParameters<typeof ReviewEntryBatcher>[1] = {}) {
-  const entries: unknown[] = [];
+function widgetHarness(mode = "tui") {
+  const widgets: Array<{
+    key: string;
+    content: unknown;
+    options: unknown;
+  }> = [];
   const notifications: unknown[] = [];
-  const pi = {
-    appendEntry(_type: string, data: unknown) {
-      entries.push(data);
-    },
-  };
   const ctx = {
     hasUI: true,
-    mode: "tui",
+    mode,
     ui: {
       notify(message: string, type: string) {
         notifications.push({ message, type });
       },
+      setWidget(key: string, content: unknown, options: unknown) {
+        widgets.push({ key, content, options });
+      },
     },
   };
   return {
-    entries,
+    widgets,
     notifications,
-    pi,
     ctx,
-    batcher: new ReviewEntryBatcher(pi as never, options),
+    controller: new UserReviewWidgetController(),
   };
 }
 
-function enqueueMember(
-  harness: ReturnType<typeof batchHarness>,
-  requestId: string,
-  toolCallId: string,
-  surface = "bash",
-  sessionId = "session-a",
-) {
-  const input = {
-    outcome: "allow" as const,
-    surface,
-    target: surface === "bash" ? "printf hi" : "/tmp/out",
-    rationale: `${surface} is narrow`,
-  };
-  harness.batcher.enqueue({
-    sessionId,
-    toolCallId,
-    member: { requestId, ...input },
-    notice: buildUserReviewNotice(input),
-    data: buildUserReviewEntryData(input),
-    ctx: harness.ctx as never,
-  });
+const widgetTheme = {
+  fg(_color: string, text: string) {
+    return text;
+  },
+  italic(text: string) {
+    return text;
+  },
+  getFgAnsi(color: string) {
+    return `[${color}]`;
+  },
+};
+
+function renderLastWidget(harness: ReturnType<typeof widgetHarness>, width = 80) {
+  const content = harness.widgets.at(-1)?.content;
+  assert.equal(typeof content, "function");
+  const component = (content as Function)({}, widgetTheme);
+  return component.render(width) as string[];
 }
 
-test("ReviewEntryBatcher groups members by local session and tool call", () => {
-  const harness = batchHarness();
-  enqueueMember(harness, "request-path", "call-a", "external_directory");
-  enqueueMember(harness, "request-bash", "call-a");
-  enqueueMember(harness, "request-other", "call-b");
-  enqueueMember(harness, "request-session", "call-a", "bash", "session-b");
-  assert.equal(harness.entries.length, 0);
-
-  harness.batcher.toolExecutionStarted("session-a", "call-a", {
-    command: "printf hi && wc -l /tmp/out",
+test("reviewing widget uses dynamic model, above-editor placement, and wrapping", () => {
+  const harness = widgetHarness();
+  harness.controller.begin("request-a", harness.ctx as never, {
+    surface: "bash",
+    target: "printf a very long value",
+    model: "cliproxyapi/gpt-5-mini",
   });
-  assert.equal(harness.entries.length, 1);
-  const grouped = harness.entries[0] as {
-    kind: string;
-    fullCommand: string;
-    members: Array<{ requestId: string }>;
-  };
-  assert.equal(grouped.kind, "group");
-  assert.equal(grouped.fullCommand, "printf hi && wc -l /tmp/out");
-  assert.deepEqual(
-    grouped.members.map((member) => member.requestId),
-    ["request-path", "request-bash"],
-  );
-  assert.ok(
-    buildUserReviewGroupLines(grouped as never).lines.includes(
-      "external_directory · allowed · /tmp/out · external_directory is narrow",
-    ),
-  );
-
-  harness.batcher.flushAll();
-  assert.equal(harness.entries.length, 3);
+  assert.equal(harness.widgets.at(-1)?.key, "pi-auto-review");
+  assert.deepEqual(harness.widgets.at(-1)?.options, {
+    placement: "aboveEditor",
+  });
+  const lines = renderLastWidget(harness, 12);
+  assert.match(lines.join("\n"), /Auto-review/);
+  assert.match(lines.join("\n"), /gpt-5-mini/);
+  assert.ok(lines.length > 3);
 });
 
-test("ReviewEntryBatcher flushes terminal deny and records local disagreement", () => {
-  const harness = batchHarness();
-  enqueueMember(harness, "request-defer", "call-a");
-  harness.batcher.permissionDecision({
-    requestId: "request-defer",
-    result: "deny",
+test("widget bounds target and rationale with ellipses and colors only verdict", () => {
+  const input = {
+    outcome: "allow" as const,
+    surface: "bash",
+    target: "t".repeat(120),
+    rationale: "r".repeat(220),
+    model: "provider/reviewer",
+    usage: { availability: "reported" as const, input: 2100, output: 64 },
+    durationMs: 900,
+  };
+  const data = buildUserReviewWidgetData(input);
+  assert.match(data.lines[1] ?? "", /t… · r.*…$/);
+  const rendered = renderUserReviewWidgetLines(data, widgetTheme, 400);
+  assert.match(rendered[0] ?? "", /\[success\]allowed/);
+  assert.doesNotMatch(rendered.at(-1) ?? "", /\[success\]/);
+  assert.match(rendered.at(-1) ?? "", /2\.1k toks in/);
+});
+
+test("controller overwrites checks, retains completion, and rejects stale updates", () => {
+  const harness = widgetHarness();
+  const first = harness.controller.begin("request-a", harness.ctx as never, {
+    surface: "path",
+    target: "/tmp/a",
+    model: "provider/a",
   });
-  assert.equal(harness.entries.length, 1);
-  const grouped = harness.entries[0] as Parameters<typeof buildUserReviewGroupLines>[0];
-  assert.equal(grouped.members[0]?.permissionResult, "deny");
-  assert.match(
-    buildUserReviewGroupLines(grouped).lines.join("\n"),
-    /Local confirmation · denied/,
+  const second = harness.controller.begin("request-b", harness.ctx as never, {
+    surface: "bash",
+    target: "printf b",
+    model: "provider/b",
+  });
+  const firstInput = { outcome: "allow" as const, surface: "path", target: "/tmp/a" };
+  harness.controller.complete(
+    "request-a",
+    first,
+    harness.ctx as never,
+    buildUserReviewNotice(firstInput),
+    buildUserReviewWidgetData(firstInput),
   );
+  assert.match(renderLastWidget(harness).join("\n"), /printf b/);
+
+  const secondInput = { outcome: "allow" as const, surface: "bash", target: "printf b" };
+  harness.controller.complete(
+    "request-b",
+    second,
+    harness.ctx as never,
+    buildUserReviewNotice(secondInput),
+    buildUserReviewWidgetData(secondInput),
+  );
+  const callsAfterCompletion = harness.widgets.length;
+  harness.controller.permissionDecision({ requestId: "request-a", result: "deny" });
+  assert.equal(harness.widgets.length, callsAfterCompletion);
+  harness.controller.permissionDecision({ requestId: "request-b", result: "deny" });
+  assert.match(renderLastWidget(harness).join("\n"), /Local confirmation · denied/);
+  assert.equal(harness.widgets.at(-1)?.content === undefined, false);
+  harness.controller.clear(harness.ctx as never);
+  assert.equal(harness.widgets.at(-1)?.content, undefined);
 });
 
 test("group member summaries preserve auto-confirm detail on one line", () => {
@@ -372,34 +404,47 @@ test("group member summaries preserve auto-confirm detail on one line", () => {
   ]);
 });
 
-test("ReviewEntryBatcher bounds groups and members without dropping feedback", () => {
-  const harness = batchHarness({ maxGroups: 2, maxMembers: 2 });
-  enqueueMember(harness, "a-1", "call-a");
-  enqueueMember(harness, "b-1", "call-b");
-  enqueueMember(harness, "c-1", "call-c");
-  assert.equal(harness.entries.length, 1, "oldest group flushed on overflow");
-  enqueueMember(harness, "c-2", "call-c");
-  enqueueMember(harness, "c-3", "call-c");
-  assert.equal(harness.entries.length, 2, "full member group flushed");
-  harness.batcher.flushAll();
-  const memberCount = harness.entries.reduce<number>(
-    (count, entry) => count + (entry as { members: unknown[] }).members.length,
-    0,
-  );
-  assert.equal(memberCount, 5);
-});
-
-test("ReviewEntryBatcher TTL and append failure fall back without loss", async () => {
-  const ttl = batchHarness({ ttlMs: 5 });
-  enqueueMember(ttl, "ttl", "call-ttl");
-  await new Promise((resolve) => setTimeout(resolve, 15));
-  assert.equal(ttl.entries.length, 1);
-
-  const fallback = batchHarness();
-  fallback.pi.appendEntry = () => {
+test("widget completion falls back to notify when setWidget fails", () => {
+  const harness = widgetHarness();
+  const generation = harness.controller.begin("request-a", harness.ctx as never, {
+    surface: "bash",
+    model: "provider/reviewer",
+  });
+  harness.ctx.ui.setWidget = () => {
     throw new Error("renderer storage unavailable");
   };
-  enqueueMember(fallback, "fallback", "call-fallback");
-  fallback.batcher.flushAll();
-  assert.equal(fallback.notifications.length, 1);
+  const input = { outcome: "unavailable" as const, surface: "bash" };
+  harness.controller.complete(
+    "request-a",
+    generation,
+    harness.ctx as never,
+    buildUserReviewNotice(input),
+    buildUserReviewWidgetData(input),
+  );
+  assert.equal(harness.notifications.length, 1);
+});
+
+test("non-TUI completions keep independent notification behavior", () => {
+  const harness = widgetHarness("rpc");
+  const first = harness.controller.begin("request-a", harness.ctx as never, {
+    surface: "bash",
+  });
+  const second = harness.controller.begin("request-b", harness.ctx as never, {
+    surface: "path",
+  });
+  for (const [requestId, generation, surface] of [
+    ["request-a", first, "bash"],
+    ["request-b", second, "path"],
+  ] as const) {
+    const input = { outcome: "allow" as const, surface };
+    harness.controller.complete(
+      requestId,
+      generation,
+      harness.ctx as never,
+      buildUserReviewNotice(input),
+      buildUserReviewWidgetData(input),
+    );
+  }
+  assert.equal(harness.widgets.length, 0);
+  assert.equal(harness.notifications.length, 2);
 });

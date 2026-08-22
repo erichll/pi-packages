@@ -1,10 +1,8 @@
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 export const USER_REVIEW_STATUS_KEY = "pi-auto-review";
 export const USER_REVIEW_ENTRY_TYPE = "pi-auto-review";
+export const USER_REVIEW_WIDGET_KEY = "pi-auto-review";
 
 export type UserReviewOutcome =
   | "allow"
@@ -45,6 +43,14 @@ export function compactReviewText(value: unknown, max = 90): string {
     .slice(0, max);
 }
 
+/** Collapse whitespace and visibly truncate bounded widget text. */
+export function truncateReviewText(value: unknown, max: number): string {
+  const compact = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (compact.length <= max) return compact;
+  if (max <= 1) return "…".slice(0, max);
+  return `${compact.slice(0, max - 1).trimEnd()}…`;
+}
+
 export function reviewTargetFromRequest(request: {
   resolvedPath?: string;
   path?: string;
@@ -62,7 +68,7 @@ export function reviewTargetFromRequest(request: {
     request.toolName ??
     request.skillName ??
     request.operation;
-  const compact = compactReviewText(target, 100);
+  const compact = truncateReviewText(target, 100);
   return compact || undefined;
 }
 
@@ -197,8 +203,8 @@ function reviewTargetRationaleLine(input: {
   target?: string;
   rationale?: string;
 }): string | undefined {
-  const target = compactReviewText(input.target, 100);
-  const rationale = compactReviewText(input.rationale, 180);
+  const target = truncateReviewText(input.target, 100);
+  const rationale = truncateReviewText(input.rationale, 180);
   if (target && rationale) return `${target} · ${rationale}`;
   return target || rationale || undefined;
 }
@@ -400,7 +406,6 @@ export function renderUserReviewQuoteLines(
   const contentWidth = Math.max(1, width);
   const verb = outcomeVerb(data.outcome);
   const verbAnsi = theme.getFgAnsi(outcomeAccent(data.outcome));
-  const numberAnsi = theme.getFgAnsi("success");
   const rendered: string[] = [];
   for (const [index, line] of data.lines.entries()) {
     for (const visual of wrapReviewDisplayText(line, contentWidth)) {
@@ -409,12 +414,6 @@ export function renderUserReviewQuoteLines(
         painted = painted.replace(
           verb,
           `${verbAnsi}${verb}\x1b[0m`,
-        );
-      }
-      if (index === data.lines.length - 1) {
-        painted = painted.replace(
-          /(\d+(?:\.\d+)?[kM]?)(?=\s(?:toks|calls)|ms\b|s\b)/g,
-          `${numberAnsi}$1\x1b[0m`,
         );
       }
       rendered.push(withQuoteStyle(theme, painted));
@@ -528,34 +527,6 @@ export function renderUserReviewEntry(
   };
 }
 
-function presentUserReviewGroupEntry(
-  pi: ExtensionAPI | undefined,
-  ctx: ExtensionContext | undefined,
-  data: UserReviewGroupEntryData,
-): boolean {
-  if (!pi || !ctx?.hasUI || ctx.mode !== "tui") return false;
-  try {
-    pi.appendEntry(USER_REVIEW_ENTRY_TYPE, data);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function presentUserReviewEntry(
-  pi: ExtensionAPI | undefined,
-  ctx: ExtensionContext | undefined,
-  data: UserReviewEntryData,
-): boolean {
-  if (!pi || !ctx?.hasUI || ctx.mode !== "tui") return false;
-  try {
-    pi.appendEntry(USER_REVIEW_ENTRY_TYPE, data);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** Best-effort toast; never throws into the authorizer path. */
 export function notifyUserReview(
   ctx: ExtensionContext | undefined,
@@ -569,184 +540,160 @@ export function notifyUserReview(
   }
 }
 
-/** TUI structured entry when possible; otherwise a plain notify toast. */
-export function presentUserReview(
-  pi: ExtensionAPI | undefined,
-  ctx: ExtensionContext | undefined,
-  notice: UserReviewNotice,
-  data: UserReviewEntryData,
-): void {
-  if (presentUserReviewEntry(pi, ctx, data)) return;
-  notifyUserReview(ctx, notice);
+export type UserReviewWidgetData = UserReviewEntryData & {
+  phase: "reviewing" | "complete";
+};
+
+export function buildUserReviewingWidgetData(input: {
+  surface: string;
+  target?: string;
+  model?: string;
+}): UserReviewWidgetData {
+  const target = truncateReviewText(input.target, 100);
+  const model = formatReviewModelName(input.model) ?? "reviewer";
+  return {
+    phase: "reviewing",
+    outcome: "defer",
+    type: "info",
+    lines: joinNoticeLines([
+      `Auto-review · reviewing · ${input.surface}`,
+      target,
+      `Waiting for ${model}…`,
+    ]),
+  };
 }
 
-type PendingReviewGroup = {
-  sessionId: string;
-  toolCallId: string;
-  fullCommand?: string;
-  members: Map<string, {
-    member: UserReviewGroupMember;
-    notice: UserReviewNotice;
-    data: UserReviewEntryData;
-  }>;
-  ctx: ExtensionContext;
-  createdAt: number;
-  timer: ReturnType<typeof setTimeout>;
-};
+export function buildUserReviewWidgetData(
+  input: UserReviewNoticeInput,
+): UserReviewWidgetData {
+  return {
+    phase: "complete",
+    ...buildUserReviewEntryData(input),
+  };
+}
 
-export type ReviewEntryBatcherOptions = {
-  maxGroups?: number;
-  maxMembers?: number;
-  ttlMs?: number;
-  now?: () => number;
-};
-
-/** Buffers only transcript presentation; permission requests remain independent. */
-export class ReviewEntryBatcher {
-  readonly #groups = new Map<string, PendingReviewGroup>();
-  readonly #maxGroups: number;
-  readonly #maxMembers: number;
-  readonly #ttlMs: number;
-  readonly #now: () => number;
-
-  constructor(
-    private readonly pi: ExtensionAPI,
-    options: ReviewEntryBatcherOptions = {},
-  ) {
-    this.#maxGroups = options.maxGroups ?? 32;
-    this.#maxMembers = options.maxMembers ?? 8;
-    this.#ttlMs = options.ttlMs ?? 60_000;
-    this.#now = options.now ?? Date.now;
+export function renderUserReviewWidgetLines(
+  data: UserReviewWidgetData,
+  theme: UserReviewTheme,
+  width: number,
+): string[] {
+  const rendered: string[] = [];
+  const verb = data.phase === "reviewing"
+    ? "reviewing"
+    : outcomeVerb(data.outcome);
+  const accent = data.phase === "reviewing"
+    ? "muted"
+    : outcomeAccent(data.outcome);
+  const verbAnsi = theme.getFgAnsi(accent);
+  const mutedAnsi = theme.getFgAnsi("muted");
+  for (const [index, line] of data.lines.entries()) {
+    for (const visual of wrapReviewDisplayText(line, Math.max(1, width))) {
+      let painted = `${mutedAnsi}${visual}\x1b[0m`;
+      if (index === 0) {
+        painted = painted.replace(
+          verb,
+          `${verbAnsi}${verb}\x1b[0m${mutedAnsi}`,
+        );
+      }
+      rendered.push(painted);
+    }
   }
+  return rendered;
+}
 
-  enqueue(input: {
-    sessionId: string;
-    toolCallId: string;
-    fullCommand?: string;
-    member: UserReviewGroupMember;
-    notice: UserReviewNotice;
-    data: UserReviewEntryData;
+function setWidget(
+  ctx: ExtensionContext | undefined,
+  data: UserReviewWidgetData | undefined,
+): boolean {
+  if (!ctx?.hasUI || ctx.mode !== "tui") return false;
+  try {
+    ctx.ui.setWidget(
+      USER_REVIEW_WIDGET_KEY,
+      data
+        ? (_tui, theme) => ({
+            render: (width: number) =>
+              renderUserReviewWidgetLines(data, theme, width),
+            invalidate() {},
+          })
+        : undefined,
+      { placement: "aboveEditor" },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Owns the single live widget and rejects stale concurrent completions. */
+export class UserReviewWidgetController {
+  #generation = 0;
+  #current?: {
+    requestId: string;
+    generation: number;
     ctx: ExtensionContext;
-  }): void {
-    try {
-      const key = this.#key(input.sessionId, input.toolCallId);
-      let group = this.#groups.get(key);
-      if (group?.members.has(input.member.requestId)) return;
-      if (group && group.members.size >= this.#maxMembers) {
-        this.#flushKey(key);
-        group = undefined;
-      }
-      if (!group) {
-        if (this.#groups.size >= this.#maxGroups) {
-          const oldest = [...this.#groups.entries()].sort(
-            (left, right) => left[1].createdAt - right[1].createdAt,
-          )[0]?.[0];
-          if (oldest) this.#flushKey(oldest);
-        }
-        const timer = setTimeout(() => this.#flushKey(key), this.#ttlMs);
-        timer.unref?.();
-        group = {
-          sessionId: input.sessionId,
-          toolCallId: input.toolCallId,
-          fullCommand: input.fullCommand,
-          members: new Map(),
-          ctx: input.ctx,
-          createdAt: this.#now(),
-          timer,
-        };
-        this.#groups.set(key, group);
-      } else if (!group.fullCommand && input.fullCommand) {
-        group.fullCommand = input.fullCommand;
-      }
-      group.members.set(input.member.requestId, {
-        member: input.member,
-        notice: input.notice,
-        data: input.data,
-      });
-      if (input.member.outcome === "deny" ||
-          input.member.outcome === "circuit_breaker") {
-        this.#flushKey(key);
-      }
-    } catch {
-      presentUserReview(this.pi, input.ctx, input.notice, input.data);
-    }
+    data?: UserReviewWidgetData;
+    notice?: UserReviewNotice;
+  };
+
+  begin(
+    requestId: string,
+    ctx: ExtensionContext,
+    input: { surface: string; target?: string; model?: string },
+  ): number {
+    const generation = ++this.#generation;
+    this.#current = { requestId, generation, ctx };
+    setWidget(ctx, buildUserReviewingWidgetData(input));
+    return generation;
   }
 
-  toolExecutionStarted(
-    sessionId: string,
-    toolCallId: string,
-    args: unknown,
+  complete(
+    requestId: string,
+    generation: number,
+    ctx: ExtensionContext,
+    notice: UserReviewNotice,
+    data: UserReviewWidgetData,
   ): void {
-    const key = this.#key(sessionId, toolCallId);
-    const group = this.#groups.get(key);
-    if (!group) return;
-    if (!group.fullCommand && args && typeof args === "object" &&
-        !Array.isArray(args) &&
-        typeof (args as Record<string, unknown>).command === "string") {
-      group.fullCommand = String((args as Record<string, unknown>).command);
+    if (!ctx.hasUI || ctx.mode !== "tui") {
+      notifyUserReview(ctx, notice);
+      return;
     }
-    this.#flushKey(key);
+    if (!this.#isCurrent(requestId, generation)) return;
+    this.#current = { requestId, generation, ctx, notice, data };
+    if (!setWidget(ctx, data)) notifyUserReview(ctx, notice);
   }
 
   permissionDecision(event: unknown): void {
     if (!event || typeof event !== "object" || Array.isArray(event)) return;
     const record = event as Record<string, unknown>;
-    if (typeof record.requestId !== "string" ||
-        (record.result !== "allow" && record.result !== "deny")) return;
-    for (const [key, group] of this.#groups) {
-      const pending = group.members.get(record.requestId);
-      if (!pending) continue;
-      pending.member.permissionResult = record.result;
-      if (record.result === "deny") this.#flushKey(key);
-      return;
-    }
-  }
-
-  flushAll(): void {
-    for (const key of [...this.#groups.keys()]) this.#flushKey(key);
-  }
-
-  get pendingGroups(): number {
-    return this.#groups.size;
-  }
-
-  #key(sessionId: string, toolCallId: string): string {
-    return `${sessionId}\u0000${toolCallId}`;
-  }
-
-  #flushKey(key: string): void {
-    const group = this.#groups.get(key);
-    if (!group) return;
-    this.#groups.delete(key);
-    clearTimeout(group.timer);
-    const pending = [...group.members.values()];
-    if (pending.length === 0) return;
-    const members = pending.map((entry) => entry.member);
-    const data: UserReviewGroupEntryData = {
-      kind: "group",
-      type: noticeType(groupOutcome(members)),
-      sessionId: group.sessionId,
-      toolCallId: group.toolCallId,
-      ...(group.fullCommand ? { fullCommand: group.fullCommand } : {}),
-      members,
+    const current = this.#current;
+    if (
+      record.result !== "deny" ||
+      typeof record.requestId !== "string" ||
+      record.requestId !== current?.requestId ||
+      !current.data ||
+      current.data.lines.includes("Local confirmation · denied")
+    ) return;
+    const data = {
+      ...current.data,
+      lines: [...current.data.lines, "Local confirmation · denied"],
     };
-    if (presentUserReviewGroupEntry(this.pi, group.ctx, data)) return;
-    for (const entry of pending) {
-      presentUserReview(this.pi, group.ctx, entry.notice, entry.data);
-    }
+    const notice = {
+      type: current.notice?.type ?? data.type,
+      message: data.lines.join("\n"),
+    };
+    this.#current = { ...current, data, notice };
+    if (!setWidget(current.ctx, data)) notifyUserReview(current.ctx, notice);
   }
-}
 
-/** Best-effort footer status; pass undefined to clear. */
-export function setUserReviewStatus(
-  ctx: ExtensionContext | undefined,
-  text: string | undefined,
-  key = USER_REVIEW_STATUS_KEY,
-): void {
-  if (!ctx?.hasUI) return;
-  try {
-    ctx.ui.setStatus?.(key, text);
-  } catch {
-    // UI delivery is observational and must not change a decision.
+  clear(ctx?: ExtensionContext): void {
+    ++this.#generation;
+    const current = this.#current;
+    this.#current = undefined;
+    if (current) setWidget(ctx ?? current.ctx, undefined);
+  }
+
+  #isCurrent(requestId: string, generation: number): boolean {
+    return this.#current?.requestId === requestId &&
+      this.#current.generation === generation;
   }
 }

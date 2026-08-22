@@ -16,7 +16,7 @@ that dependency is a hard prerequisite (see [Install and enable](#install-and-en
 > **Prerequisite:** pi-auto-review is an authorizer inside
 > `@gotgenes/pi-permission-system`. Pi does not auto-install peer packages, so
 > install the permission system separately (once per machine) before this
-> extension. Version 0.9.0 requires permission-system 27.x:
+> extension. Version 0.10.0 requires permission-system 27.x:
 
 ```bash
 pi install npm:@gotgenes/pi-permission-system
@@ -132,16 +132,20 @@ only a fixed, budget-checked schema correction.
 
 ## Operator feedback and exact retry
 
-Interactive sessions show a best-effort footer while review is running and
-structured results for allow, local confirmation, defer, deny, or circuit
-breaker outcomes. Local permission-system asks that belong to the same tool
-call are grouped into one TUI entry; each request still has its own model call,
-verdict, grant, local confirmation, and audit record. Forwarded asks and
-non-TUI modes remain immediate and ungrouped. Group members retain their own
-surface, outcome, target, rationale, model, token usage, and duration. UI
-entries use unbordered muted text and place each target and rationale together
-on the same line as that member's surface and outcome. UI delivery never
-changes the authorization result.
+Interactive sessions show the current permission check in a single widget
+above the editor. Each check first shows its surface, compact target, and the
+dynamically configured reviewer model, then replaces that content in place
+with the outcome, target and rationale, model, token usage, duration, and any
+extra call count. A new check replaces the previous result; the latest result
+remains visible until then and is cleared when the session changes or shuts
+down. Concurrent older checks cannot overwrite the most recently started one.
+
+Every request still has its own model call, verdict, grant, local confirmation,
+and audit record. No new review-result transcript entries are written. Existing
+`pi-auto-review` entries in historical sessions remain renderable. Non-TUI
+modes retain best-effort notifications, and a failed TUI widget update falls
+back to the same notification path. UI delivery never changes the authorization
+result.
 
 In an interactive TUI, `/auto-review-approve` lists up to ten recent
 non-critical model denials from the current session. Selecting one asks the

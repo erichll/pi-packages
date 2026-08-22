@@ -1,6 +1,6 @@
 {
   "name": "@erichll/pi-sandbox",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Sandbox Runtime-backed Linux and macOS sandbox with pi-auto-review approval",
   "type": "module",
   "license": "Apache-2.0",
@@ -51,7 +51,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.73",
-    "@erichll/pi-auto-review": "0.9.0"
+    "@erichll/pi-auto-review": "0.10.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^0.84.1",
