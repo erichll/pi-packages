@@ -11,6 +11,20 @@ that dependency is a hard prerequisite (see [Install and enable](#install-and-en
 - authorizer: `pi-auto-review`
 - default reviewer model: `codex-auto-review`
 
+## Contents
+
+- [Install and enable](#install-and-enable)
+- [Security model](#security-model)
+- [Configuration](#configuration)
+  - [Deadlines and retries](#deadlines-and-retries)
+- [Operator feedback and exact retry](#operator-feedback-and-exact-retry)
+- [Boundary broker API](#boundary-broker-api)
+- [Reviewer context and token budgets](#reviewer-context-and-token-budgets)
+- [Sandbox integration](#sandbox-integration)
+- [Trust boundary](#trust-boundary)
+- [Telemetry](#telemetry)
+- [Real-model smoke test](#real-model-smoke-test)
+
 ## Install and enable
 
 > **Prerequisite:** pi-auto-review is an authorizer inside
@@ -23,7 +37,8 @@ pi install npm:@gotgenes/pi-permission-system
 pi install npm:@erichll/pi-auto-review
 ```
 
-Install the package outside the agent-writable workspace:
+Install the package outside the agent-writable workspace (see
+[Trust boundary](#trust-boundary)):
 
 Add it to the permission-system authorizer chain:
 
@@ -292,7 +307,7 @@ Writes to the installed reviewer package, its user-global configuration,
 project and global security configuration, and the global audit directory are
 deterministically denied.
 
-## Telemetry and smoke testing
+## Telemetry
 
 Every actual model call emits an internal `review_attempt`; each approval emits
 one `review_complete`. Events contain stable status/error classes, timings,
@@ -300,6 +315,8 @@ usage counters, evidence metadata, and prompt-part counts. They do not contain
 prompt or response text, provider errors, credentials, headers, or URL query
 values. Usage is marked `unknown_provenance` when pi-ai cannot distinguish
 provider counters from initialized values, and `unavailable` when absent.
+
+## Real-model smoke test
 
 For a controlled real-model smoke test, load only the provider, reviewer,
 sandbox, and audit listener:

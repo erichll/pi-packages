@@ -1,7 +1,7 @@
 {
   "name": "@erichll/pi-auto-review",
   "version": "0.10.0",
-  "description": "Model-backed boundary approval broker for Pi",
+  "description": "Fail-closed, model-backed approval broker for Pi: deterministically hard-denies dangerous operations, reviews dangerous boundaries with a reviewer model, and issues one-shot expiring grants that OS sandbox adapters must consume before retrying.",
   "type": "module",
   "license": "MIT",
   "keywords": [

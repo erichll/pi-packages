@@ -4,6 +4,19 @@
 `@anthropic-ai/sandbox-runtime`. It protects main-agent Bash commands and can
 also run complete process-backed subagent trees inside independent sandboxes.
 
+## Contents
+
+- [Security model](#security-model)
+- [Linux requirements](#linux-requirements)
+- [Subagent provider](#subagent-provider)
+  - [`pi-subagents` 0.53.0 capability boundary](#pi-subagents-0530-capability-boundary)
+- [Network domain policy](#network-domain-policy)
+- [Optional host IPC fallback](#optional-host-ipc-fallback)
+- [Additional trusted read paths](#additional-trusted-read-paths)
+- [Installation](#installation)
+- [Development](#development)
+- [Upstream](#upstream)
+
 ## Security model
 
 - Linux uses bubblewrap mount/network namespaces and seccomp.
