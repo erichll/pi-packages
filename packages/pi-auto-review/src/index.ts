@@ -42,6 +42,7 @@ import {
   buildUserReviewStatus,
   notifyUserReview,
   presentUserReview,
+  ReviewEntryBatcher,
   renderUserReviewEntry,
   reviewTargetFromRequest,
   setUserReviewStatus,
@@ -272,9 +273,6 @@ const USER_CONFIG_RELATIVE_PATH = join(
   "extensions",
   "pi-auto-review",
   "config.json",
-);
-const PERMISSIONS_SERVICE_KEY = Symbol.for(
-  "@gotgenes/pi-permission-system:service",
 );
 const BOUNDED_SURFACES = new Set(["path", "external_directory"]);
 const REVIEWER_FRAMING_RESERVE_TOKENS = 64;
@@ -728,10 +726,50 @@ type PermissionsService = {
   ): () => void;
 };
 
-function permissionsService(): PermissionsService | undefined {
-  return (globalThis as Record<symbol, unknown>)[
-    PERMISSIONS_SERVICE_KEY
-  ] as PermissionsService | undefined;
+function promptPayloadRecord(
+  details: PromptPermissionDetails,
+): Record<string, unknown> | undefined {
+  const payload = (details as unknown as Record<string, unknown>).payload;
+  return payload && typeof payload === "object" && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : undefined;
+}
+
+function promptIsForwarded(details: PromptPermissionDetails): boolean {
+  if ((details as unknown as Record<string, unknown>).forwarding) return true;
+  const request = promptPayloadRecord(details)?.request;
+  if (!request || typeof request !== "object" || Array.isArray(request)) {
+    return false;
+  }
+  const requester = (request as Record<string, unknown>).requester;
+  return Boolean(
+    requester && typeof requester === "object" && !Array.isArray(requester) &&
+    (requester as Record<string, unknown>).forwarded === true
+  );
+}
+
+function reliableFullCommand(
+  details: PromptPermissionDetails,
+): string | undefined {
+  const payload = promptPayloadRecord(details);
+  const evidence = payload?.evidence;
+  if (Array.isArray(evidence)) {
+    for (const item of evidence) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const entry = item as Record<string, unknown>;
+      if (entry.label === "full command" && typeof entry.text === "string" &&
+          entry.text.trim()) {
+        return entry.text;
+      }
+    }
+  }
+  if (payload?.kind !== "bash_external_directory") return undefined;
+  const request = payload.request;
+  if (!request || typeof request !== "object" || Array.isArray(request)) {
+    return undefined;
+  }
+  const value = (request as Record<string, unknown>).value;
+  return typeof value === "string" && value.trim() ? value : undefined;
 }
 
 function boundaryRequest(
@@ -1925,6 +1963,9 @@ export function createPiAutoReviewExtension(
   let context: ExtensionContext | undefined;
   let config: Readonly<Config> = trustedConfig;
   let disposeAuthorizer: (() => void) | undefined;
+  let registeredSessionId: string | undefined;
+  let registrationEpoch = 0;
+  let shuttingDown = false;
   let disposeBrokerService: (() => void) | undefined;
   const reviewResults = new Map<string, ReviewResult>();
   const telemetryCompleted = new Set<string>();
@@ -1935,6 +1976,7 @@ export function createPiAutoReviewExtension(
   const uiAutoConfirmer = new PermissionUiAutoConfirmer(
     () => config.autoConfirmBoundedAllows,
   );
+  const reviewEntryBatcher = new ReviewEntryBatcher(pi);
 
   const emitTelemetry = (event: ReviewerTelemetryEvent): void => {
     writeOptionalAuditFile(event);
@@ -2267,6 +2309,12 @@ export function createPiAutoReviewExtension(
   });
 
   pi.on("session_start", (_event, ctx) => {
+    shuttingDown = false;
+    registrationEpoch++;
+    disposeAuthorizer?.();
+    disposeAuthorizer = undefined;
+    registeredSessionId = undefined;
+    reviewEntryBatcher.flushAll();
     disposeBrokerService?.();
     broker?.clear();
     reviewResults.clear();
@@ -2280,7 +2328,17 @@ export function createPiAutoReviewExtension(
       );
       context = ctx;
       broker = createBroker();
-      disposeBrokerService = publishBoundaryBroker(broker);
+      try {
+        disposeBrokerService = publishBoundaryBroker(broker);
+      } catch (error) {
+        if (!(error instanceof Error) ||
+            error.message !== "pi-auto-review boundary broker is already published") {
+          throw error;
+        }
+        // In-process child nodes still need their own reviewer/authorizer.
+        // The process-global broker capability remains owned by the parent.
+        disposeBrokerService = undefined;
+      }
     } catch (error) {
       context = undefined;
       broker = undefined;
@@ -2300,12 +2358,57 @@ export function createPiAutoReviewExtension(
     if (context) uiAutoConfirmer.handlePrompt(event, context);
   });
 
-  pi.events.on("permissions:ready", () => {
-    try {
-      const service = permissionsService();
-      if (!service) return;
+  pi.events.on("permissions:decision", (event) => {
+    reviewEntryBatcher.permissionDecision(event);
+  });
+
+  pi.on("tool_execution_start", (event, ctx) => {
+    reviewEntryBatcher.toolExecutionStarted(
+      ctx.sessionManager.getSessionId(),
+      event.toolCallId,
+      event.args,
+    );
+  });
+  pi.on("turn_end", () => reviewEntryBatcher.flushAll());
+  pi.on("agent_end", () => reviewEntryBatcher.flushAll());
+
+  pi.events.on("permissions:ready", (event) => {
+    const ready = event && typeof event === "object" && !Array.isArray(event)
+      ? event as Record<string, unknown>
+      : undefined;
+    const sessionId = typeof ready?.sessionId === "string" &&
+        ready.sessionId.trim()
+      ? ready.sessionId
+      : undefined;
+    if (!sessionId) {
+      console.error(
+        `${EXTENSION_NAME}: ignored permissions:ready without a session id`,
+      );
+      return;
+    }
+    if (registeredSessionId === sessionId && disposeAuthorizer) return;
+
+    const epoch = ++registrationEpoch;
+    if (registeredSessionId && registeredSessionId !== sessionId) {
       disposeAuthorizer?.();
-      disposeAuthorizer = service.registerAuthorizer(
+      disposeAuthorizer = undefined;
+      registeredSessionId = undefined;
+    }
+
+    void import("@gotgenes/pi-permission-system").then((module) => {
+      if (shuttingDown || epoch !== registrationEpoch || !context) return;
+      const service = module.getPermissionsService(sessionId) as
+        | PermissionsService
+        | undefined;
+      if (!service) {
+        console.error(
+          `${EXTENSION_NAME}: permissions service unavailable for session ${sessionId}`,
+        );
+        return;
+      }
+      let dispose: (() => void) | undefined;
+      try {
+        dispose = service.registerAuthorizer(
         EXTENSION_NAME,
         async (details, query, log: AuthorizerLog) => {
           const evidence = normalizePermissionEvidence(details);
@@ -2379,15 +2482,35 @@ export function createPiAutoReviewExtension(
                   : undefined,
               ...reviewMeta,
             };
-            presentUserReview(
-              pi,
-              context,
-              buildUserReviewNotice(noticeInput),
-              buildUserReviewEntryData(noticeInput),
-            );
+            const notice = buildUserReviewNotice(noticeInput);
+            const entryData = buildUserReviewEntryData(noticeInput);
+            const localSessionId = context.sessionManager.getSessionId();
+            if (
+              context.mode === "tui" &&
+              context.hasUI &&
+              request.toolCallId &&
+              localSessionId &&
+              !promptIsForwarded(details)
+            ) {
+              reviewEntryBatcher.enqueue({
+                sessionId: localSessionId,
+                toolCallId: request.toolCallId,
+                fullCommand: reliableFullCommand(details),
+                member: {
+                  requestId: request.id,
+                  ...noticeInput,
+                },
+                notice,
+                data: entryData,
+                ctx: context,
+              });
+            } else {
+              presentUserReview(pi, context, notice, entryData);
+            }
 
             log.review("pi_auto_review_decision", {
               requestId: request.id,
+              toolCallId: request.toolCallId,
               surface,
               model: config.model,
               reviewerModel: reviewMeta.model,
@@ -2445,22 +2568,45 @@ export function createPiAutoReviewExtension(
           } finally {
             setUserReviewStatus(context, undefined);
           }
-        },
-      );
-      writeOptionalAuditFile({ type: "authorizer_registered" });
-    } catch (error) {
+          },
+        );
+        if (shuttingDown || epoch !== registrationEpoch || !context) {
+          dispose();
+          return;
+        }
+        disposeAuthorizer?.();
+        disposeAuthorizer = dispose;
+        registeredSessionId = sessionId;
+        writeOptionalAuditFile({
+          type: "authorizer_registered",
+          sessionId,
+        });
+      } catch (error) {
+        dispose?.();
+        console.error(
+          `${EXTENSION_NAME}: authorizer registration failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }).catch((error) => {
+      if (shuttingDown || epoch !== registrationEpoch) return;
       console.error(
-        `${EXTENSION_NAME}: authorizer registration failed: ${
+        `${EXTENSION_NAME}: permission-system import failed: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-    }
+    });
   });
 
   pi.on("session_shutdown", () => {
+    shuttingDown = true;
+    registrationEpoch++;
     setUserReviewStatus(context, undefined);
+    reviewEntryBatcher.flushAll();
     disposeAuthorizer?.();
     disposeAuthorizer = undefined;
+    registeredSessionId = undefined;
     disposeBrokerService?.();
     disposeBrokerService = undefined;
     broker?.clear();

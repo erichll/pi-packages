@@ -6,6 +6,10 @@ import { AuthorizerRegistry } from "../../../node_modules/@gotgenes/pi-permissio
 import { composeAuthorizerChain } from "../../../node_modules/@gotgenes/pi-permission-system/src/authority/authorizer-chain.ts";
 import { encloseInDelegationEnvelope } from "../../../node_modules/@gotgenes/pi-permission-system/src/authority/delegation-envelope.ts";
 import {
+  publishPermissionsService,
+  unpublishPermissionsService,
+} from "../../../node_modules/@gotgenes/pi-permission-system/src/service.ts";
+import {
   REVIEWER_NONCRITICAL_DENY_AGENT_INSTRUCTION,
   createPiAutoReviewExtension,
   loadConfig,
@@ -14,10 +18,6 @@ import {
 import { getBoundaryBroker } from "../src/broker/index.ts";
 import { boundaryRequestHash } from "../src/broker/grants.ts";
 import { approveSandboxTrap } from "../../pi-sandbox/src/approval.ts";
-
-const PERMISSIONS_SERVICE_KEY = Symbol.for(
-  "@gotgenes/pi-permission-system:service",
-);
 
 type ModelBehavior =
   | string
@@ -80,6 +80,9 @@ function harness(
     interactiveTui?: boolean;
     uiPromptRequestId?: string;
     recognizePermissionComponent?: boolean;
+    emitReady?: boolean;
+    sessionId?: string;
+    adjudicatesLocally?: boolean;
     contextEntries?: readonly unknown[];
     authBehavior?: () => Promise<
       | {
@@ -92,6 +95,7 @@ function harness(
     >;
   } = {},
 ) {
+  const harnessSessionId = options.sessionId ?? "integration-session";
   const registry = new AuthorizerRegistry();
   const events = new EventEmitter();
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
@@ -105,13 +109,26 @@ function harness(
   const uiDecisions: unknown[] = [];
   const modelCallOptions: Array<Record<string, unknown>> = [];
   const telemetry: Array<Record<string, unknown>> = [];
+  const appendedEntries: Array<{ type: string; data: unknown }> = [];
   let reviewerResolveCalls = 0;
   let reviewerMetaCalls = 0;
+  let registrationCalls = 0;
+  let disposalCalls = 0;
   const service = {
-    registerAuthorizer: registry.register.bind(registry),
+    registerAuthorizer(
+      name: string,
+      authorize: Parameters<AuthorizerRegistry["register"]>[1],
+    ) {
+      registrationCalls++;
+      const dispose = registry.register(name, authorize);
+      return () => {
+        disposalCalls++;
+        dispose();
+      };
+    },
     checkPermission: () => "ask",
   };
-  (globalThis as Record<symbol, unknown>)[PERMISSIONS_SERVICE_KEY] = service;
+  publishPermissionsService(harnessSessionId, service as never);
   events.on("pi-auto-review:audit", (event) => {
     telemetry.push(event as Record<string, unknown>);
   });
@@ -129,6 +146,10 @@ function harness(
     },
     sendUserMessage(message: string) {
       sentUserMessages.push(message);
+    },
+    registerEntryRenderer() {},
+    appendEntry(type: string, data: unknown) {
+      appendedEntries.push({ type, data });
     },
   };
   const model = {
@@ -231,7 +252,7 @@ function harness(
       }),
     },
     sessionManager: {
-      getSessionId: () => "integration-session",
+      getSessionId: () => harnessSessionId,
       buildContextEntries: () =>
         options.contextEntries ?? [
           {
@@ -249,7 +270,12 @@ function harness(
     allowUntrustedWorkspace: true,
   })(pi as never);
   handlers.get("session_start")?.({}, context);
-  events.emit("permissions:ready");
+  if (options.emitReady !== false) {
+    events.emit("permissions:ready", {
+      sessionId: harnessSessionId,
+      adjudicatesLocally: options.adjudicatesLocally ?? true,
+    });
+  }
 
   const log = {
     review(event: string, data: Record<string, unknown>) {
@@ -266,6 +292,9 @@ function harness(
       surface: string,
       overrides: Record<string, unknown> = {},
     ) {
+      if (!registry.get("pi-auto-review")) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
       const registered = registry.get("pi-auto-review");
       assert.ok(registered, "pi-auto-review registered through the service");
       let terminalCalls = 0;
@@ -357,12 +386,20 @@ function harness(
     uiDecisions,
     modelCallOptions,
     telemetry,
+    appendedEntries,
+    events,
     context,
     get reviewerResolveCalls() {
       return reviewerResolveCalls;
     },
     get reviewerMetaCalls() {
       return reviewerMetaCalls;
+    },
+    get registrationCalls() {
+      return registrationCalls;
+    },
+    get disposalCalls() {
+      return disposalCalls;
     },
     get seenModels() {
       return seenModels;
@@ -384,7 +421,7 @@ function harness(
     },
     dispose() {
       handlers.get("session_shutdown")?.();
-      delete (globalThis as Record<symbol, unknown>)[PERMISSIONS_SERVICE_KEY];
+      unpublishPermissionsService(harnessSessionId, service as never);
     },
   };
 }
@@ -404,6 +441,31 @@ const defer =
 const highRiskAllow =
   '{"outcome":"allow","risk_level":"high","user_authorization":"high","rationale":"The user explicitly authorized this operation."}';
 
+function promptPayload(
+  kind: "bash" | "bash_external_directory",
+  surface: string,
+  value: string,
+  fullCommand?: string,
+) {
+  return {
+    kind,
+    request: {
+      requester: { agentName: null, forwarded: false, sessionId: null },
+      surface,
+      toolName: "bash",
+      invokedToolName: null,
+      value,
+      matchedPattern: "*",
+      commandContext: null,
+      executedUnit: null,
+    },
+    evidence: fullCommand
+      ? [{ label: "full command", text: fullCommand, detail: null }]
+      : [],
+    annotations: [],
+  };
+}
+
 test("request hashes bind forwarded requester sessions", () => {
   const request = {
     id: "request",
@@ -421,6 +483,94 @@ test("request hashes bind forwarded requester sessions", () => {
   );
 });
 
+test("27.x ready registration is session-scoped and idempotent", async () => {
+  const instance = harness(allow);
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(instance.registrationCalls, 1);
+    instance.events.emit("permissions:ready", {
+      sessionId: "integration-session",
+      adjudicatesLocally: false,
+    });
+    instance.events.emit("permissions:ready", {
+      sessionId: null,
+      adjudicatesLocally: true,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(instance.registrationCalls, 1);
+  } finally {
+    instance.dispose();
+  }
+  assert.equal(instance.disposalCalls, 1);
+});
+
+test("shutdown invalidates a late 27.x registration task", async () => {
+  const instance = harness(allow, { emitReady: false });
+  instance.events.emit("permissions:ready", {
+    sessionId: "integration-session",
+    adjudicatesLocally: true,
+  });
+  instance.dispose();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(instance.registrationCalls, 0);
+  assert.equal(instance.disposalCalls, 0);
+});
+
+test("a new ready session disposes the previous authorizer before registering", async () => {
+  const instance = harness(allow);
+  const nextRegistry = new AuthorizerRegistry();
+  let nextDisposals = 0;
+  const nextService = {
+    registerAuthorizer(
+      name: string,
+      authorize: Parameters<AuthorizerRegistry["register"]>[1],
+    ) {
+      const dispose = nextRegistry.register(name, authorize);
+      return () => {
+        nextDisposals++;
+        dispose();
+      };
+    },
+    checkPermission: () => "ask",
+  };
+  publishPermissionsService("next-session", nextService as never);
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    instance.events.emit("permissions:ready", {
+      sessionId: "next-session",
+      adjudicatesLocally: true,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(instance.disposalCalls, 1);
+    assert.ok(nextRegistry.get("pi-auto-review"));
+  } finally {
+    instance.dispose();
+    unpublishPermissionsService("next-session", nextService as never);
+  }
+  assert.equal(nextDisposals, 1);
+});
+
+test("in-process nodes register independently and child shutdown preserves parent", async () => {
+  const parent = harness(allow, { sessionId: "parent-session" });
+  const child = harness(allow, {
+    sessionId: "child-session",
+    adjudicatesLocally: false,
+  });
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(parent.registrationCalls, 1);
+    assert.equal(child.registrationCalls, 1);
+    child.dispose();
+    assert.equal(child.disposalCalls, 1);
+    const result = await parent.authorize("bash");
+    assert.equal(result.decision.approved, true);
+    assert.equal(parent.disposalCalls, 0);
+  } finally {
+    parent.dispose();
+    unpublishPermissionsService("child-session", {} as never);
+  }
+});
+
 test("real permission-system authorizer chain integration", async (t) => {
   await t.test("ask is decided as allow, deny, or terminal defer", async () => {
     for (const [output, approved, terminalCalls] of [
@@ -436,6 +586,98 @@ test("real permission-system authorizer chain integration", async (t) => {
       } finally {
         instance.dispose();
       }
+    }
+  });
+
+  await t.test("two local asks keep separate reviews and audit but append one TUI group", async () => {
+    const instance = harness(allow, { interactiveTui: true });
+    const command = "d=$(mktemp -d /tmp/demo.XXXXXX) && printf hi > $d/out";
+    try {
+      await instance.authorize("external_directory", {
+        requestId: "request-path",
+        toolCallId: "call-shared",
+        command,
+        payload: promptPayload(
+          "bash_external_directory",
+          "external_directory",
+          command,
+        ),
+      });
+      await instance.authorize("bash", {
+        requestId: "request-bash",
+        toolCallId: "call-shared",
+        command: "d=$(mktemp -d /tmp/demo.XXXXXX)",
+        payload: promptPayload(
+          "bash",
+          "bash",
+          "d=$(mktemp -d /tmp/demo.XXXXXX)",
+          command,
+        ),
+      });
+      assert.equal(instance.modelContexts.length, 2);
+      assert.equal(
+        instance.reviews.filter((entry) =>
+          entry.event === "pi_auto_review_decision"
+        ).length,
+        2,
+      );
+      assert.ok(
+        instance.reviews
+          .filter((entry) => entry.event === "pi_auto_review_decision")
+          .every((entry) => entry.data.toolCallId === "call-shared"),
+      );
+      assert.equal(instance.appendedEntries.length, 0);
+      instance.handlers.get("tool_execution_start")?.(
+        {
+          type: "tool_execution_start",
+          toolCallId: "call-shared",
+          toolName: "bash",
+          args: { command },
+        },
+        instance.context,
+      );
+      assert.equal(instance.appendedEntries.length, 1);
+      const data = instance.appendedEntries[0]?.data as {
+        kind: string;
+        fullCommand: string;
+        members: Array<{ requestId: string; surface: string }>;
+      };
+      assert.equal(data.kind, "group");
+      assert.equal(data.fullCommand, command);
+      assert.deepEqual(
+        data.members.map(({ requestId, surface }) => ({ requestId, surface })),
+        [
+          { requestId: "request-path", surface: "external_directory" },
+          { requestId: "request-bash", surface: "bash" },
+        ],
+      );
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  await t.test("forwarded and uncorrelated asks remain immediate TUI entries", async () => {
+    const instance = harness(allow, { interactiveTui: true });
+    try {
+      await instance.authorize("bash", {
+        requestId: "request-forwarded",
+        toolCallId: "call-forwarded",
+        command: "printf forwarded",
+        forwarding: {
+          requesterAgentName: "worker",
+          requesterSessionId: "child-session",
+        },
+      });
+      await instance.authorize("bash", {
+        requestId: "request-no-call",
+        command: "printf direct",
+      });
+      assert.equal(instance.appendedEntries.length, 2);
+      assert.ok(instance.appendedEntries.every((entry) =>
+        !(entry.data as { kind?: string }).kind
+      ));
+    } finally {
+      instance.dispose();
     }
   });
 

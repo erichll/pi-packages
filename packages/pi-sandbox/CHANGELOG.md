@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0 - 2026-08-22
+
+- Align the planned package version with `@erichll/pi-auto-review` `0.9.0` and
+  update the exact dependency. This inherits permission-system 27-only
+  session-scoped authorizer registration and local TUI review aggregation; the
+  sandbox's network, filesystem, grant, and external-worker security behavior
+  is unchanged.
+
 ## 0.8.7 - 2026-08-21
 
 - Update the exact `@erichll/pi-auto-review` dependency to `0.8.2`, inheriting

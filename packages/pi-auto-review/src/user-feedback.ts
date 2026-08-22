@@ -101,15 +101,15 @@ export function formatReviewUsage(usage: UserReviewUsage): string | undefined {
   if (input !== undefined) {
     const cache =
       usage.cacheRead && usage.cacheRead > 0
-        ? ` (${formatReviewTokenCount(usage.cacheRead)} cache)`
+        ? ` (${formatReviewTokenCount(usage.cacheRead)} toks cache)`
         : "";
-    parts.push(`${formatReviewTokenCount(input)} in${cache}`);
+    parts.push(`${formatReviewTokenCount(input)} toks in${cache}`);
   }
   if (usage.output !== undefined) {
-    parts.push(`${formatReviewTokenCount(usage.output)} out`);
+    parts.push(`${formatReviewTokenCount(usage.output)} toks out`);
   }
   if (parts.length === 0 && usage.totalTokens !== undefined) {
-    parts.push(`${formatReviewTokenCount(usage.totalTokens)} tok`);
+    parts.push(`${formatReviewTokenCount(usage.totalTokens)} toks`);
   }
   if (parts.length === 0) return undefined;
   const approx = usage.availability === "estimated" ? "~" : "";
@@ -193,6 +193,16 @@ function joinNoticeLines(lines: Array<string | undefined>): string[] {
     .filter((line) => line.length > 0);
 }
 
+function reviewTargetRationaleLine(input: {
+  target?: string;
+  rationale?: string;
+}): string | undefined {
+  const target = compactReviewText(input.target, 100);
+  const rationale = compactReviewText(input.rationale, 180);
+  if (target && rationale) return `${target} · ${rationale}`;
+  return target || rationale || undefined;
+}
+
 export type UserReviewNoticeInput = {
   outcome: UserReviewOutcome;
   surface: string;
@@ -210,6 +220,24 @@ export type UserReviewEntryData = {
   type: UserReviewNotice["type"];
   lines: string[];
 };
+
+export type UserReviewGroupMember = UserReviewNoticeInput & {
+  requestId: string;
+  permissionResult?: "allow" | "deny";
+};
+
+export type UserReviewGroupEntryData = {
+  kind: "group";
+  type: UserReviewNotice["type"];
+  sessionId: string;
+  toolCallId: string;
+  fullCommand?: string;
+  members: UserReviewGroupMember[];
+};
+
+export type AnyUserReviewEntryData =
+  | UserReviewEntryData
+  | UserReviewGroupEntryData;
 
 type UserReviewTheme = {
   fg(color: string, text: string): string;
@@ -258,11 +286,21 @@ function outcomeVerb(outcome: UserReviewOutcome): string {
   }
 }
 
+function memberOutcomeText(outcome: UserReviewOutcome): string {
+  switch (outcome) {
+    case "auto_confirm":
+      return "allowed · auto-confirm";
+    case "needs_confirmation":
+      return "allowed · confirm locally";
+    default:
+      return outcomeVerb(outcome);
+  }
+}
+
 export function buildUserReviewLines(input: UserReviewNoticeInput): string[] {
   return joinNoticeLines([
     reviewHeadline(input.outcome, input.surface),
-    compactReviewText(input.target, 100) || undefined,
-    compactReviewText(input.rationale, 180) || undefined,
+    reviewTargetRationaleLine(input),
     recoveryLine(input.outcome, input.recoveryCommand),
     formatReviewMeta({
       model: input.model,
@@ -275,7 +313,7 @@ export function buildUserReviewLines(input: UserReviewNoticeInput): string[] {
 
 /**
  * User-facing (not agent-facing) notice after a review decision.
- * Structured for TUI wrapping: headline, target, rationale, then model/tokens.
+ * Structured for TUI wrapping: headline, target+rationale, then model/tokens.
  */
 export function buildUserReviewNotice(
   input: UserReviewNoticeInput,
@@ -297,10 +335,7 @@ export function buildUserReviewEntryData(
 }
 
 export function formatUserReviewQuoteMessage(message: string): string {
-  return message
-    .split("\n")
-    .map((line) => `│ ${line}`)
-    .join("\n");
+  return message;
 }
 
 function displayWidth(text: string): number {
@@ -362,8 +397,7 @@ export function renderUserReviewQuoteLines(
   theme: UserReviewTheme,
   width: number,
 ): string[] {
-  const contentWidth = Math.max(1, width - 2);
-  const border = theme.fg("mdQuoteBorder", "│ ");
+  const contentWidth = Math.max(1, width);
   const verb = outcomeVerb(data.outcome);
   const verbAnsi = theme.getFgAnsi(outcomeAccent(data.outcome));
   const numberAnsi = theme.getFgAnsi("success");
@@ -379,14 +413,77 @@ export function renderUserReviewQuoteLines(
       }
       if (index === data.lines.length - 1) {
         painted = painted.replace(
-          /(\d+(?:\.\d+)?[kM]?)(?=\s(?:in|out|tok|cache|calls)|ms\b|s\b)/g,
+          /(\d+(?:\.\d+)?[kM]?)(?=\s(?:toks|calls)|ms\b|s\b)/g,
           `${numberAnsi}$1\x1b[0m`,
         );
       }
-      rendered.push(border + withQuoteStyle(theme, painted));
+      rendered.push(withQuoteStyle(theme, painted));
     }
   }
   return rendered;
+}
+
+function groupOutcome(members: readonly UserReviewGroupMember[]): UserReviewOutcome {
+  if (members.some((member) => member.permissionResult === "deny")) return "deny";
+  for (const outcome of [
+    "circuit_breaker",
+    "deny",
+    "unavailable",
+    "defer",
+    "needs_confirmation",
+    "auto_confirm",
+  ] as const) {
+    if (members.some((member) => member.outcome === outcome)) return outcome;
+  }
+  return "allow";
+}
+
+function groupHeadline(data: UserReviewGroupEntryData): string {
+  const outcome = groupOutcome(data.members);
+  const result = outcome === "deny" || outcome === "circuit_breaker" ||
+      outcome === "unavailable"
+    ? "denied"
+    : outcome === "defer" || outcome === "needs_confirmation"
+      ? "deferred"
+      : "allowed";
+  return `Auto-review · ${result} · ${data.members.length} checks`;
+}
+
+export function buildUserReviewGroupLines(
+  data: UserReviewGroupEntryData,
+): UserReviewEntryData {
+  if (data.members.length === 1) {
+    const member = data.members[0];
+    const lines = buildUserReviewLines(member);
+    if (member.permissionResult === "deny" && member.outcome !== "deny") {
+      lines.push("Local confirmation · denied");
+    }
+    return { outcome: groupOutcome(data.members), type: data.type, lines };
+  }
+
+  const lines: string[] = [groupHeadline(data)];
+  const command = String(data.fullCommand ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (command) lines.push(command);
+  for (const member of data.members) {
+    const summary = joinNoticeLines([
+      member.surface,
+      memberOutcomeText(member.outcome),
+      reviewTargetRationaleLine(member),
+    ]).join(" · ");
+    lines.push(
+      summary,
+      ...joinNoticeLines([
+        recoveryLine(member.outcome, member.recoveryCommand),
+        member.permissionResult === "deny" && member.outcome !== "deny"
+          ? "Local confirmation · denied"
+          : undefined,
+        formatReviewMeta(member),
+      ]),
+    );
+  }
+  return { outcome: groupOutcome(data.members), type: data.type, lines };
 }
 
 export function renderUserReviewEntry(
@@ -395,6 +492,25 @@ export function renderUserReviewEntry(
   theme: UserReviewTheme,
 ): { render(width: number): string[]; invalidate(): void } | undefined {
   const data = entry.data;
+  if (
+    data &&
+    typeof data === "object" &&
+    (data as UserReviewGroupEntryData).kind === "group" &&
+    Array.isArray((data as UserReviewGroupEntryData).members) &&
+    (data as UserReviewGroupEntryData).members.length > 0
+  ) {
+    const parsed = data as UserReviewGroupEntryData;
+    return {
+      render(width: number) {
+        return renderUserReviewQuoteLines(
+          buildUserReviewGroupLines(parsed),
+          theme,
+          width,
+        );
+      },
+      invalidate() {},
+    };
+  }
   if (
     !data ||
     typeof data !== "object" ||
@@ -410,6 +526,20 @@ export function renderUserReviewEntry(
     },
     invalidate() {},
   };
+}
+
+function presentUserReviewGroupEntry(
+  pi: ExtensionAPI | undefined,
+  ctx: ExtensionContext | undefined,
+  data: UserReviewGroupEntryData,
+): boolean {
+  if (!pi || !ctx?.hasUI || ctx.mode !== "tui") return false;
+  try {
+    pi.appendEntry(USER_REVIEW_ENTRY_TYPE, data);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function presentUserReviewEntry(
@@ -439,7 +569,7 @@ export function notifyUserReview(
   }
 }
 
-/** TUI quote-style entry when possible; otherwise a quoted notify toast. */
+/** TUI structured entry when possible; otherwise a plain notify toast. */
 export function presentUserReview(
   pi: ExtensionAPI | undefined,
   ctx: ExtensionContext | undefined,
@@ -448,6 +578,163 @@ export function presentUserReview(
 ): void {
   if (presentUserReviewEntry(pi, ctx, data)) return;
   notifyUserReview(ctx, notice);
+}
+
+type PendingReviewGroup = {
+  sessionId: string;
+  toolCallId: string;
+  fullCommand?: string;
+  members: Map<string, {
+    member: UserReviewGroupMember;
+    notice: UserReviewNotice;
+    data: UserReviewEntryData;
+  }>;
+  ctx: ExtensionContext;
+  createdAt: number;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+export type ReviewEntryBatcherOptions = {
+  maxGroups?: number;
+  maxMembers?: number;
+  ttlMs?: number;
+  now?: () => number;
+};
+
+/** Buffers only transcript presentation; permission requests remain independent. */
+export class ReviewEntryBatcher {
+  readonly #groups = new Map<string, PendingReviewGroup>();
+  readonly #maxGroups: number;
+  readonly #maxMembers: number;
+  readonly #ttlMs: number;
+  readonly #now: () => number;
+
+  constructor(
+    private readonly pi: ExtensionAPI,
+    options: ReviewEntryBatcherOptions = {},
+  ) {
+    this.#maxGroups = options.maxGroups ?? 32;
+    this.#maxMembers = options.maxMembers ?? 8;
+    this.#ttlMs = options.ttlMs ?? 60_000;
+    this.#now = options.now ?? Date.now;
+  }
+
+  enqueue(input: {
+    sessionId: string;
+    toolCallId: string;
+    fullCommand?: string;
+    member: UserReviewGroupMember;
+    notice: UserReviewNotice;
+    data: UserReviewEntryData;
+    ctx: ExtensionContext;
+  }): void {
+    try {
+      const key = this.#key(input.sessionId, input.toolCallId);
+      let group = this.#groups.get(key);
+      if (group?.members.has(input.member.requestId)) return;
+      if (group && group.members.size >= this.#maxMembers) {
+        this.#flushKey(key);
+        group = undefined;
+      }
+      if (!group) {
+        if (this.#groups.size >= this.#maxGroups) {
+          const oldest = [...this.#groups.entries()].sort(
+            (left, right) => left[1].createdAt - right[1].createdAt,
+          )[0]?.[0];
+          if (oldest) this.#flushKey(oldest);
+        }
+        const timer = setTimeout(() => this.#flushKey(key), this.#ttlMs);
+        timer.unref?.();
+        group = {
+          sessionId: input.sessionId,
+          toolCallId: input.toolCallId,
+          fullCommand: input.fullCommand,
+          members: new Map(),
+          ctx: input.ctx,
+          createdAt: this.#now(),
+          timer,
+        };
+        this.#groups.set(key, group);
+      } else if (!group.fullCommand && input.fullCommand) {
+        group.fullCommand = input.fullCommand;
+      }
+      group.members.set(input.member.requestId, {
+        member: input.member,
+        notice: input.notice,
+        data: input.data,
+      });
+      if (input.member.outcome === "deny" ||
+          input.member.outcome === "circuit_breaker") {
+        this.#flushKey(key);
+      }
+    } catch {
+      presentUserReview(this.pi, input.ctx, input.notice, input.data);
+    }
+  }
+
+  toolExecutionStarted(
+    sessionId: string,
+    toolCallId: string,
+    args: unknown,
+  ): void {
+    const key = this.#key(sessionId, toolCallId);
+    const group = this.#groups.get(key);
+    if (!group) return;
+    if (!group.fullCommand && args && typeof args === "object" &&
+        !Array.isArray(args) &&
+        typeof (args as Record<string, unknown>).command === "string") {
+      group.fullCommand = String((args as Record<string, unknown>).command);
+    }
+    this.#flushKey(key);
+  }
+
+  permissionDecision(event: unknown): void {
+    if (!event || typeof event !== "object" || Array.isArray(event)) return;
+    const record = event as Record<string, unknown>;
+    if (typeof record.requestId !== "string" ||
+        (record.result !== "allow" && record.result !== "deny")) return;
+    for (const [key, group] of this.#groups) {
+      const pending = group.members.get(record.requestId);
+      if (!pending) continue;
+      pending.member.permissionResult = record.result;
+      if (record.result === "deny") this.#flushKey(key);
+      return;
+    }
+  }
+
+  flushAll(): void {
+    for (const key of [...this.#groups.keys()]) this.#flushKey(key);
+  }
+
+  get pendingGroups(): number {
+    return this.#groups.size;
+  }
+
+  #key(sessionId: string, toolCallId: string): string {
+    return `${sessionId}\u0000${toolCallId}`;
+  }
+
+  #flushKey(key: string): void {
+    const group = this.#groups.get(key);
+    if (!group) return;
+    this.#groups.delete(key);
+    clearTimeout(group.timer);
+    const pending = [...group.members.values()];
+    if (pending.length === 0) return;
+    const members = pending.map((entry) => entry.member);
+    const data: UserReviewGroupEntryData = {
+      kind: "group",
+      type: noticeType(groupOutcome(members)),
+      sessionId: group.sessionId,
+      toolCallId: group.toolCallId,
+      ...(group.fullCommand ? { fullCommand: group.fullCommand } : {}),
+      members,
+    };
+    if (presentUserReviewGroupEntry(this.pi, group.ctx, data)) return;
+    for (const entry of pending) {
+      presentUserReview(this.pi, group.ctx, entry.notice, entry.data);
+    }
+  }
 }
 
 /** Best-effort footer status; pass undefined to clear. */

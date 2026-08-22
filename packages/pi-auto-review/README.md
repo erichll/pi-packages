@@ -16,7 +16,7 @@ that dependency is a hard prerequisite (see [Install and enable](#install-and-en
 > **Prerequisite:** pi-auto-review is an authorizer inside
 > `@gotgenes/pi-permission-system`. Pi does not auto-install peer packages, so
 > install the permission system separately (once per machine) before this
-> extension:
+> extension. Version 0.9.0 requires permission-system 27.x:
 
 ```bash
 pi install npm:@gotgenes/pi-permission-system
@@ -49,7 +49,7 @@ adapters must consume the exact grant before retrying an operation. Changing
 the command, path, resolved path, destination, cwd, agent, or tool input
 invalidates that grant.
 
-Permission-system v24 downgrades authorizer allows on `path` and
+Permission-system downgrades authorizer allows on `path` and
 `external_directory` to `defer`. In an interactive TUI,
 `autoConfirmBoundedAllows` can bind the exact model allow to the immediately
 following recognized permission dialog. The bridge is request-ID-bound,
@@ -132,13 +132,16 @@ only a fixed, budget-checked schema correction.
 
 ## Operator feedback and exact retry
 
-Interactive sessions show a best-effort footer while review is running and a
-structured result row for allow, local confirmation, defer, deny, or circuit
-breaker outcomes. In the TUI this is a quote-style entry (`│`, muted quote
-color) that separates the outcome and surface from the target and rationale,
-then shows the reviewer model name (without provider prefix), input/output
-tokens, and duration when a model call ran. UI delivery never changes the
-authorization result.
+Interactive sessions show a best-effort footer while review is running and
+structured results for allow, local confirmation, defer, deny, or circuit
+breaker outcomes. Local permission-system asks that belong to the same tool
+call are grouped into one TUI entry; each request still has its own model call,
+verdict, grant, local confirmation, and audit record. Forwarded asks and
+non-TUI modes remain immediate and ungrouped. Group members retain their own
+surface, outcome, target, rationale, model, token usage, and duration. UI
+entries use unbordered muted text and place each target and rationale together
+on the same line as that member's surface and outcome. UI delivery never
+changes the authorization result.
 
 In an interactive TUI, `/auto-review-approve` lists up to ten recent
 non-critical model denials from the current session. Selecting one asks the

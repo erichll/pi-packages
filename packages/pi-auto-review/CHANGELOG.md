@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.9.0 - 2026-08-22
+
+- Require `@gotgenes/pi-permission-system` `^27.0.0` and register through the
+  session-keyed `getPermissionsService(sessionId)` locator. Repeated ready
+  broadcasts are idempotent; session changes, shutdown, and late asynchronous
+  imports cannot retain or revive a stale authorizer registration. In-process
+  child nodes register against their own service without replacing the
+  parent's process-local broker capability.
+- Group local TUI review results by `(sessionId, toolCallId)` into one
+  transcript entry while preserving independent asks, model calls, verdicts,
+  grants, confirmations, and audit records. Denials flush immediately; tool
+  start, terminal permission denial, turn/agent/session end, a 60-second TTL,
+  and bounded-capacity eviction provide lossless fallback flushes. Forwarded,
+  uncorrelated, and non-TUI reviews remain immediate.
+- Add `toolCallId` to each `pi_auto_review_decision` audit entry and retain
+  compatibility rendering for historical single-result transcript entries.
+- Remove the review entry's left quote bar and combine each target with its
+  rationale and member surface/outcome on one line, keeping model/token/duration
+  metadata separate.
+- Label every displayed model token count with `toks` in both grouped and
+  single-result output.
+
 ## 0.8.2 - 2026-08-21
 
 - Structure interactive review results as headline, target, rationale, and a

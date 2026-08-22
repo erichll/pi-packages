@@ -11,6 +11,8 @@ import {
   formatReviewTokenCount,
   formatReviewUsage,
   formatUserReviewQuoteMessage,
+  ReviewEntryBatcher,
+  buildUserReviewGroupLines,
   renderUserReviewQuoteLines,
   reviewTargetFromRequest,
 } from "../src/user-feedback.ts";
@@ -67,14 +69,14 @@ test("formatReviewUsage prefers in/out and omits unavailable counters", () => {
       output: 86,
       cacheRead: 800,
     }),
-    "2.4k in (800 cache) · 86 out",
+    "2.4k toks in (800 toks cache) · 86 toks out",
   );
   assert.equal(
     formatReviewUsage({
       availability: "estimated",
       totalTokens: 1200,
     }),
-    "~1.2k tok",
+    "~1.2k toks",
   );
   assert.equal(
     formatReviewUsage({ availability: "unavailable" }),
@@ -101,7 +103,7 @@ test("formatReviewMeta joins model, usage, duration, and extra calls", () => {
       durationMs: 1120,
       attempts: 2,
     }),
-    "gpt-5-mini · 2.4k in · 86 out · 1.1s · 2 calls",
+    "gpt-5-mini · 2.4k toks in · 86 toks out · 1.1s · 2 calls",
   );
   assert.equal(formatReviewDuration(340), "340ms");
   assert.equal(formatReviewMeta({}), undefined);
@@ -126,9 +128,8 @@ test("buildUserReviewNotice covers decisive user outcomes", () => {
       type: "info",
       message: [
         "Auto-review · allowed · bash",
-        "ls",
-        "read-only listing",
-        "gpt-5-mini · 2.1k in · 64 out · 900ms",
+        "ls · read-only listing",
+        "gpt-5-mini · 2.1k toks in · 64 toks out · 900ms",
       ].join("\n"),
     },
   );
@@ -160,8 +161,7 @@ test("buildUserReviewNotice covers decisive user outcomes", () => {
     }).message,
     [
       "Auto-review · deferred · bash",
-      "curl example.com",
-      "network side effects",
+      "curl example.com · network side effects",
     ].join("\n"),
   );
 
@@ -203,10 +203,10 @@ test("buildUserReviewNotice covers decisive user outcomes", () => {
   assert.match(unavailable.message, /unavailable/);
 });
 
-test("quote formatting uses a left bar like markdown blockquotes", () => {
+test("review formatting has no left bar and combines target with rationale", () => {
   assert.equal(
     formatUserReviewQuoteMessage("Auto-review · allowed · bash\nls"),
-    "│ Auto-review · allowed · bash\n│ ls",
+    "Auto-review · allowed · bash\nls",
   );
 
   const theme = {
@@ -234,11 +234,172 @@ test("quote formatting uses a left bar like markdown blockquotes", () => {
     durationMs: 900,
   });
   const rendered = renderUserReviewQuoteLines(data, theme, 80);
-  assert.equal(rendered.length, 4);
+  assert.equal(rendered.length, 3);
   for (const line of rendered) {
-    assert.match(line, /^\[mdQuoteBorder\]│ /);
+    assert.doesNotMatch(line, /│|mdQuoteBorder/);
     assert.match(line, /\[mdQuote\]/);
   }
+  assert.match(rendered[1] ?? "", /ls · read-only listing/);
   assert.match(rendered[0] ?? "", /\[success\]allowed/);
   assert.match(rendered.at(-1) ?? "", /\[success\]2\.1k/);
+});
+
+function batchHarness(options: ConstructorParameters<typeof ReviewEntryBatcher>[1] = {}) {
+  const entries: unknown[] = [];
+  const notifications: unknown[] = [];
+  const pi = {
+    appendEntry(_type: string, data: unknown) {
+      entries.push(data);
+    },
+  };
+  const ctx = {
+    hasUI: true,
+    mode: "tui",
+    ui: {
+      notify(message: string, type: string) {
+        notifications.push({ message, type });
+      },
+    },
+  };
+  return {
+    entries,
+    notifications,
+    pi,
+    ctx,
+    batcher: new ReviewEntryBatcher(pi as never, options),
+  };
+}
+
+function enqueueMember(
+  harness: ReturnType<typeof batchHarness>,
+  requestId: string,
+  toolCallId: string,
+  surface = "bash",
+  sessionId = "session-a",
+) {
+  const input = {
+    outcome: "allow" as const,
+    surface,
+    target: surface === "bash" ? "printf hi" : "/tmp/out",
+    rationale: `${surface} is narrow`,
+  };
+  harness.batcher.enqueue({
+    sessionId,
+    toolCallId,
+    member: { requestId, ...input },
+    notice: buildUserReviewNotice(input),
+    data: buildUserReviewEntryData(input),
+    ctx: harness.ctx as never,
+  });
+}
+
+test("ReviewEntryBatcher groups members by local session and tool call", () => {
+  const harness = batchHarness();
+  enqueueMember(harness, "request-path", "call-a", "external_directory");
+  enqueueMember(harness, "request-bash", "call-a");
+  enqueueMember(harness, "request-other", "call-b");
+  enqueueMember(harness, "request-session", "call-a", "bash", "session-b");
+  assert.equal(harness.entries.length, 0);
+
+  harness.batcher.toolExecutionStarted("session-a", "call-a", {
+    command: "printf hi && wc -l /tmp/out",
+  });
+  assert.equal(harness.entries.length, 1);
+  const grouped = harness.entries[0] as {
+    kind: string;
+    fullCommand: string;
+    members: Array<{ requestId: string }>;
+  };
+  assert.equal(grouped.kind, "group");
+  assert.equal(grouped.fullCommand, "printf hi && wc -l /tmp/out");
+  assert.deepEqual(
+    grouped.members.map((member) => member.requestId),
+    ["request-path", "request-bash"],
+  );
+  assert.ok(
+    buildUserReviewGroupLines(grouped as never).lines.includes(
+      "external_directory · allowed · /tmp/out · external_directory is narrow",
+    ),
+  );
+
+  harness.batcher.flushAll();
+  assert.equal(harness.entries.length, 3);
+});
+
+test("ReviewEntryBatcher flushes terminal deny and records local disagreement", () => {
+  const harness = batchHarness();
+  enqueueMember(harness, "request-defer", "call-a");
+  harness.batcher.permissionDecision({
+    requestId: "request-defer",
+    result: "deny",
+  });
+  assert.equal(harness.entries.length, 1);
+  const grouped = harness.entries[0] as Parameters<typeof buildUserReviewGroupLines>[0];
+  assert.equal(grouped.members[0]?.permissionResult, "deny");
+  assert.match(
+    buildUserReviewGroupLines(grouped).lines.join("\n"),
+    /Local confirmation · denied/,
+  );
+});
+
+test("group member summaries preserve auto-confirm detail on one line", () => {
+  const data = {
+    kind: "group" as const,
+    type: "info" as const,
+    sessionId: "session-a",
+    toolCallId: "call-a",
+    members: [
+      {
+        requestId: "path",
+        outcome: "auto_confirm" as const,
+        surface: "external_directory",
+        target: "/tmp/demo",
+        rationale: "temporary output only",
+      },
+      {
+        requestId: "bash",
+        outcome: "allow" as const,
+        surface: "bash",
+        target: "printf hi",
+        rationale: "harmless output",
+      },
+    ],
+  };
+  assert.deepEqual(buildUserReviewGroupLines(data).lines, [
+    "Auto-review · allowed · 2 checks",
+    "external_directory · allowed · auto-confirm · /tmp/demo · temporary output only",
+    "bash · allowed · printf hi · harmless output",
+  ]);
+});
+
+test("ReviewEntryBatcher bounds groups and members without dropping feedback", () => {
+  const harness = batchHarness({ maxGroups: 2, maxMembers: 2 });
+  enqueueMember(harness, "a-1", "call-a");
+  enqueueMember(harness, "b-1", "call-b");
+  enqueueMember(harness, "c-1", "call-c");
+  assert.equal(harness.entries.length, 1, "oldest group flushed on overflow");
+  enqueueMember(harness, "c-2", "call-c");
+  enqueueMember(harness, "c-3", "call-c");
+  assert.equal(harness.entries.length, 2, "full member group flushed");
+  harness.batcher.flushAll();
+  const memberCount = harness.entries.reduce<number>(
+    (count, entry) => count + (entry as { members: unknown[] }).members.length,
+    0,
+  );
+  assert.equal(memberCount, 5);
+});
+
+test("ReviewEntryBatcher TTL and append failure fall back without loss", async () => {
+  const ttl = batchHarness({ ttlMs: 5 });
+  enqueueMember(ttl, "ttl", "call-ttl");
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  assert.equal(ttl.entries.length, 1);
+
+  const fallback = batchHarness();
+  fallback.pi.appendEntry = () => {
+    throw new Error("renderer storage unavailable");
+  };
+  enqueueMember(fallback, "fallback", "call-fallback");
+  fallback.batcher.flushAll();
+  assert.equal(fallback.notifications.length, 1);
 });

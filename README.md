@@ -27,7 +27,7 @@ projects. The repository can also be installed as one Git-backed Pi package.
 - Node.js 22.19 or newer
 - npm 11
 - Pi 0.82.1 or newer
-- `@gotgenes/pi-permission-system` 23 or newer
+- `@gotgenes/pi-permission-system` 27 or newer
 - Linux: `bubblewrap`, `socat`, and `ripgrep`
 
 ## Development
