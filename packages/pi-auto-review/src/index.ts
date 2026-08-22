@@ -77,7 +77,7 @@ type ReasoningLevel =
 type BoundedSurface = "external_directory" | "path";
 
 export type Config = {
-  model: string;
+  model?: string;
   reasoning: ReasoningLevel;
   timeoutMs: number;
   maxTokens: number;
@@ -281,7 +281,6 @@ const REVIEWER_MAX_RETRY_AFTER_MS = 5_000;
 const FORMAT_RETRY_INSTRUCTION =
   "Format correction only: return exactly one JSON object matching the required schema; do not change the authorization scope or evidence interpretation.";
 const DEFAULT_CONFIG: Config = {
-  model: "codex-auto-review",
   reasoning: "low",
   timeoutMs: 90_000,
   maxTokens: 256,
@@ -371,10 +370,13 @@ function validateConfig(value: unknown, source: string): Config {
   }
   const config = { ...DEFAULT_CONFIG, ...raw };
   if (
-    typeof config.model !== "string" ||
-    !config.model.trim() ||
-    /\s/.test(config.model) ||
-    config.model.split("/").some((segment) => !segment.trim())
+    config.model !== undefined &&
+    (
+      typeof config.model !== "string" ||
+      !config.model.trim() ||
+      /\s/.test(config.model) ||
+      config.model.split("/").some((segment) => !segment.trim())
+    )
   ) {
     throw new Error(
       `${EXTENSION_NAME}: model must be a model id or provider/model`,
@@ -1329,7 +1331,7 @@ function aggregateUsage(attempts: readonly ReviewAttemptObservation[]): {
 
 function userReviewMetaFromResult(
   result: ReviewResult | undefined,
-  fallbackModel: string,
+  fallbackModel: string | undefined,
 ): {
   model?: string;
   usage?: UserReviewUsage;
@@ -1366,7 +1368,7 @@ function completeTelemetry(
     type: "review_complete",
     requestId: request.id,
     surface: request.surface,
-    model: summary.attempts.at(-1)?.model ?? config.model,
+    model: summary.attempts.at(-1)?.model ?? config.model ?? "active",
     reasoning: config.reasoning,
     outcome,
     ...(failureMode ? { failureMode } : {}),
@@ -1493,7 +1495,15 @@ async function resolveReviewerMeta(
   ctx: ExtensionContext,
   config: Config,
 ): Promise<ReviewerMeta> {
-  const { provider, modelId } = parseModelRef(config.model);
+  const activeModel = ctx.getModel?.();
+  const modelRef =
+    config.model ?? (activeModel ? `${activeModel.provider}/${activeModel.id}` : undefined);
+  if (!modelRef) {
+    throw new Error(
+      `${EXTENSION_NAME}: no reviewer model configured and no active model is available`,
+    );
+  }
+  const { provider, modelId } = parseModelRef(modelRef);
   const available = ctx.modelRegistry.getAvailable();
   const registeredModel = provider
     ? ctx.modelRegistry.find(provider, modelId)
@@ -1512,8 +1522,8 @@ async function resolveReviewerMeta(
   if (!model) {
     throw new Error(
       provider
-        ? `provider ${provider} is unavailable for custom model ${config.model}`
-        : `model ${config.model} is unavailable`,
+        ? `provider ${provider} is unavailable for custom model ${modelRef}`
+        : `model ${modelRef} is unavailable`,
     );
   }
 
