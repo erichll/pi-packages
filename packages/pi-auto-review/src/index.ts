@@ -1504,15 +1504,15 @@ async function resolveReviewerMeta(
     );
   }
   const { provider, modelId } = parseModelRef(modelRef);
-  const available = ctx.modelRegistry.getAvailable();
+  const all = ctx.modelRegistry.getAll();
   const registeredModel = provider
     ? ctx.modelRegistry.find(provider, modelId)
-    : available.find(
+    : all.find(
         (candidate) =>
           candidate.id === modelId || candidate.name === modelId,
       );
   const providerFallback = provider
-    ? available.find((candidate) => candidate.provider === provider)
+    ? all.find((candidate) => candidate.provider === provider)
     : undefined;
   const model =
     registeredModel ||
