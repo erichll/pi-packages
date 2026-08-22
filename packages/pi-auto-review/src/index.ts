@@ -11,11 +11,12 @@ import {
   completeSimple,
   type ApiStreamSimpleFunction,
 } from "@earendil-works/pi-ai/compat";
-import type {
-  AuthorizerLog,
-  AuthorizerVerdict,
-  PermissionQuery,
-  PromptPermissionDetails,
+import {
+  getPermissionsService,
+  type AuthorizerLog,
+  type AuthorizerVerdict,
+  type PermissionQuery,
+  type PromptPermissionDetails,
 } from "@gotgenes/pi-permission-system";
 import {
   buildClassifierTranscript,
@@ -2395,20 +2396,19 @@ export function createPiAutoReviewExtension(
       registeredSessionId = undefined;
     }
 
-    void import("@gotgenes/pi-permission-system").then((module) => {
-      if (shuttingDown || epoch !== registrationEpoch || !context) return;
-      const service = module.getPermissionsService(sessionId) as
-        | PermissionsService
-        | undefined;
-      if (!service) {
-        console.error(
-          `${EXTENSION_NAME}: permissions service unavailable for session ${sessionId}`,
-        );
-        return;
-      }
-      let dispose: (() => void) | undefined;
-      try {
-        dispose = service.registerAuthorizer(
+    if (shuttingDown || epoch !== registrationEpoch || !context) return;
+    const service = getPermissionsService(sessionId) as
+      | PermissionsService
+      | undefined;
+    if (!service) {
+      console.error(
+        `${EXTENSION_NAME}: permissions service unavailable for session ${sessionId}`,
+      );
+      return;
+    }
+    let dispose: (() => void) | undefined;
+    try {
+      dispose = service.registerAuthorizer(
         EXTENSION_NAME,
         async (details, query, log: AuthorizerLog) => {
           const evidence = normalizePermissionEvidence(details);
@@ -2568,35 +2568,27 @@ export function createPiAutoReviewExtension(
           } finally {
             setUserReviewStatus(context, undefined);
           }
-          },
-        );
-        if (shuttingDown || epoch !== registrationEpoch || !context) {
-          dispose();
-          return;
-        }
-        disposeAuthorizer?.();
-        disposeAuthorizer = dispose;
-        registeredSessionId = sessionId;
-        writeOptionalAuditFile({
-          type: "authorizer_registered",
-          sessionId,
-        });
-      } catch (error) {
-        dispose?.();
-        console.error(
-          `${EXTENSION_NAME}: authorizer registration failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
+        },
+      );
+      if (shuttingDown || epoch !== registrationEpoch || !context) {
+        dispose();
+        return;
       }
-    }).catch((error) => {
-      if (shuttingDown || epoch !== registrationEpoch) return;
+      disposeAuthorizer?.();
+      disposeAuthorizer = dispose;
+      registeredSessionId = sessionId;
+      writeOptionalAuditFile({
+        type: "authorizer_registered",
+        sessionId,
+      });
+    } catch (error) {
+      dispose?.();
       console.error(
-        `${EXTENSION_NAME}: permission-system import failed: ${
+        `${EXTENSION_NAME}: authorizer registration failed: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-    });
+    }
   });
 
   pi.on("session_shutdown", () => {

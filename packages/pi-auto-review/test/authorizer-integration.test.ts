@@ -506,11 +506,12 @@ test("27.x ready registration is session-scoped and idempotent", async () => {
 
 test("shutdown invalidates a late 27.x registration task", async () => {
   const instance = harness(allow, { emitReady: false });
+  instance.dispose();
+  // A permissions:ready that arrives after shutdown must not register.
   instance.events.emit("permissions:ready", {
     sessionId: "integration-session",
     adjudicatesLocally: true,
   });
-  instance.dispose();
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(instance.registrationCalls, 0);
   assert.equal(instance.disposalCalls, 0);
