@@ -265,8 +265,10 @@ function outcomeAccent(
     case "auto_confirm":
     case "needs_confirmation":
       return "success";
+    // Deferred also warns: it awaits a human decision, so it must be clearly
+    // visible (theme warning) and stand out until resolved.
     case "defer":
-      return "muted";
+      return "warning";
     case "deny":
     case "circuit_breaker":
       return "warning";

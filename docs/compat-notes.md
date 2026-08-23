@@ -6,12 +6,14 @@ This document records every point at which `pi-packages` (specifically
 verifiable on upgrade so that a `pi-subagents` release cannot silently break
 the outer worker isolation boundary or the compatibility gates.
 
-Current pinned baseline: `pi-subagents 0.54.0` (exact pin in
-`packages/pi-sandbox` `devDependencies`, test/CI only). The `0.53.0 → 0.54.0`
-upgrade was verified: every seam below was diffed between the two published
-releases and found byte-identical (`pi-spawn.ts`, `api/external-runs.ts`,
-`api/external-job-provider.ts`, and `package.json` `exports`), and
-`gate:external-isolation` passes against the installed `0.54.0`.
+Current pinned baseline: `pi-subagents 0.55.0` (exact pin in
+`packages/pi-sandbox` `devDependencies`, test/CI only). The `0.54.0 → 0.55.0`
+upgrade was verified by diffing the two published releases: the seams below
+that this repository couples to are byte-identical (`pi-spawn.ts` incl.
+`PI_SUBAGENT_PI_BINARY`, `api/external-runs.ts`, and `package.json` `exports`).
+`api/external-job-provider.ts` changed only additively (added `followUp?()`
+and the `"follow-up"` operation); pi-sandbox does not import that subpath.
+`gate:external-isolation` is expected to pass against the installed `0.55.0`.
 
 ## Seam registry
 
