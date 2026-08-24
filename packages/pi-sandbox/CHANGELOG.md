@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11.0 - 2026-08-24
 
 - **Tag unmatched network domains.** When a domain does not match any static
   allow or deny rule, the approval request now explicitly records this as

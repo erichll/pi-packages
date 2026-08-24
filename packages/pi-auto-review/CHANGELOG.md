@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11.0 - 2026-08-24
 
 - **Structured network destination.** Network approval requests now carry
   separate host, port, and protocol fields alongside the existing combined
