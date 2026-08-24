@@ -36,6 +36,21 @@ export type SandboxRequestContext = {
   agentName?: string;
 };
 
+export function parseHostPort(target: string | undefined): {
+  host: string;
+  port: number | undefined;
+} | undefined {
+  if (!target) return undefined;
+  const lastColon = target.lastIndexOf(":");
+  if (lastColon <= 0) return { host: target, port: undefined };
+  const portStr = target.slice(lastColon + 1);
+  const port = Number(portStr);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return { host: target, port: undefined };
+  }
+  return { host: target.slice(0, lastColon), port };
+}
+
 export function sandboxTrapToBoundaryRequest(
   trap: SandboxBoundaryTrap,
   context: SandboxRequestContext,
@@ -66,6 +81,7 @@ export function sandboxTrapToBoundaryRequest(
       },
     };
   }
+  const parsed = parseHostPort(trap.target);
   return {
     id,
     source: "sandbox-runtime",
@@ -74,6 +90,8 @@ export function sandboxTrapToBoundaryRequest(
     cwd: trap.process?.cwd || context.cwd,
     command: context.command,
     destination: trap.target,
+    destinationHost: parsed?.host,
+    destinationPort: parsed?.port,
     toolName: trap.process?.exe || undefined,
     agentName: context.agentName,
     matchedPolicy: { decision: "ask" },

@@ -156,6 +156,9 @@ export type RelevantBoundaryRequest = {
   path?: string;
   resolvedPath?: string;
   destination?: string;
+  destinationHost?: string;
+  destinationPort?: number;
+  destinationProtocol?: string;
   toolCallId?: string;
   toolName?: string;
   toolInputPreview?: string;
@@ -1098,6 +1101,9 @@ function toolArgumentCoveredByRequest(
     path: request.path,
     resolvedPath: request.resolvedPath,
     destination: request.destination,
+    destinationHost: request.destinationHost,
+    destinationPort: request.destinationPort,
+    destinationProtocol: request.destinationProtocol,
     cwd: request.cwd,
     agentName: request.agentName,
     requesterSessionId: request.requesterSessionId,

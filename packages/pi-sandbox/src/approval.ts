@@ -52,7 +52,14 @@ export async function approveDomainEndpoint(
     cwd: context.cwd,
     command: context.command,
     destination: `${endpoint.hostname}:${endpoint.port}`,
+    destinationHost: endpoint.hostname,
+    destinationPort: endpoint.port,
+    destinationProtocol: endpoint.protocol,
     agentName: context.agentName,
+    matchedPolicy: {
+      decision: "ask",
+      rule: "network-unmatched",
+    },
   };
   return approveBoundaryRequest(request, context);
 }

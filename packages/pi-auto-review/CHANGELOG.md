@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Structured network destination.** Network approval requests now carry
+  separate host, port, and protocol fields alongside the existing combined
+  destination string. One-shot grants bind each component independently, so a
+  grant issued for one host-port-protocol combination cannot be reused for a
+  different one.
+- **Deferred reviews are more visible.** The review widget now highlights
+  deferred verdicts with a warning accent instead of the previous muted style,
+  making pending human decisions easier to spot.
+
 ## 0.10.0 - 2026-08-22
 
 - Replace the review footer and newly appended transcript entries with one

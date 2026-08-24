@@ -64,6 +64,8 @@ export {
   type SandboxNetworkTrap,
   type SandboxRequestContext,
 } from "./integrations/sandbox.ts";
+import { parseHostPort } from "./integrations/sandbox.ts";
+export { parseHostPort };
 
 type ReasoningLevel =
   | "off"
@@ -749,6 +751,7 @@ function boundaryRequest(
     typeof deterministicPolicy === "string"
       ? deterministicPolicy
       : JSON.stringify(deterministicPolicy);
+  const destParsed = parseHostPort(evidence.destination);
   return {
     id: details.requestId,
     source: "permission-system",
@@ -759,6 +762,8 @@ function boundaryRequest(
     path: evidence.path,
     resolvedPath: evidence.resolvedPath,
     destination: evidence.destination,
+    destinationHost: destParsed?.host,
+    destinationPort: destParsed?.port,
     toolCallId:
       typeof (details as unknown as Record<string, unknown>).toolCallId ===
       "string"

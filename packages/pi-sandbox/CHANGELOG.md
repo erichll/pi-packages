@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Tag unmatched network domains.** When a domain does not match any static
+  allow or deny rule, the approval request now explicitly records this as
+  "network-unmatched" so that audit logs, reviewer context, and grants clearly
+  distinguish static-policy misses from other review triggers.
+- **Structured network destination.** Domain approval requests now include
+  separate host, port, and protocol fields in addition to the combined
+  destination string. Grants bind each component independently, preventing a
+  grant for one host-port-protocol combination from being reused for another.
+- Update the dev-only `pi-subagents` compatibility baseline from `0.54.0` to
+  `0.56.0`. No runtime or public API changes.
+
 ## 0.10.0 - 2026-08-22
 
 - Align the package version with `@erichll/pi-auto-review` `0.10.0` and update

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { sandboxTrapToBoundaryRequest } from "../src/integrations/sandbox.ts";
+import { sandboxTrapToBoundaryRequest, parseHostPort } from "../src/integrations/sandbox.ts";
 
 test("maps a Sandbox Runtime filesystem boundary without losing the resolved path", () => {
   assert.deepEqual(
@@ -44,4 +44,36 @@ test("maps a Sandbox Runtime network boundary to an exact destination", () => {
   assert.equal(request.source, "sandbox-runtime");
   assert.equal(request.surface, "network");
   assert.equal(request.destination, "api.example.com:443");
+  assert.equal(request.destinationHost, "api.example.com");
+  assert.equal(request.destinationPort, 443);
+  assert.equal(request.destinationProtocol, undefined);
+});
+
+test("parseHostPort splits a valid host:port string", () => {
+  assert.deepEqual(parseHostPort("example.com:8443"), {
+    host: "example.com",
+    port: 8443,
+  });
+});
+
+test("parseHostPort returns host only when port is absent", () => {
+  assert.deepEqual(parseHostPort("example.com"), {
+    host: "example.com",
+    port: undefined,
+  });
+});
+
+test("parseHostPort rejects out-of-range ports", () => {
+  assert.deepEqual(parseHostPort("example.com:0"), {
+    host: "example.com:0",
+    port: undefined,
+  });
+  assert.deepEqual(parseHostPort("example.com:70000"), {
+    host: "example.com:70000",
+    port: undefined,
+  });
+});
+
+test("parseHostPort returns undefined for undefined input", () => {
+  assert.equal(parseHostPort(undefined), undefined);
 });

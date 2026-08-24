@@ -22,6 +22,9 @@ export type BoundaryRequest = {
   path?: string;
   resolvedPath?: string;
   destination?: string;
+  destinationHost?: string;
+  destinationPort?: number;
+  destinationProtocol?: string;
   toolCallId?: string;
   toolName?: string;
   skillName?: string;

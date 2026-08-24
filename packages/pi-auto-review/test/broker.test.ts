@@ -16,6 +16,10 @@ const request: BoundaryRequest = {
   cwd: "/workspace/project",
   command: "npm install",
   destination: "registry.npmjs.org:443",
+  destinationHost: "registry.npmjs.org",
+  destinationPort: 443,
+  destinationProtocol: "https",
+  matchedPolicy: { decision: "ask", rule: "network-unmatched" },
 };
 
 const allowReview: BoundaryReview = {
@@ -61,7 +65,49 @@ test("grant cannot authorize a materially different request", async () => {
   if (decision.kind !== "allow" || !decision.grant) return;
   assert.equal(
     broker.consumeGrant(
-      { ...request, destination: "example.com:443" },
+      { ...request, destination: "example.com:443", destinationHost: "example.com" },
+      "session-1",
+      decision.grant.token,
+    ),
+    false,
+  );
+});
+
+test("grant hash binds structured destination port independently", async () => {
+  const broker = new BoundaryApprovalBroker({
+    reviewer: async () => allowReview,
+  });
+  const decision = await broker.review(request, {
+    sessionId: "session-1",
+    scopeKey: "turn-1",
+    issueGrant: true,
+  });
+  assert.ok(decision.kind === "allow" && decision.grant);
+  if (decision.kind !== "allow" || !decision.grant) return;
+  assert.equal(
+    broker.consumeGrant(
+      { ...request, destinationPort: 8443 },
+      "session-1",
+      decision.grant.token,
+    ),
+    false,
+  );
+});
+
+test("grant hash binds structured destination protocol independently", async () => {
+  const broker = new BoundaryApprovalBroker({
+    reviewer: async () => allowReview,
+  });
+  const decision = await broker.review(request, {
+    sessionId: "session-1",
+    scopeKey: "turn-1",
+    issueGrant: true,
+  });
+  assert.ok(decision.kind === "allow" && decision.grant);
+  if (decision.kind !== "allow" || !decision.grant) return;
+  assert.equal(
+    broker.consumeGrant(
+      { ...request, destinationProtocol: "tcp" },
       "session-1",
       decision.grant.token,
     ),

@@ -121,10 +121,10 @@ test("host-IPC fallback warns that the first attempt may have side effects", asy
 });
 
 test("domain approval consumes a grant bound to the exact hostname and port", async () => {
-  let reviewedDestination = "";
+  let reviewedRequest: import("@erichll/pi-auto-review/broker").BoundaryRequest | undefined;
   const broker = new BoundaryApprovalBroker({
     reviewer: async (request) => {
-      reviewedDestination = request.destination || "";
+      reviewedRequest = request;
       return review;
     },
   });
@@ -140,7 +140,15 @@ test("domain approval consumes a grant bound to the exact hostname and port", as
   );
   assert.equal(result.action, "allow");
   assert.equal(result.source, "reviewer");
-  assert.equal(reviewedDestination, "registry.npmjs.org:443");
+  assert.ok(reviewedRequest);
+  assert.equal(reviewedRequest.destination, "registry.npmjs.org:443");
+  assert.equal(reviewedRequest.destinationHost, "registry.npmjs.org");
+  assert.equal(reviewedRequest.destinationPort, 443);
+  assert.equal(reviewedRequest.destinationProtocol, "https");
+  assert.deepEqual(reviewedRequest.matchedPolicy, {
+    decision: "ask",
+    rule: "network-unmatched",
+  });
 });
 
 test("allows only after consuming the exact reviewer grant", async () => {
