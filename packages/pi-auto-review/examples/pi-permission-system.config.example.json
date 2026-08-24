@@ -100,6 +100,7 @@
       "command -v *": "allow",
       "mkdir *": "allow",
       "cat *": "allow",
+      "echo *": "allow",
       "head *": "allow",
       "tail *": "allow",
       "ls *": "allow",
