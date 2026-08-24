@@ -100,6 +100,12 @@ Use the user-global file for normal customization. It may set any legal key:
 }
 ```
 
+For a complete `@gotgenes/pi-permission-system` config that wires
+`pi-auto-review` into the authorizer chain — a copyable baseline covering
+read/write/edit, a read-only bash allowlist, an MCP discovery policy, and a
+`path` deny block for secret and credential files — see
+[`examples/pi-permission-system.config.example.json`](examples/pi-permission-system.config.example.json).
+
 Package defaults:
 
 ```json
