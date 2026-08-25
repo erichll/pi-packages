@@ -84,7 +84,6 @@
       "rtk rg *": "allow",
       "rtk diff *": "allow",
       "rtk wc *": "allow",
-      "rtk git status": "allow",
       "rtk git status *": "allow",
       "rtk git diff *": "allow",
       "rtk git log *": "allow",
@@ -92,6 +91,24 @@
       "rtk git commit *": "allow",
       "rtk git show *": "allow",
       "rtk git branch": "allow",
+      "tmux capture-pane *": "allow",
+      "tmux display-message *": "allow",
+      "tmux display-menu *": "allow",
+      "tmux display-panes *": "allow",
+      "tmux display-popup *": "allow",
+      "tmux find-window *": "allow",
+      "tmux has-session *": "allow",
+      "tmux list-*": "allow",
+      "tmux show-*": "allow",
+      "tmux last-pane *": "allow",
+      "tmux last-window *": "allow",
+      "tmux next-window *": "allow",
+      "tmux previous-window *": "allow",
+      "tmux select-layout *": "allow",
+      "tmux select-pane *": "allow",
+      "tmux select-window *": "allow",
+      "tmux switch-client *": "allow",
+      "tmux wait-for *": "allow",
       "cd *": "allow",
       "basename *": "allow",
       "dirname *": "allow",
@@ -101,6 +118,9 @@
       "mkdir *": "allow",
       "cat *": "allow",
       "echo *": "allow",
+      "printf *": "allow",
+      "sleep *": "allow",
+      "export *": "allow",
       "head *": "allow",
       "tail *": "allow",
       "ls *": "allow",
@@ -116,9 +136,13 @@
       "fd *": "allow",
       "diff *": "allow",
       "pwd": "allow",
-      "date": "allow",
+      "date *": "allow",
       "which *": "allow",
       "type *": "allow"
+    },
+    "external_directory": {
+      "*": "ask",
+      "/tmp/*": "allow"
     },
     "mcp": {
       "*": "ask",
@@ -130,9 +154,6 @@
     "skill": {
       "*": "allow"
     },
-    "external_directory": {
-      "*": "ask",
-      "/tmp/*": "allow"
-    }
+    "ask_user": "allow"
   }
 }
