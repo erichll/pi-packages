@@ -30,8 +30,7 @@ const hasSrtDependencies =
   spawnSync("socat", ["-V"]).status === 0 &&
   spawnSync("rg", ["--version"]).status === 0;
 const srtTest = hasSrtDependencies ? test : test.skip;
-const nativeSrtTest =
-  process.platform === "darwin" || hasSrtDependencies ? test : test.skip;
+const macosSrtTest = process.platform === "darwin" ? test : test.skip;
 const rpcTest = sandboxRuntimeNetworkCapable() ? test : test.skip;
 
 function policy(root: string, workspace: string): SandboxPolicy {
@@ -237,7 +236,7 @@ srtTest("Sandbox Runtime blocks filesystem access outside policy", async () => {
   }
 });
 
-nativeSrtTest("Sandbox Runtime keeps all child temp env vars on the private directory", async () => {
+macosSrtTest("Sandbox Runtime keeps all child temp env vars on the private directory", async () => {
   const workspace = mkdtempSync(join(tmpdir(), "pi-sandbox-srt-tmpenv-"));
   let output = "";
   try {
