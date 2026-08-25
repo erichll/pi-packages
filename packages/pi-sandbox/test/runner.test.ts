@@ -30,6 +30,8 @@ const hasSrtDependencies =
   spawnSync("socat", ["-V"]).status === 0 &&
   spawnSync("rg", ["--version"]).status === 0;
 const srtTest = hasSrtDependencies ? test : test.skip;
+const nativeSrtTest =
+  process.platform === "darwin" || hasSrtDependencies ? test : test.skip;
 const rpcTest = sandboxRuntimeNetworkCapable() ? test : test.skip;
 
 function policy(root: string, workspace: string): SandboxPolicy {
@@ -235,6 +237,30 @@ srtTest("Sandbox Runtime blocks filesystem access outside policy", async () => {
   }
 });
 
+nativeSrtTest("Sandbox Runtime keeps all child temp env vars on the private directory", async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "pi-sandbox-srt-tmpenv-"));
+  let output = "";
+  try {
+    const result = await runSandboxedCommand({
+      command: `printf '%s\\n' "$TMPDIR" "$TMP" "$TEMP"; test "$TMPDIR" = "$TMP"; test "$TMP" = "$TEMP"; touch "$TMPDIR/probe"`,
+      cwd: workspace,
+      onData(data) {
+        output += data.toString("utf8");
+      },
+      async review() {
+        return "deny";
+      },
+    });
+    assert.equal(result.exitCode, 0);
+    const [commandTmpdir, commandTmp, commandTemp] = output.trim().split("\n");
+    assert.equal(commandTmpdir, commandTmp);
+    assert.equal(commandTmp, commandTemp);
+    assert.match(commandTmpdir, /(?:^|[/\\])pi-sandbox-tmp-[^/\\]+$/);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 rpcTest("Sandbox Runtime supports a persistent direct invocation", async () => {
   const workspace = mkdtempSync(join(tmpdir(), "pi-sandbox-srt-stdin-"));
   const worker = join(workspace, "worker.mjs");
@@ -314,6 +340,11 @@ test("injects a private writable temp dir into policy and broker env, then clean
     assert.ok(probe.allowWrite.includes(tempDir), "allowWrite should include temp dir");
     assert.ok(probe.allowRead.includes(tempDir), "allowRead should include temp dir");
     assert.equal(probe.tmpdirEnv, tempDir, "broker env should carry PI_SANDBOX_TMPDIR");
+    assert.equal(
+      probe.sandboxRuntimeTmpdirEnv,
+      tempDir,
+      "broker env should point Sandbox Runtime at the private temp dir",
+    );
     // The runner must remove the per-command temp dir on completion.
     assert.equal(existsSync(tempDir), false, "temp dir should be cleaned up");
   } finally {

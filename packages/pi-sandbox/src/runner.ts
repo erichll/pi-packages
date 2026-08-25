@@ -92,6 +92,10 @@ const BROKER_MODULE = fileURLToPath(
  * external worker launcher, which creates the same per-worker temp dir.
  */
 const SANDBOX_TMPDIR_ENV = "PI_SANDBOX_TMPDIR";
+// Sandbox Runtime injects TMPDIR into its wrapped command from this variable.
+// Keep it aligned with SANDBOX_TMPDIR_ENV so that injection does not replace
+// the private command temp directory with its /tmp/claude fallback.
+const SANDBOX_RUNTIME_TMPDIR_ENV = "CLAUDE_CODE_TMPDIR";
 const COMMAND_TMPDIR_PREFIX = "pi-sandbox-tmp-";
 
 /**
@@ -196,7 +200,11 @@ export async function runSandboxedCommand(
     : createCommandTempDir();
   if (tempDir) {
     policy = withWritableTempDir(policy, tempDir);
-    brokerEnv = { ...brokerEnv, [SANDBOX_TMPDIR_ENV]: tempDir };
+    brokerEnv = {
+      ...brokerEnv,
+      [SANDBOX_TMPDIR_ENV]: tempDir,
+      [SANDBOX_RUNTIME_TMPDIR_ENV]: tempDir,
+    };
   }
   const broker = spawnBroker(options, brokerEnv);
   let timeoutHandle: NodeJS.Timeout | undefined;

@@ -10,6 +10,7 @@ process.on("message", (message) => {
       allowRead,
       network: message.runtimeConfig.network,
       tmpdirEnv: process.env.PI_SANDBOX_TMPDIR ?? "",
+      sandboxRuntimeTmpdirEnv: process.env.CLAUDE_CODE_TMPDIR ?? "",
     }),
   );
   setTimeout(() => process.exit(0), 10);
