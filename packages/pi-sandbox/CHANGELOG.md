@@ -1,11 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.11.1 - 2026-08-25
 
 - Keep Sandbox Runtime's `CLAUDE_CODE_TMPDIR` aligned with each command's
   private `pi-sandbox-tmp-*` directory. This prevents Sandbox Runtime from
   overriding `TMPDIR` with its missing `/tmp/claude` fallback, notably fixing
   `TMPDIR`-dependent tools on macOS.
+- Align the exact `@erichll/pi-auto-review` dependency with `0.11.1`.
 
 ## 0.11.0 - 2026-08-24
 

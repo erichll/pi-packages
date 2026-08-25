@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.1 - 2026-08-25
+
+- Align the package version with `@erichll/pi-sandbox` `0.11.1`. No
+  pi-auto-review runtime or public API changes.
+
 ## 0.11.0 - 2026-08-24
 
 - **Structured network destination.** Network approval requests now carry
