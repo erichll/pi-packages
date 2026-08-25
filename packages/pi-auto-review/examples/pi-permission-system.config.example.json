@@ -14,6 +14,11 @@
   ],
   "permission": {
     "*": "ask",
+    "external_directory": {
+      "*": "ask",
+      "/tmp/*": "allow",
+      "~/.agents/skills/*": "allow"
+    },
     "path": {
       "*": "allow",
       "*.env": "deny",
@@ -91,6 +96,9 @@
       "rtk git commit *": "allow",
       "rtk git show *": "allow",
       "rtk git branch": "allow",
+      "rtk git branch --show-current *": "allow",
+      "rtk git branch -v *": "allow",
+      "rtk git branch -a *": "allow",
       "tmux capture-pane *": "allow",
       "tmux display-message *": "allow",
       "tmux display-menu *": "allow",
@@ -109,6 +117,10 @@
       "tmux select-window *": "allow",
       "tmux switch-client *": "allow",
       "tmux wait-for *": "allow",
+      "cd ~/.agents/skills*": "allow",
+      "bash ~/.agents/skills/*": "allow",
+      "sh ~/.agents/skills/*": "allow",
+      "cat ~/.agents/skills/*": "allow",
       "cd *": "allow",
       "basename *": "allow",
       "dirname *": "allow",
@@ -139,10 +151,6 @@
       "date *": "allow",
       "which *": "allow",
       "type *": "allow"
-    },
-    "external_directory": {
-      "*": "ask",
-      "/tmp/*": "allow"
     },
     "mcp": {
       "*": "ask",
