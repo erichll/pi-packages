@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- Use the audit to find where permission prompts create the most friction:
+  compare current-project or anonymous global surface/command hotspots, denial
+  rates, approval sources, and rule-hit fingerprints; then review repeatedly
+  approved read-only operations as candidates for narrowly scoped `allow`
+  rules. Mutation, project execution, network, arbitrary-shell, unknown, and
+  custom-tool activity is called out as keep-`ask` evidence rather than an
+  automatic relaxation. The report does not edit policy or claim that an
+  unobserved rule is unused.
+- Add default-on, 180-day permission-policy auditing backed by built-in
+  `node:sqlite`. Permission decisions are immediately reduced to fixed command,
+  risk, path-class, source, and anonymous rule-hit aggregates; raw commands,
+  paths, URLs, credentials, request IDs, and project names are never stored.
+- Add `/auto-review-policy-audit` as an extension-owned custom-entry report.
+  It is not registered as an Agent tool or packaged skill, so audit reporting
+  adds no tool schema or skill metadata to the model context. Reports default
+  to the current project and can explicitly show an anonymous global aggregate.
+- Require Node.js 22.13.0 or newer. No SQLite CLI, system library, npm SQLite
+  package, RTK, or historical permission-log import is required.
+
 ## 0.11.1 - 2026-08-25
 
 - Align the package version with `@erichll/pi-sandbox` `0.11.1`. No

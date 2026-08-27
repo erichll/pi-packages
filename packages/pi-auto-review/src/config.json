@@ -11,5 +11,9 @@
   "breakGlassEnabled": true,
   "failureMode": "deny",
   "grantTtlMs": 60000,
-  "autoConfirmBoundedAllows": ["external_directory", "path"]
+  "autoConfirmBoundedAllows": ["external_directory", "path"],
+  "policyAudit": {
+    "enabled": true,
+    "retentionDays": 180
+  }
 }

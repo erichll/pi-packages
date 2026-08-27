@@ -36,6 +36,7 @@ test("project config can only tighten trusted settings and is frozen", () => {
   assert.equal(effective.retries, 0);
   assert.equal(effective.maxReviewerInputTokens, 4_096);
   assert.equal(effective.breakGlassEnabled, false);
+  assert.deepEqual(effective.policyAudit, { enabled: true, retentionDays: 180 });
   assert.equal(effective.model, trusted.model);
   assert.deepEqual(effective.autoConfirmBoundedAllows, []);
   assert.equal(Object.isFrozen(effective), true);
@@ -44,6 +45,16 @@ test("project config can only tighten trusted settings and is frozen", () => {
   assert.throws(() =>
     applyProjectConfig(trusted, { model: "attacker/reviewer" }),
   );
+  assert.deepEqual(applyProjectConfig(trusted, { policyAudit: { retentionDays: 30 } }).policyAudit, {
+    enabled: true,
+    retentionDays: 30,
+  });
+  assert.deepEqual(applyProjectConfig(trusted, { policyAudit: { enabled: false } }).policyAudit, {
+    enabled: false,
+    retentionDays: 180,
+  });
+  assert.throws(() => applyProjectConfig(trusted, { policyAudit: { retentionDays: 181 } }));
+  assert.throws(() => applyProjectConfig({ ...trusted, policyAudit: { enabled: false, retentionDays: 180 } }, { policyAudit: { enabled: true } }));
   assert.throws(() =>
     applyProjectConfig(trusted, { grantTtlMs: trusted.grantTtlMs + 1 }),
   );
@@ -80,6 +91,7 @@ test("user config can fully overlay package trusted settings", () => {
     autoConfirmBoundedAllows: ["external_directory", "path"],
     timeoutMs: 12_000,
     failureMode: "defer",
+    policyAudit: { retentionDays: 365 },
   });
   assert.equal(effective.model, "user-provider/other-reviewer");
   assert.deepEqual(effective.autoConfirmBoundedAllows, [
@@ -88,6 +100,7 @@ test("user config can fully overlay package trusted settings", () => {
   ]);
   assert.equal(effective.timeoutMs, 12_000);
   assert.equal(effective.failureMode, "defer");
+  assert.deepEqual(effective.policyAudit, { enabled: true, retentionDays: 365 });
   assert.equal(effective.retries, packageConfig.retries);
 
   const bareModel = applyUserConfig(packageConfig, {
@@ -96,6 +109,7 @@ test("user config can fully overlay package trusted settings", () => {
   assert.equal(bareModel.model, "codex-auto-review");
 
   assert.throws(() => applyUserConfig(packageConfig, { model: "" }));
+  assert.throws(() => applyUserConfig(packageConfig, { policyAudit: null }));
   assert.throws(() =>
     applyUserConfig(packageConfig, { maxReviewerInputTokens: 2_047 }),
   );

@@ -22,6 +22,7 @@ that dependency is a hard prerequisite (see [Install and enable](#install-and-en
 - [Reviewer context and token budgets](#reviewer-context-and-token-budgets)
 - [Sandbox integration](#sandbox-integration)
 - [Trust boundary](#trust-boundary)
+- [Permission policy audit](#permission-policy-audit)
 - [Telemetry](#telemetry)
 - [Real-model smoke test](#real-model-smoke-test)
 
@@ -31,6 +32,10 @@ that dependency is a hard prerequisite (see [Install and enable](#install-and-en
 > `@gotgenes/pi-permission-system`. Pi does not auto-install peer packages, so
 > install the permission system separately (once per machine) before this
 > extension. Version 0.10.0 requires permission-system 27.x:
+
+Node.js 22.13.0 or newer is required. Permission auditing uses Node's built-in
+`node:sqlite`; it does not require a SQLite CLI, system SQLite library, or npm
+SQLite package.
 
 ```bash
 pi install npm:@gotgenes/pi-permission-system
@@ -122,7 +127,11 @@ Package defaults:
   "breakGlassEnabled": true,
   "failureMode": "deny",
   "grantTtlMs": 60000,
-  "autoConfirmBoundedAllows": ["external_directory", "path"]
+  "autoConfirmBoundedAllows": ["external_directory", "path"],
+  "policyAudit": {
+    "enabled": true,
+    "retentionDays": 180
+  }
 }
 ```
 
@@ -135,6 +144,11 @@ and grant TTL, set `failureMode` to `"deny"`, set `breakGlassEnabled` to
 `false`, or remove auto-confirmed surfaces. It cannot re-enable break glass,
 select a model, raise a trusted limit, or weaken fail-closed behavior. Invalid
 configuration disables the reviewer for that session.
+
+The trusted user config may set `policyAudit.enabled` and a retention of
+1–3,650 days. Project config may only set `enabled: false` or shorten the
+inherited retention; it cannot re-enable globally disabled collection or
+extend retention.
 
 ### Deadlines and retries
 
@@ -312,6 +326,44 @@ PI_AUTO_REVIEW_ALLOW_UNTRUSTED_DEV=1 pi --approve
 Writes to the installed reviewer package, its user-global configuration,
 project and global security configuration, and the global audit directory are
 deterministically denied.
+
+## Permission policy audit
+
+The extension observes terminal `permissions:decision` broadcasts and stores
+only daily, redacted aggregates. Collection is enabled by default and retains
+180 days. It starts when this version first initializes successfully; no
+permission-system JSONL or RTK history is read or imported.
+
+Before storage, Bash values become fixed signatures such as `git:push`,
+`rtk:git:status`, `npm:test`, or `<path-command>`. Paths become only
+`workspace`, `temp`, `home`, `external`, `sensitive`, or `unknown`. Request IDs,
+project locations, and matched-rule patterns are HMACed. The database never
+stores raw commands, paths, URLs, credentials, tool inputs, or project names.
+
+Data lives at
+`~/.pi/agent/extensions/pi-auto-review/policy-audit.sqlite`, beside an
+owner-only HMAC key. The directory is mode `0700`; the key, database, WAL, and
+SHM are mode `0600`. Initialization, lock, write, or corruption failures disable
+auditing and warn once without changing any permission result. A corrupt
+database is not deleted or rebuilt automatically. Disable new collection with:
+
+```json
+{
+  "policyAudit": { "enabled": false }
+}
+```
+
+Run `/auto-review-policy-audit` for a durable TUI report that is not sent to the
+LLM. Options are `--days 1..retention`, `--top 1..50`, `--min-count >=1`, and
+`--scope current|all`; defaults are `30`, `20`, `5`, and `current`.
+
+The report is an extension-owned custom entry. It is deliberately not exposed
+as an Agent tool or packaged skill, so neither a tool schema nor skill metadata
+is added to the model context. Permission changes remain a separate, explicit
+user operation.
+
+`PI_AUTO_REVIEW_AUDIT_FILE` remains a test/release observation sink. It is not
+an input to this audit and supplies no RTK token or parsing metrics.
 
 ## Telemetry
 
