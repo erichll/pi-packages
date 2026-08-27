@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.12.0 - 2026-08-27
+
+- Align the package version with `@erichll/pi-auto-review` `0.12.0` and update
+  the exact dependency to inherit the private permission-policy audit and its
+  shutdown idempotence fix. No pi-sandbox runtime, filesystem/network policy,
+  grant, or public API changes.
+
 ## 0.11.1 - 2026-08-25
 
 - Keep Sandbox Runtime's `CLAUDE_CODE_TMPDIR` aligned with each command's

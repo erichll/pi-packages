@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.12.0 - 2026-08-27
 
-- Use the audit to find where permission prompts create the most friction:
+- Add the private policy audit
   compare current-project or anonymous global surface/command hotspots, denial
   rates, approval sources, and rule-hit fingerprints; then review repeatedly
   approved read-only operations as candidates for narrowly scoped `allow`
