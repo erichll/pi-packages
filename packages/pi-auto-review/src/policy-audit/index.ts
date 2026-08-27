@@ -163,7 +163,10 @@ export class PolicyAuditController {
 
   async close(): Promise<void> {
     await this.queue;
-    if (this.storePromise) (await this.storePromise.catch(() => undefined))?.close();
+    // Detach before awaiting so concurrent shutdowns cannot double-close.
+    const storePromise = this.storePromise;
     this.storePromise = undefined;
+    const store = await storePromise?.catch(() => undefined);
+    store?.close();
   }
 }

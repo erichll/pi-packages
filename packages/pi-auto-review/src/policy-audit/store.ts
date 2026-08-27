@@ -138,6 +138,7 @@ export class PolicyAuditStore {
     private readonly databasePath: string,
     private readonly retentionDays: number,
     private readonly now: () => Date,
+    private closed = false,
   ) {}
 
   private initialize(): void {
@@ -285,6 +286,9 @@ export class PolicyAuditStore {
   }
 
   close(): void {
+    // Concurrent session_shutdown handlers must not reject a second close.
+    if (this.closed) return;
+    this.closed = true;
     this.db.close();
   }
 }
