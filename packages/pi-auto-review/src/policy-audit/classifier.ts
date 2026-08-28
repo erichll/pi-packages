@@ -23,7 +23,17 @@ export type PolicyAuditCommandFeature =
   | "env_prefix"
   | "compound"
   | "pipeline"
+  | "redirection"
   | "relative_executable";
+
+export type PolicyConfigCandidate = {
+  surface: string;
+  pattern?: string;
+  action: "allow";
+  safetyClass: "observed_bash_template" | "observed_surface";
+  eligible: boolean;
+  blocker?: string;
+};
 
 export type ClassifiedPermission = {
   surface: string;
@@ -32,49 +42,12 @@ export type ClassifiedPermission = {
   risk: PolicyAuditRisk;
   pathClass: PolicyAuditPathClass;
   features: readonly PolicyAuditCommandFeature[];
+  candidate?: PolicyConfigCandidate;
 };
 
-const KNOWN_SURFACES = new Set([
-  "bash",
-  "bash_escalated",
-  "read",
-  "write",
-  "edit",
-  "grep",
-  "find",
-  "ls",
-  "path",
-  "external_directory",
-  "path_read",
-  "path_write",
-  "external_directory_read",
-  "external_directory_write",
-  "skill",
-  "mcp",
-  "network",
-]);
-
+const SAFE_SURFACE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
+const SAFE_COMMAND_WORD = /^[A-Za-z0-9][A-Za-z0-9+._:-]{0,63}$/;
 const SENSITIVE_PATH = /(?:^|[/\\])(?:\.ssh|\.aws|\.gnupg|\.kube|\.azure|\.npmrc|\.netrc|\.env(?:\.[^/\\]+)?|auth\.json|credentials?)(?:[/\\]|$)/i;
-const READ_ONLY_COMMANDS = new Set([
-  "cat", "find", "grep", "head", "ls", "pwd", "rg", "sed", "sort",
-  "stat", "tail", "wc", "which",
-]);
-const MUTATING_COMMANDS = new Set([
-  "chmod", "chown", "cp", "install", "ln", "mkdir", "mv", "rm", "rmdir",
-  "touch", "truncate",
-]);
-const NETWORK_COMMANDS = new Set(["curl", "dig", "host", "nc", "ping", "ssh", "wget"]);
-const SHELL_COMMANDS = new Set(["bash", "dash", "fish", "sh", "zsh"]);
-const GIT_ACTIONS = new Set([
-  "add", "branch", "checkout", "clean", "clone", "commit", "diff", "fetch",
-  "log", "merge", "pull", "push", "rebase", "remote", "reset", "restore",
-  "send-pack", "show", "status", "switch", "tag",
-]);
-const RTK_ACTIONS = new Set(["diff", "find", "grep", "ls", "read", "rg", "smart", "wc"]);
-const PACKAGE_ACTIONS = new Set([
-  "add", "build", "check", "coverage", "dev", "format", "install", "lint",
-  "publish", "start", "test", "typecheck", "uninstall", "update", "upgrade",
-]);
 
 function within(path: string, parent: string): boolean {
   const rel = relative(parent, path);
@@ -90,12 +63,8 @@ export function classifyPath(
   if (typeof value !== "string" || !value.trim()) return "unknown";
   const raw = value.trim();
   if (SENSITIVE_PATH.test(raw)) return "sensitive";
-  if (!raw.startsWith("/") && !raw.startsWith("~") && !raw.startsWith(".")) {
-    return "unknown";
-  }
-  const expanded = raw === "~" || raw.startsWith("~/")
-    ? resolve(home, raw.slice(2))
-    : resolve(cwd, raw);
+  if (!raw.startsWith("/") && !raw.startsWith("~") && !raw.startsWith(".")) return "unknown";
+  const expanded = raw === "~" || raw.startsWith("~/") ? resolve(home, raw.slice(2)) : resolve(cwd, raw);
   if (within(expanded, resolve(cwd))) return "workspace";
   if (within(expanded, resolve(temp))) return "temp";
   if (within(expanded, resolve(home))) return "home";
@@ -103,138 +72,145 @@ export function classifyPath(
 }
 
 function shellTokens(command: string): string[] {
-  return command
-    .trim()
-    .split(/\s+/u)
-    .map((token) => token.replace(/^["']|["']$/g, ""));
+  return command.trim().split(/\s+/u);
 }
 
 function executableIndex(tokens: readonly string[]): number {
   let index = 0;
   if (tokens[index] === "env") index++;
-  while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=.*/.test(tokens[index])) {
-    index++;
-  }
+  while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=.*/.test(tokens[index])) index++;
   return index;
 }
 
-function safeCommandName(token: string | undefined): string {
-  if (!token) return "unknown";
-  const name = token.split(/[\\/]/).at(-1)?.toLowerCase() || "unknown";
-  return /^[a-z0-9][a-z0-9+._-]{0,31}$/.test(name) ? name : "unknown";
+function safeExecutable(token: string | undefined): string | undefined {
+  if (!token || token.includes("/") || token.startsWith(".")) return undefined;
+  const unquoted = token.replace(/^["']|["']$/g, "");
+  return SAFE_COMMAND_WORD.test(unquoted) ? unquoted : undefined;
 }
 
-function knownSignature(tokens: readonly string[], index: number): string {
-  const executable = safeCommandName(tokens[index]);
-  const sub = safeCommandName(tokens[index + 1]);
-  const third = safeCommandName(tokens[index + 2]);
-  if (executable === "rtk") {
-    if (sub === "git") return `rtk:git:${GIT_ACTIONS.has(third) ? third : "other"}`;
-    return `rtk:${RTK_ACTIONS.has(sub) ? sub : "other"}`;
+function reliableShellText(command: string): boolean {
+  let quote = "";
+  let escaped = false;
+  for (const character of command) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) quote = "";
+    } else if (character === "'" || character === '"') {
+      quote = character;
+    }
   }
-  if (executable === "git") return `git:${GIT_ACTIONS.has(sub) ? sub : "other"}`;
-  if (["npm", "pnpm", "yarn", "bun"].includes(executable)) {
-    const action = sub === "run" ? third : sub;
-    return `${executable}:${PACKAGE_ACTIONS.has(action) ? action : "custom-script"}`;
-  }
-  if (READ_ONLY_COMMANDS.has(executable) || MUTATING_COMMANDS.has(executable) ||
-      NETWORK_COMMANDS.has(executable) || SHELL_COMMANDS.has(executable)) {
-    return executable;
-  }
-  if (tokens[index]?.includes("/") || tokens[index]?.startsWith(".")) {
-    return "<path-command>";
-  }
-  return "<other-command>";
+  return !quote && !escaped;
 }
 
-function commandRisk(signature: string, executable: string, command: string): PolicyAuditRisk {
-  if (/&&|\|\||;|\n|`|\$\(|(^|[^|])\|([^|]|$)/.test(command)) return "arbitrary_shell";
-  if (["git:push", "git:send-pack", "rtk:git:push", "rtk:git:send-pack"].includes(signature)) return "network_mutation";
-  if (/^(?:npm|pnpm|yarn|bun):(install|publish|add|upgrade|update)$/.test(signature)) {
-    return signature.endsWith(":publish") ? "network_mutation" : "project_code_execution";
+function sanitizedTemplateToken(token: string, followsOption: boolean): string {
+  if (!token || /^['"]/.test(token) || /[/\\@]/.test(token) || /:\/\//.test(token)) return "*";
+  if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) return "*";
+  if (token.startsWith("--") && token.includes("=")) {
+    const name = token.slice(0, token.indexOf("="));
+    return /^--[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(name) ? `${name}=*` : "*";
   }
-  if (/^(?:npm|pnpm|yarn|bun):/.test(signature)) return "project_code_execution";
-  if (NETWORK_COMMANDS.has(executable)) {
-    return /(?:^|\s)(?:--upload-file|-T|-X\s*(?:POST|PUT|PATCH|DELETE)|--data|-d)(?:\s|=|$)/i.test(command)
-      ? "network_mutation"
-      : "network";
+  if (/^--?[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(token)) return token;
+  if (followsOption) return "*";
+  return SAFE_COMMAND_WORD.test(token) ? token : "*";
+}
+
+function observedBashTemplate(tokens: readonly string[], index: number): string | undefined {
+  const executable = safeExecutable(tokens[index]);
+  if (!executable) return undefined;
+  const template = [executable];
+  let followsOption = false;
+  for (const rawToken of tokens.slice(index + 1)) {
+    const token = sanitizedTemplateToken(rawToken, followsOption);
+    if (template.at(-1) !== "*" || token !== "*") template.push(token);
+    followsOption = /^--?[A-Za-z0-9]/.test(rawToken) && !rawToken.includes("=");
   }
-  if (MUTATING_COMMANDS.has(executable) || ["git:add", "git:commit", "git:reset", "git:clean", "git:checkout", "git:restore", "git:rebase", "rtk:git:add", "rtk:git:commit"].includes(signature)) {
-    return "workspace_mutation";
-  }
-  if (READ_ONLY_COMMANDS.has(executable) || /^(?:rtk:)?git:(?:status|diff|log|show|branch)$/.test(signature)) {
-    return "read_only";
-  }
-  if (SHELL_COMMANDS.has(executable) || signature === "<path-command>") {
-    return "arbitrary_shell";
-  }
-  return "unknown";
+  return template.join(" ");
 }
 
 export function classifyBash(command: unknown, cwd: string): ClassifiedPermission {
   if (typeof command !== "string" || !command.trim()) {
-    return { surface: "bash", signature: "<other-command>", bashCategory: "unknown", risk: "unknown", pathClass: "unknown", features: [] };
+    return { surface: "bash", signature: "<command>", bashCategory: "unknown", risk: "unknown", pathClass: "unknown", features: [] };
   }
   const tokens = shellTokens(command);
   const index = executableIndex(tokens);
-  const executable = safeCommandName(tokens[index]);
-  const signature = knownSignature(tokens, index);
   const features: PolicyAuditCommandFeature[] = [];
   if (index > 0) features.push("env_prefix");
   if (/&&|\|\||;|\n|`|\$\(/.test(command)) features.push("compound");
   if (/(^|[^|])\|([^|]|$)/.test(command)) features.push("pipeline");
+  if (/[<>]/.test(command)) features.push("redirection");
   if (tokens[index]?.includes("/") || tokens[index]?.startsWith(".")) features.push("relative_executable");
-  const bashCategory = /^(?:rtk:)?git:/.test(signature)
-    ? "version_control"
-    : /^(?:npm|pnpm|yarn|bun):/.test(signature)
-      ? "package_script"
-      : NETWORK_COMMANDS.has(executable)
-        ? "network"
-        : READ_ONLY_COMMANDS.has(executable) || MUTATING_COMMANDS.has(executable)
-          ? "filesystem"
-          : "shell";
+  const uniqueFeatures = [...new Set(features)].sort();
+  const structuralBoundary = command.search(/&&|\|\||[;|<>\n]|`|\$\(/);
+  const templateTokens = shellTokens(structuralBoundary >= 0 ? command.slice(0, structuralBoundary) : command);
+  const template = observedBashTemplate(templateTokens, executableIndex(templateTokens));
+  let blocker: string | undefined;
+  if (!reliableShellText(command) || !template) blocker = "command could not be templated reliably";
+  else if (uniqueFeatures.length > 0) blocker = `unsafe command feature: ${uniqueFeatures.join(", ")}`;
+  const candidate: PolicyConfigCandidate | undefined = template ? {
+    surface: "bash",
+    pattern: template,
+    action: "allow",
+    safetyClass: "observed_bash_template",
+    eligible: blocker === undefined,
+    ...(blocker ? { blocker } : {}),
+  } : undefined;
   const pathToken = tokens.slice(index + 1)
-    .map((token) => token.includes("=") ? token.slice(token.indexOf("=") + 1) : token.replace(/^@/, ""))
+    .map((token) => token.replace(/^@/, ""))
     .find((token) => token.startsWith("/") || token.startsWith("./") || token.startsWith("../") || token.startsWith("~/"));
   return {
     surface: "bash",
-    signature,
-    bashCategory,
-    risk: commandRisk(signature, executable, command),
+    signature: template ?? "<command>",
+    bashCategory: uniqueFeatures.length === 0 ? "simple" : "structured",
+    risk: uniqueFeatures.includes("compound") || uniqueFeatures.includes("pipeline")
+      ? "arbitrary_shell"
+      : uniqueFeatures.includes("redirection") ? "workspace_mutation" : "unknown",
     pathClass: classifyPath(pathToken, cwd),
-    features: [...new Set(features)].sort(),
+    features: uniqueFeatures,
+    ...(candidate ? { candidate } : {}),
   };
 }
 
 export function classifyPermission(surfaceValue: unknown, value: unknown, cwd: string): ClassifiedPermission {
-  const rawSurface = typeof surfaceValue === "string" ? surfaceValue.trim().toLowerCase() : "";
-  if (rawSurface === "bash" || rawSurface === "bash_escalated") {
+  const suppliedSurface = typeof surfaceValue === "string" ? surfaceValue.trim() : "";
+  const normalizedSurface = suppliedSurface.toLowerCase();
+  if (normalizedSurface === "bash" || normalizedSurface === "bash_escalated") {
     const classified = classifyBash(value, cwd);
-    return { ...classified, surface: rawSurface || "bash" };
+    if (normalizedSurface === "bash_escalated") {
+      const { candidate: _candidate, ...statisticsOnly } = classified;
+      return { ...statisticsOnly, surface: normalizedSurface };
+    }
+    return classified;
   }
-  const surface = KNOWN_SURFACES.has(rawSurface) ? rawSurface : "custom_tool";
-  const pathSurface = pathSurfaceInfo(surface);
-  if (pathSurface || ["read", "write", "edit"].includes(surface)) {
-    const pathClass = classifyPath(value, cwd);
-    const risk = pathSurface?.effect === "read" || surface === "read"
-      ? "read_only"
-      : pathSurface?.effect === "write" || surface === "write" || surface === "edit"
-        ? "workspace_mutation"
-        : "unknown";
-    return { surface, signature: `<${surface}>`, bashCategory: "not_bash", risk, pathClass, features: [] };
-  }
-  if (["grep", "find", "ls"].includes(surface)) {
-    return { surface, signature: `<${surface}>`, bashCategory: "not_bash", risk: "read_only", pathClass: "unknown", features: [] };
-  }
-  if (surface === "network") {
-    return { surface, signature: "<network>", bashCategory: "not_bash", risk: "network", pathClass: "unknown", features: [] };
-  }
+
+  const validSurface = SAFE_SURFACE.test(suppliedSurface) ? suppliedSurface : undefined;
+  const pathSurface = pathSurfaceInfo(normalizedSurface);
+  const pathLike = pathSurface !== undefined || normalizedSurface === "read" || normalizedSurface === "write" || normalizedSurface === "edit";
+  const pathClass = pathLike ? classifyPath(value, cwd) : "unknown";
+  const risk = pathSurface?.effect === "read" || normalizedSurface === "read"
+    ? "read_only"
+    : pathSurface?.effect === "write" || normalizedSurface === "write" || normalizedSurface === "edit"
+      ? "workspace_mutation"
+      : "unknown";
+  const candidate: PolicyConfigCandidate | undefined = validSurface ? {
+    surface: validSurface,
+    action: "allow",
+    safetyClass: "observed_surface",
+    eligible: true,
+  } : undefined;
   return {
-    surface,
-    signature: surface === "custom_tool" ? "<custom-tool>" : `<${surface}>`,
+    surface: validSurface ?? "custom_tool",
+    signature: validSurface ?? "<custom-tool>",
     bashCategory: "not_bash",
-    risk: "unknown",
-    pathClass: "unknown",
+    risk,
+    pathClass,
     features: [],
+    ...(candidate ? { candidate } : {}),
   };
 }

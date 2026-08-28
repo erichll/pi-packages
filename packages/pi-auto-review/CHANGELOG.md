@@ -2,6 +2,25 @@
 
 ## 0.13.0 - 2026-08-28
 
+- Upgrade `/auto-review-policy-audit` from redacted statistics to an
+  evidence-driven permission-configuration optimizer. Reports now separate
+  suggested allow rules, keep-ask rules, and insufficient evidence, and emit a
+  copyable JSON fragment targeting the selected project or global
+  permission-system configuration. Suggestions remain advisory and never read
+  or modify permission configuration.
+- Discover candidates from actual audit data without built-in tool, executable,
+  Git, RTK, package-manager, or read-only command catalogs. Valid observed
+  surfaces and sanitized Bash templates—including unknown tools and write
+  operations—can qualify after the configured minimum number of successful
+  ask-path approvals. Denials, gate failures, unavailable confirmations,
+  forwarded requests, and structurally unsafe Bash variants block a suggestion.
+- Migrate the policy-audit database transactionally to schema v2. Existing
+  aggregate counts and `collecting_since` are preserved, while the new
+  `recommendations_since` boundary prevents pre-migration data from producing
+  allow suggestions. Valid custom tool names and sanitized Bash templates are
+  retained for reporting. Templates replace paths, URLs, assignments, quoted
+  values, and option values with wildcards; raw commands and non-Bash tool
+  arguments or inputs remain excluded.
 - Add compatibility with `@gotgenes/pi-permission-system` 27.1 directional
   `path_*` and `external_directory_*` surfaces while retaining the original
   surface in authorization evidence, UI binding, logs, and policy audits.

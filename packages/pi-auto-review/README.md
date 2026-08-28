@@ -334,11 +334,18 @@ only daily, redacted aggregates. Collection is enabled by default and retains
 180 days. It starts when this version first initializes successfully; no
 permission-system JSONL or RTK history is read or imported.
 
-Before storage, Bash values become fixed signatures such as `git:push`,
-`rtk:git:status`, `npm:test`, or `<path-command>`. Paths become only
+Before storage, Bash values become observed command templates such as
+`git status --short`, `cat *`, or `npm test * --token *`. URLs, paths,
+assignments, quoted values, and option values are replaced with `*`; safe bare
+command words remain in plaintext so the report can emit a matching rule.
+Paths used for path-surface statistics become only
 `workspace`, `temp`, `home`, `external`, `sensitive`, or `unknown`. Request IDs,
-project locations, and matched-rule patterns are HMACed. The database never
-stores raw commands, paths, URLs, credentials, tool inputs, or project names.
+project locations, and matched-rule patterns are HMACed. Syntactically valid
+custom tool names are also retained in plaintext; invalid names stay anonymous
+as `<custom-tool>`. The database never stores raw commands, raw paths,
+URLs, credentials, or non-Bash tool arguments and inputs. Because safe bare Bash
+words are retained, command templates can contain non-secret filenames or
+project-specific labels; inspect suggestions before copying them.
 
 Data lives at
 `~/.pi/agent/extensions/pi-auto-review/policy-audit.sqlite`, beside an
@@ -356,6 +363,31 @@ database is not deleted or rebuilt automatically. Disable new collection with:
 Run `/auto-review-policy-audit` for a durable TUI report that is not sent to the
 LLM. Options are `--days 1..retention`, `--top 1..50`, `--min-count >=1`, and
 `--scope current|all`; defaults are `30`, `20`, `5`, and `current`.
+
+In addition to the redacted statistics, the report proposes copyable
+permission-system fragments. `--scope current` targets
+`.pi/extensions/pi-permission-system/config.json`; `--scope all` targets
+`~/.pi/agent/extensions/pi-permission-system/config.json`. The extension never
+reads, edits, or rewrites either file. Merge suggested Bash patterns into the
+existing `permission.bash` map and place the narrow allow entries after broader
+matching ask entries, because permission-system uses last-match-wins.
+
+Suggestions are discovered entirely from observed audit data; there is no
+built-in tool, executable, Git action, package-manager action, or read-only
+command catalog. Every valid observed permission surface and reliably templated
+Bash command can qualify, including previously unknown tools and write
+operations. Environment prefixes, compound syntax, pipelines, redirection,
+path executables, and unreliable parsing block that Bash template. Forwarded
+requests are statistics-only because the requester's cwd is not available. A
+candidate needs at least `--min-count` successful ask-path approvals and no
+denial, gate error, unavailable confirmation, blocked structural variant, or
+forwarded-only evidence in the selected window. Existing policy/infrastructure
+allows do not count as evidence of user friction. Repeated approval is evidence
+of user preference, not independent proof that a capability is safe.
+
+Schema v2 migrates v1 aggregates transactionally. Old totals remain visible,
+`collecting_since` is preserved, and `recommendations_since` records when safe
+recommendation evidence began; pre-migration data cannot produce a suggestion.
 
 The report is an extension-owned custom entry. It is deliberately not exposed
 as an Agent tool or packaged skill, so neither a tool schema nor skill metadata
