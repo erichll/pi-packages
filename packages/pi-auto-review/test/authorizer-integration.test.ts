@@ -370,8 +370,14 @@ function harness(
         query as never,
         log,
       );
-      const pathSurface =
-        surface === "path" || surface === "external_directory";
+      const pathSurface = [
+        "path",
+        "path_read",
+        "path_write",
+        "external_directory",
+        "external_directory_read",
+        "external_directory_write",
+      ].includes(surface);
       const decision = await chain.authorize({
         requestId: `request-${surface}`,
         surface: surface === "external_directory" ? undefined : surface,
@@ -1822,7 +1828,14 @@ test("real permission-system authorizer chain integration", async (t) => {
   });
 
   await t.test("path and external_directory allows are capped", async () => {
-    for (const surface of ["path", "external_directory"]) {
+    for (const surface of [
+      "path",
+      "path_read",
+      "path_write",
+      "external_directory",
+      "external_directory_read",
+      "external_directory_write",
+    ]) {
       const instance = harness(allow);
       try {
         const result = await instance.authorize(surface);
@@ -1831,6 +1844,11 @@ test("real permission-system authorizer chain integration", async (t) => {
         assert.equal(
           instance.reviews.at(-1)?.data.allowCapped,
           true,
+        );
+        assert.equal(instance.reviews.at(-1)?.data.surface, surface);
+        assert.equal(
+          (instance.reviews.at(-1)?.data.accessIntent as { surface?: string })?.surface,
+          surface,
         );
       } finally {
         instance.dispose();
@@ -1860,6 +1878,45 @@ test("real permission-system authorizer chain integration", async (t) => {
         renderedWidgetLines(instance.widgets.at(-1)).join("\n"),
         /allowed.*auto-confirm.*external_directory/,
       );
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  await t.test("directional allows auto-confirm through their configured family", async () => {
+    for (const surface of [
+      "path_read",
+      "path_write",
+      "external_directory_read",
+      "external_directory_write",
+    ]) {
+      const instance = harness(allow, { interactiveTui: true });
+      try {
+        const result = await instance.authorize(surface);
+        assert.equal(result.decision.approved, true, surface);
+        assert.equal(result.decision.autoApproved, true, surface);
+        assert.equal(result.terminalCalls, 1, surface);
+        assert.equal(instance.reviews.at(-1)?.data.allowCapped, true, surface);
+        assert.equal(instance.reviews.at(-1)?.data.autoConfirmQueued, true, surface);
+      } finally {
+        instance.dispose();
+      }
+    }
+  });
+
+  await t.test("disabling a family leaves its directional allows for manual confirmation", async () => {
+    const instance = harness(allow, {
+      interactiveTui: true,
+      config: config({ autoConfirmBoundedAllows: ["external_directory"] }),
+    });
+    try {
+      const path = await instance.authorize("path_read");
+      assert.equal(path.decision.approved, false);
+      assert.equal(instance.reviews.at(-1)?.data.autoConfirmQueued, false);
+
+      const external = await instance.authorize("external_directory_read");
+      assert.equal(external.decision.approved, true);
+      assert.equal(instance.reviews.at(-1)?.data.autoConfirmQueued, true);
     } finally {
       instance.dispose();
     }
@@ -2153,6 +2210,71 @@ test("real permission-system authorizer chain integration", async (t) => {
       assert.doesNotMatch(result.reason ?? "", /auto-review-(?:approve|break-glass)/);
     } finally {
       instance.dispose();
+    }
+  });
+
+  await t.test("directional protected writes hard-deny before the model while reads do not", async () => {
+    const cases = [
+      {
+        writeSurface: "path_write",
+        readSurface: "path_read",
+        target: join(
+          process.cwd(),
+          "packages",
+          "pi-auto-review",
+          "src",
+          "config.json",
+        ),
+      },
+      {
+        writeSurface: "external_directory_write",
+        readSurface: "external_directory_read",
+        target: join(process.cwd(), ".pi", "settings.json"),
+      },
+    ];
+
+    for (const { writeSurface, readSurface, target } of cases) {
+      const write = harness(allow);
+      try {
+        const result = await write.authorize(writeSurface, {
+          source: "tool",
+          path: target,
+          value: target,
+          accessIntent: {
+            surface: writeSurface,
+            matchValues: [target],
+            boundaryValue: target,
+          },
+        });
+        assert.equal(result.decision.approved, false, writeSurface);
+        assert.equal(result.terminalCalls, 0, writeSurface);
+        assert.equal(write.modelContexts.length, 0, writeSurface);
+        assert.match(
+          String(write.reviews.at(-1)?.data.rationale),
+          /security|forbidden/i,
+        );
+      } finally {
+        write.dispose();
+      }
+
+      const read = harness(allow);
+      try {
+        const result = await read.authorize(readSurface, {
+          source: "tool",
+          path: target,
+          value: target,
+          accessIntent: {
+            surface: readSurface,
+            matchValues: [target],
+            boundaryValue: target,
+          },
+        });
+        assert.equal(result.terminalCalls, 1, readSurface);
+        assert.equal(read.modelContexts.length, 1, readSurface);
+        assert.equal(read.reviews.at(-1)?.data.allowCapped, true, readSurface);
+      } finally {
+        read.dispose();
+      }
     }
   });
 

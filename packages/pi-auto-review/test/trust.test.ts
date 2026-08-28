@@ -110,6 +110,16 @@ test("user config can fully overlay package trusted settings", () => {
 
   assert.throws(() => applyUserConfig(packageConfig, { model: "" }));
   assert.throws(() => applyUserConfig(packageConfig, { policyAudit: null }));
+  for (const surface of [
+    "path_read",
+    "path_write",
+    "external_directory_read",
+    "external_directory_write",
+  ]) {
+    assert.throws(() =>
+      applyUserConfig(packageConfig, { autoConfirmBoundedAllows: [surface] }),
+    );
+  }
   assert.throws(() =>
     applyUserConfig(packageConfig, { maxReviewerInputTokens: 2_047 }),
   );

@@ -211,6 +211,65 @@ test("gate-surface mismatch does not auto-confirm", async () => {
   assert.deepEqual(result.decision, HUMAN_DENIED);
 });
 
+test("directional surfaces use family configuration but bind the exact prompt surface", async () => {
+  for (const [surface, family] of [
+    ["path_read", "path"],
+    ["path_write", "path"],
+    ["external_directory_read", "external_directory"],
+    ["external_directory_write", "external_directory"],
+  ] as const) {
+    const request = {
+      ...(v26Prompt().request as Record<string, unknown>),
+      surface,
+    };
+    const approved = await runPrompt({
+      event: v26Prompt({ request }),
+      component: dialog(),
+      stageSurface: surface,
+      surfaces: [family],
+    });
+    assert.deepEqual(approved.decision, AUTO_APPROVED, surface);
+
+    const disabled = await runPrompt({
+      event: v26Prompt({ request }),
+      component: dialog(),
+      stageSurface: surface,
+      surfaces: [],
+    });
+    assert.deepEqual(disabled.decision, HUMAN_DENIED, surface);
+  }
+});
+
+test("a path_read pending approval cannot confirm a path_write prompt", async () => {
+  const result = await runPrompt({
+    event: v26Prompt({
+      request: {
+        ...(v26Prompt().request as Record<string, unknown>),
+        surface: "path_write",
+      },
+    }),
+    component: dialog(),
+    stageSurface: "path_read",
+    surfaces: ["path"],
+  });
+  assert.deepEqual(result.decision, HUMAN_DENIED);
+});
+
+test("a directional pending approval requires request.surface evidence", async () => {
+  const result = await runPrompt({
+    event: {
+      requestId: "req-1",
+      source: "tool_call",
+      surface: "read",
+      value: "/tmp/reviewed",
+    },
+    component: dialog(),
+    stageSurface: "path_read",
+    surfaces: ["path"],
+  });
+  assert.deepEqual(result.decision, HUMAN_DENIED);
+});
+
 test("display surface bash does not block an external_directory gate", async () => {
   const result = await runPrompt({
     event: v26Prompt({ surface: "bash" }),

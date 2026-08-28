@@ -72,6 +72,7 @@ import {
   type PolicyAuditArguments,
   type PolicyAuditConfig,
 } from "./policy-audit/index.ts";
+import { isPathSurface, pathSurfaceInfo } from "./path-surfaces.ts";
 export { parseHostPort };
 
 type ReasoningLevel =
@@ -697,6 +698,7 @@ function protectedWriteHardDeny(
 ): { rule: string; reason: string } | undefined {
   const isWrite =
     request.surface === "filesystem-write" ||
+    pathSurfaceInfo(request.surface)?.effect === "write" ||
     /\b(?:write|create|delete|rename|chmod|chown)\b/i.test(
       request.operation,
     );
@@ -773,7 +775,7 @@ function sessionConfig(
 }
 
 function boundedRequest(surface: string): boolean {
-  return BOUNDED_SURFACES.has(surface);
+  return isPathSurface(surface);
 }
 
 type PermissionsService = {
@@ -796,7 +798,7 @@ function boundaryRequest(
   const surface = evidence.surface;
   const value =
     evidence.resolvedPath ??
-    (surface === "path" || surface === "external_directory"
+    (isPathSurface(surface)
       ? evidence.path
       : evidence.command ?? evidence.value ?? evidence.destination) ??
     details.skillName ??

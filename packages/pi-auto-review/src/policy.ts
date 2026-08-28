@@ -1,3 +1,5 @@
+import { isPathSurface } from "./path-surfaces.ts";
+
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
 export type ModelDecision = {
@@ -327,7 +329,7 @@ export function normalizePermissionEvidence(
     "unknown";
   const value = nonEmptyString(details.value);
   const isBash = surface === "bash" || surface === "bash_escalated";
-  const isPath = surface === "path" || surface === "external_directory";
+  const isPath = isPathSurface(surface);
   const command =
     nonEmptyString(details.command) ??
     parsedPreviewCommand(details.toolInputPreview) ??

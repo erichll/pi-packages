@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Add compatibility with `@gotgenes/pi-permission-system` 27.1 directional
+  `path_*` and `external_directory_*` surfaces while retaining the original
+  surface in authorization evidence, UI binding, logs, and policy audits.
+- Keep the permission-system peer range at `^27.0.0` so existing 27.x bare
+  `path` and `external_directory` integrations remain supported.
+
 ## 0.12.0 - 2026-08-27
 
 - Add the private policy audit

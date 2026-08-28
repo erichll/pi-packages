@@ -7,7 +7,9 @@ export async function resolve(specifier, context, nextResolve) {
   } catch (error) {
     if (
       error?.code !== "ERR_MODULE_NOT_FOUND" ||
-      (!specifier.startsWith(".") && !specifier.startsWith("file:"))
+      (!specifier.startsWith(".") &&
+        !specifier.startsWith("file:") &&
+        !specifier.startsWith("#src/"))
     ) {
       throw error;
     }

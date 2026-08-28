@@ -67,6 +67,24 @@ test("path and non-bash classifiers expose buckets rather than paths", () => {
   });
   assert.equal(classifyPermission("my_private_tool", "https://secret.test", "/work/project").signature, "<custom-tool>");
   assert.equal(classifyPermission("external_directory", "/srv/data", "/work/project").risk, "unknown");
+  for (const [surface, risk] of [
+    ["path_read", "read_only"],
+    ["path_write", "workspace_mutation"],
+    ["external_directory_read", "read_only"],
+    ["external_directory_write", "workspace_mutation"],
+  ] as const) {
+    const classified = classifyPermission(surface, "/work/project/src/a.ts", "/work/project");
+    assert.deepEqual(classified, {
+      surface,
+      signature: `<${surface}>`,
+      bashCategory: "not_bash",
+      risk,
+      pathClass: "workspace",
+      features: [],
+    });
+  }
+  assert.equal(classifyPermission("path", "/work/project", "/work/project").risk, "unknown");
+  assert.equal(classifyPermission("external_directory", "/srv/data", "/work/project").signature, "<external_directory>");
 });
 
 test("argument parser enforces the public report bounds", () => {

@@ -16,8 +16,11 @@
     "*": "ask",
     "external_directory": {
       "*": "ask",
-      "/tmp/*": "allow",
-      "~/.agents/skills/*": "allow"
+      "/tmp/*": "allow"
+    },
+    "external_directory_read": {
+      "~/.agents/skills/*": "allow",
+      "~/.pi/agent/skills/*": "allow"
     },
     "path": {
       "*": "allow",

@@ -2,6 +2,7 @@ import type {
   ExtensionContext,
   ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
+import { pathSurfaceInfo } from "./path-surfaces.ts";
 
 type UiCustom = ExtensionUIContext["custom"];
 
@@ -61,7 +62,8 @@ export class PermissionUiAutoConfirmer {
 
   stage(requestId: string, surface: string): boolean {
     this.pruneExpired();
-    if (!this.enabledSurfaces().includes(surface)) return false;
+    const info = pathSurfaceInfo(surface);
+    if (!info || !this.enabledSurfaces().includes(info.family)) return false;
     this.pending.set(requestId, {
       surface,
       expiresAt: Date.now() + this.pendingTtlMs,
@@ -84,10 +86,14 @@ export class PermissionUiAutoConfirmer {
     }
     this.pending.delete(event.requestId);
 
-    if (!this.enabledSurfaces().includes(pending.surface)) return;
+    const info = pathSurfaceInfo(pending.surface);
+    if (!info || !this.enabledSurfaces().includes(info.family)) return;
     // Top-level event.surface is the display tool name (e.g. bash), not the
     // gate. Only request.surface is comparable to the staged allow.
     if (event.gateSurface && event.gateSurface !== pending.surface) return;
+    // Directional approvals cannot safely fall back to a legacy payload that
+    // omits request.surface: read and write members share the same family.
+    if (!event.gateSurface && info.effect) return;
     this.settleActiveForConflict();
 
     const attempt: PromptAttempt = {

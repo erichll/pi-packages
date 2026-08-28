@@ -1,5 +1,6 @@
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
+import { pathSurfaceInfo } from "../path-surfaces.ts";
 
 export type PolicyAuditRisk =
   | "read_only"
@@ -44,6 +45,10 @@ const KNOWN_SURFACES = new Set([
   "ls",
   "path",
   "external_directory",
+  "path_read",
+  "path_write",
+  "external_directory_read",
+  "external_directory_write",
   "skill",
   "mcp",
   "network",
@@ -208,11 +213,12 @@ export function classifyPermission(surfaceValue: unknown, value: unknown, cwd: s
     return { ...classified, surface: rawSurface || "bash" };
   }
   const surface = KNOWN_SURFACES.has(rawSurface) ? rawSurface : "custom_tool";
-  if (["path", "external_directory", "read", "write", "edit"].includes(surface)) {
+  const pathSurface = pathSurfaceInfo(surface);
+  if (pathSurface || ["read", "write", "edit"].includes(surface)) {
     const pathClass = classifyPath(value, cwd);
-    const risk = surface === "read"
+    const risk = pathSurface?.effect === "read" || surface === "read"
       ? "read_only"
-      : surface === "write" || surface === "edit"
+      : pathSurface?.effect === "write" || surface === "write" || surface === "edit"
         ? "workspace_mutation"
         : "unknown";
     return { surface, signature: `<${surface}>`, bashCategory: "not_bash", risk, pathClass, features: [] };

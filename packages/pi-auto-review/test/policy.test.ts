@@ -146,6 +146,44 @@ test("normalizes forwarded permission evidence without guessing ambiguous values
   );
 });
 
+test("normalizes directional path surfaces as path evidence without widening them", () => {
+  const surfaces = [
+    "path_read",
+    "path_write",
+    "external_directory_read",
+    "external_directory_write",
+  ];
+  for (const surface of surfaces) {
+    const explicit = normalizePermissionEvidence({
+      surface,
+      path: "/work/project/file.txt",
+      value: "not-a-destination",
+    });
+    assert.equal(explicit.surface, surface);
+    assert.equal(explicit.path, "/work/project/file.txt");
+    assert.equal(explicit.destination, undefined);
+
+    const valueOnly = normalizePermissionEvidence({
+      value: "/work/project/value-only.txt",
+      accessIntent: {
+        surface,
+        matchValues: ["/work/project/value-only.txt"],
+      },
+    });
+    assert.equal(valueOnly.surface, surface);
+    assert.equal(valueOnly.path, "/work/project/value-only.txt");
+    assert.equal(valueOnly.destination, undefined);
+    assert.equal(valueOnly.accessIntent?.surface, surface);
+  }
+
+  const unrelated = normalizePermissionEvidence({
+    surface: "database_read",
+    value: "primary",
+  });
+  assert.equal(unrelated.path, undefined);
+  assert.equal(unrelated.destination, "primary");
+});
+
 test("deterministic hard deny catches narrow unconditional hazards", () => {
   assert.equal(
     deterministicHardDeny({
