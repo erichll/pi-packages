@@ -142,6 +142,7 @@
       "wc *": "allow",
       "grep *": "allow",
       "rg *": "allow",
+      "sed -n *": "allow",
       "jq *": "allow",
       "cut *": "allow",
       "tr *": "allow",
