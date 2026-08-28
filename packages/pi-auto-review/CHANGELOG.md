@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.13.0 - 2026-08-28
 
 - Add compatibility with `@gotgenes/pi-permission-system` 27.1 directional
   `path_*` and `external_directory_*` surfaces while retaining the original

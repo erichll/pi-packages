@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.13.0 - 2026-08-28
+
+- Align the package version with `@erichll/pi-auto-review` `0.13.0` and update
+  the exact dependency to inherit the directional `path_*` /
+  `external_directory_*` permission-system surface support. No pi-sandbox
+  runtime, filesystem/network policy, grant, or public API changes.
+
 ## 0.12.0 - 2026-08-27
 
 - Align the package version with `@erichll/pi-auto-review` `0.12.0` and update
