@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.0 - 2026-08-28
+
+- Align the package version with `@erichll/pi-auto-review` `0.14.0` and update
+  the exact dependency to inherit the evidence-driven policy-audit optimizer and
+  its schema v2 migration. No pi-sandbox runtime, filesystem/network policy,
+  grant, or public API changes.
+
 ## 0.13.0 - 2026-08-28
 
 - Align the package version with `@erichll/pi-auto-review` `0.13.0` and update

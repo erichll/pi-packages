@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.13.0 - 2026-08-28
+## 0.14.0 - 2026-08-28
 
 - Upgrade `/auto-review-policy-audit` from redacted statistics to an
   evidence-driven permission-configuration optimizer. Reports now separate
@@ -21,6 +21,9 @@
   retained for reporting. Templates replace paths, URLs, assignments, quoted
   values, and option values with wildcards; raw commands and non-Bash tool
   arguments or inputs remain excluded.
+
+## 0.13.0 - 2026-08-28
+
 - Add compatibility with `@gotgenes/pi-permission-system` 27.1 directional
   `path_*` and `external_directory_*` surfaces while retaining the original
   surface in authorization evidence, UI binding, logs, and policy audits.
