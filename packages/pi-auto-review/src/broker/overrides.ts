@@ -13,9 +13,7 @@ type PendingOverride = {
   approvedAt: number;
 };
 
-type PendingBreakGlass = BoundaryBreakGlassAuthorization & {
-  scopeKey: string;
-};
+type PendingBreakGlass = BoundaryBreakGlassAuthorization;
 
 export class RecentDenialStore {
   readonly #denials: RecentBoundaryDenial[] = [];
@@ -63,6 +61,10 @@ export class RecentDenialStore {
       scopeKey: context.scopeKey,
       deniedAt: this.#now(),
     });
+    // A fresh denial is a fresh human decision point: re-enable one-shot
+    // approval for this exact action even if a previous approval was already
+    // consumed earlier in the session.
+    this.#used.delete(this.key(context.sessionId, requestHash));
     if (this.#denials.length > this.#limit) {
       this.#denials.length = this.#limit;
     }
@@ -144,15 +146,18 @@ export class RecentDenialStore {
     if (index < 0) return;
     const denial = this.#denials[index];
     const key = this.key(sessionId, denial.requestHash);
-    if (this.#breakGlassPending.has(key)) return;
+    const pending = this.#breakGlassPending.get(key);
+    if (pending) {
+      // A pending authorization that was never consumed (the retry never
+      // arrived) must not lock break-glass forever once it has expired.
+      if (this.#now() - pending.confirmedAt <= this.#overrideTtlMs) return;
+      this.#breakGlassPending.delete(key);
+    }
     const authorization = {
       originalRequestId: denial.requestId,
       confirmedAt: this.#now(),
     };
-    this.#breakGlassPending.set(key, {
-      ...authorization,
-      scopeKey,
-    });
+    this.#breakGlassPending.set(key, { ...authorization });
     this.#denials.splice(index, 1);
     return {
       denial: structuredClone(denial),
@@ -164,10 +169,13 @@ export class RecentDenialStore {
     request: BoundaryRequest,
     context: BoundaryReviewContext,
   ): BoundaryBreakGlassAuthorization | undefined {
+    // Note: the retry always lands in a later turn than the denial (the
+    // command flow appends a user message before retrying), so the scope key
+    // is intentionally not compared here; the session + request hash and the
+    // confirmation TTL bound the match.
     const key = this.key(context.sessionId, boundaryRequestHash(request));
     const pending = this.#breakGlassPending.get(key);
     if (!pending) return;
-    if (pending.scopeKey !== context.scopeKey) return;
     this.#breakGlassPending.delete(key);
     if (this.#now() - pending.confirmedAt > this.#overrideTtlMs) {
       return;

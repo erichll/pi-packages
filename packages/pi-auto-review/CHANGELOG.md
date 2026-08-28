@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+- Fix `/auto-review-approve` and `/auto-review-break-glass` never applying in
+  real TUI sessions. The exact-match request hash included `toolCallId`, but a
+  retry is always a brand-new model tool call with a fresh tool call ID, so
+  the authorization could never match the retried request. The hash now
+  excludes both retry-minted identifiers (`id` was already excluded).
+- Fix break-glass authorization being discarded on every retry. The stored
+  authorization was bound to the denial-time turn scope, but the command flow
+  appends a user message (`pi.sendUserMessage`) before the agent retries, so
+  the retry always lands in a later turn whose scope differs. Consumption now
+  binds on session and request hash plus the confirmation TTL instead of the
+  turn scope. The non-critical approve path already behaved this way.
+- Reset the turn circuit breaker when a break-glass allow is consumed, so the
+  human-authorized scope can continue instead of staying blocked for the rest
+  of the turn. Fresh repeated denials still trip it again after three
+  consecutive failures.
+- Clean up break-glass authorization bookkeeping: an expired authorization
+  that was never consumed no longer blocks re-approving the same action, and
+  a fresh denial of an action whose approval was already consumed re-arms
+  one-shot approval (one approval per denial).
+
 ## 0.14.0 - 2026-08-28
 
 - Upgrade `/auto-review-policy-audit` from redacted statistics to an

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { BoundaryApprovalBroker } from "../src/broker/broker.ts";
-import { OneShotGrantStore } from "../src/broker/grants.ts";
+import { boundaryRequestHash, OneShotGrantStore } from "../src/broker/grants.ts";
 import { RecentDenialStore } from "../src/broker/overrides.ts";
 import type {
   BoundaryRequest,
@@ -320,12 +320,21 @@ test("critical model denials are separated and break glass allows one exact retr
   const repeated = await broker.review(request, context);
   assert.equal(repeated.kind, "deny");
   assert.equal(calls, 2);
+  // The break-glass allow reset the turn breaker (a human re-authorized the
+  // scope), so fresh denials start counting from zero again.
+  await broker.review(request, context);
+  const secondDenial = await broker.review(request, context);
+  assert.equal(
+    secondDenial.kind === "deny" && secondDenial.denialSource,
+    "reviewer",
+    "break-glass allow resets the breaker; fresh denials recount",
+  );
   await broker.review(request, context);
   const blocked = await broker.review(request, context);
   assert.equal(
     blocked.kind === "deny" && blocked.denialSource,
     "circuit-breaker",
-    "break glass must not clear denial history",
+    "repeated denials after break glass trip the breaker again",
   );
   assert.deepEqual(
     audits.filter((type) => type.startsWith("break_glass")),
@@ -337,7 +346,7 @@ test("critical model denials are separated and break glass allows one exact retr
   );
 });
 
-test("break-glass authorization expires and binds session, scope, and every request field", async () => {
+test("break-glass authorization expires and binds session and every request field", async () => {
   let now = 1_000;
   const denials = new RecentDenialStore(20, () => now);
   const criticalReview: BoundaryReview = {
@@ -364,27 +373,32 @@ test("break-glass authorization expires and binds session, scope, and every requ
       scopeKey: "turn-1",
     }),
     undefined,
+    "another session must never consume the authorization",
   );
+  // The retry always lands in a later turn than the denial (the command flow
+  // appends a user message before the agent retries), so the turn scope must
+  // not bind the authorization.
   assert.ok(
-    denials.consumeCritical(request, {
-      sessionId: "session-1",
-      scopeKey: "turn-1",
-    }),
-  );
-
-  assert.ok(authorize(request));
-  assert.equal(
     denials.consumeCritical(request, {
       sessionId: "session-1",
       scopeKey: "turn-2",
     }),
-    undefined,
+    "a shifted turn scope must not lose the authorization",
   );
+
+  // A retried action mints a fresh requestId and toolCallId (the model issues
+  // a new tool call); neither may participate in the exact match.
+  assert.ok(authorize(request));
   assert.ok(
-    denials.consumeCritical(request, {
+    denials.consumeCritical({
+      ...request,
+      id: "request-retry",
+      toolCallId: "call-retry",
+    }, {
       sessionId: "session-1",
-      scopeKey: "turn-1",
+      scopeKey: "turn-3",
     }),
+    "a retried tool call (new id + toolCallId) must still consume",
   );
 
   for (const changed of [
@@ -494,5 +508,170 @@ test("critical denial selection expires after five minutes and can be disabled",
   assert.equal(
     broker.authorizeCriticalDenial(request.id, "session-1", "turn-1"),
     undefined,
+  );
+});
+
+test("the exact-match hash ignores retry-minted identifiers (requestId, toolCallId)", () => {
+  const retried: BoundaryRequest = {
+    ...request,
+    id: "request-retry",
+    toolCallId: "call-retry",
+  };
+  assert.equal(boundaryRequestHash(retried), boundaryRequestHash(request));
+  assert.notEqual(
+    boundaryRequestHash({ ...request, command: "npm publish" }),
+    boundaryRequestHash(request),
+  );
+});
+
+test("approve override survives a retried tool call id and a shifted turn scope", async () => {
+  let now = 1_000;
+  let calls = 0;
+  const broker = new BoundaryApprovalBroker({
+    reviewer: async (_req, reviewContext) => {
+      calls++;
+      return reviewContext?.userOverride
+        ? {
+            outcome: "allow",
+            riskLevel: "high",
+            userAuthorization: "high",
+            rationale: "Human approved this exact retry.",
+          }
+        : {
+            outcome: "deny",
+            riskLevel: "high",
+            userAuthorization: "unknown",
+            rationale: "Denied without human approval.",
+          };
+    },
+    denials: new RecentDenialStore(10, () => now),
+  });
+  const first = await broker.review(request, {
+    sessionId: "session-1",
+    scopeKey: "session-1:5",
+  });
+  assert.equal(first.kind, "deny");
+  const listed = broker.recentDenials("session-1");
+  assert.equal(listed.length, 1);
+  assert.ok(broker.authorizeRecentDenial(listed[0].requestId, "session-1"));
+
+  // The retry is a new tool call (new id + toolCallId) in a later turn (the
+  // command flow appended a user message). The approval must still apply.
+  const retry = await broker.review({
+    ...request,
+    id: "request-retry",
+    toolCallId: "call-retry",
+  }, {
+    sessionId: "session-1",
+    scopeKey: "session-1:6",
+  });
+  assert.equal(retry.kind, "allow");
+  assert.equal(calls, 2, "the retry must still pass through the reviewer");
+});
+
+test("a fresh denial re-arms one-shot approval after a consumed override", async () => {
+  let now = 1_000;
+  const denials = new RecentDenialStore(10, () => now);
+  const highDeny: BoundaryReview = {
+    outcome: "deny",
+    riskLevel: "high",
+    userAuthorization: "unknown",
+    rationale: "Denied.",
+  };
+  denials.record(request, { sessionId: "session-1", scopeKey: "turn-1" }, highDeny);
+  assert.ok(denials.authorize(request.id, "session-1"));
+  assert.ok(
+    denials.consume(request, { sessionId: "session-1", scopeKey: "turn-1" }),
+  );
+  // The retry was denied again: a fresh denial is a fresh human decision
+  // point and must re-enable approval despite the consumed earlier one.
+  denials.record(request, { sessionId: "session-1", scopeKey: "turn-1" }, highDeny);
+  assert.ok(
+    denials.authorize(request.id, "session-1"),
+    "a re-denied action must be approvable again",
+  );
+  assert.ok(
+    denials.consume(request, { sessionId: "session-1", scopeKey: "turn-1" }),
+  );
+  // But a second approve while one authorization is still pending (not yet
+  // consumed by a retry) must fail.
+  now += 1_000;
+  denials.record(request, { sessionId: "session-1", scopeKey: "turn-1" }, highDeny);
+  assert.ok(denials.authorize(request.id, "session-1"));
+  assert.equal(
+    denials.authorize(request.id, "session-1"),
+    undefined,
+    "a second approve while one authorization is pending must fail",
+  );
+});
+
+test("an expired unconsumed break-glass authorization does not block re-approval", async () => {
+  let now = 1_000;
+  const denials = new RecentDenialStore(10, () => now);
+  const criticalReview: BoundaryReview = {
+    outcome: "deny",
+    riskLevel: "critical",
+    userAuthorization: "unknown",
+    rationale: "Critical model denial.",
+  };
+  denials.record(request, { sessionId: "session-1", scopeKey: "turn-1" }, criticalReview);
+  assert.ok(denials.authorizeCritical(request.id, "session-1", "turn-1"));
+
+  // The retry never arrives; the same action is denied again later.
+  now += 120_000;
+  denials.record(request, { sessionId: "session-1", scopeKey: "turn-1" }, criticalReview);
+  assert.ok(
+    denials.authorizeCritical(request.id, "session-1", "turn-1"),
+    "the stale expired authorization must not lock break-glass forever",
+  );
+});
+
+test("a break-glass allow lets the turn continue after the breaker tripped", async () => {
+  let now = 1_000;
+  let calls = 0;
+  const denials = new RecentDenialStore(10, () => now);
+  const broker = new BoundaryApprovalBroker({
+    reviewer: async () => {
+      calls++;
+      return {
+        outcome: "deny",
+        riskLevel: "critical",
+        userAuthorization: "unknown",
+        rationale: "Critical model denial.",
+      };
+    },
+    denials,
+  });
+  const context = { sessionId: "session-1", scopeKey: "turn-1" };
+  for (let i = 0; i < 3; i++) {
+    await broker.review({ ...request, id: `request-${i}` }, context);
+  }
+  calls = 0;
+  const tripped = await broker.review({ ...request, id: "request-x" }, context);
+  assert.equal(
+    tripped.kind === "deny" && tripped.denialSource,
+    "circuit-breaker",
+  );
+
+  const critical = broker.recentCriticalDenials("session-1");
+  assert.equal(critical.length, 1);
+  assert.ok(
+    broker.startBreakGlassChallenge(critical[0].requestId, "session-1", "turn-1"),
+  );
+  assert.ok(
+    broker.authorizeCriticalDenial(critical[0].requestId, "session-1", "turn-1"),
+  );
+  const allowed = await broker.review({ ...request, id: "request-retry" }, context);
+  assert.equal(allowed.kind, "allow");
+
+  // The human re-authorized the scope: the next ask reaches the reviewer
+  // instead of being blocked by the tripped breaker.
+  calls = 0;
+  const next = await broker.review({ ...request, id: "request-next" }, context);
+  assert.equal(next.kind, "deny");
+  assert.equal(calls, 1, "the breaker must be reset by the break-glass allow");
+  assert.equal(
+    next.kind === "deny" && next.denialSource,
+    "reviewer",
   );
 });

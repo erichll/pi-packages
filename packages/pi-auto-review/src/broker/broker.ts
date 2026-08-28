@@ -99,6 +99,9 @@ export class BoundaryApprovalBroker {
       ? this.#denials.consumeCritical(request, context)
       : undefined;
     if (breakGlass) {
+      // A human explicitly authorized this action; treat the scope as healthy
+      // again, exactly like a reviewer allow would.
+      this.#breaker.record(context.scopeKey, false);
       const review: BoundaryReview = {
         outcome: "allow",
         riskLevel: "critical",

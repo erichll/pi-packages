@@ -2308,6 +2308,24 @@ test("real permission-system authorizer chain integration", async (t) => {
         /Retry the prior tool call once/,
       );
 
+      // A second approval while the first authorization is still pending
+      // consumption is rejected.
+      await command.handler("", {
+        ...instance.context,
+        hasUI: true,
+        mode: "tui",
+        isIdle: () => true,
+        ui: {
+          async select(_title: string, choices: string[]) {
+            return choices[0];
+          },
+          notify(message: string) {
+            notices.push(message);
+          },
+        },
+      });
+      assert.match(notices.at(-1) ?? "", /already approved|expired/i);
+
       const retry = await instance.authorize("bash_escalated");
       assert.equal(retry.decision.approved, false);
       const context = instance.modelContexts.at(-1) as {
@@ -2329,6 +2347,8 @@ test("real permission-system authorizer chain integration", async (t) => {
         },
       );
 
+      // The denied retry re-records a fresh denial, which re-arms one-shot
+      // approval for this exact action (one approval per denial).
       await command.handler("", {
         ...instance.context,
         hasUI: true,
@@ -2343,7 +2363,7 @@ test("real permission-system authorizer chain integration", async (t) => {
           },
         },
       });
-      assert.match(notices.at(-1) ?? "", /already approved|expired/i);
+      assert.match(notices.at(-1) ?? "", /authorized once/i);
     } finally {
       instance.dispose();
     }
@@ -2495,6 +2515,76 @@ test("real permission-system authorizer chain integration", async (t) => {
         secondRetry.decision.denialReason ?? "",
         /\/auto-review-break-glass/,
       );
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  await t.test("break glass survives the real retry shape: new tool call id and a shifted turn", async () => {
+    // Real TUI flow: the command injects a user message (pi.sendUserMessage)
+    // before the agent retries, and the retry is a brand-new model tool call
+    // with a fresh requestId and toolCallId. The authorization must survive
+    // both the resulting turn-scope shift and the new identifiers.
+    const contextEntries: unknown[] = [
+      { message: { role: "user", content: "Run the exact operation requested." } },
+    ];
+    const instance = harness(criticalDeny, { contextEntries });
+    const notices: string[] = [];
+    try {
+      const first = await instance.authorize("bash_escalated", {
+        toolCallId: "call-original",
+      });
+      assert.equal(first.decision.approved, false);
+
+      const breakGlass = instance.commands.get("auto-review-break-glass");
+      assert.ok(breakGlass);
+      await breakGlass.handler("", {
+        ...instance.context,
+        hasUI: true,
+        mode: "tui",
+        isIdle: () => true,
+        ui: {
+          async select(_title: string, choices: string[]) {
+            return choices[0];
+          },
+          async confirm() {
+            return true;
+          },
+          async input(title: string) {
+            const match = title.match(/Type (BREAK-GLASS [A-F0-9]+) within/);
+            assert.ok(match);
+            return match[1];
+          },
+          notify(message: string) {
+            notices.push(message);
+          },
+        },
+      });
+      assert.match(notices.at(-1) ?? "", /authorized once/i);
+
+      // pi.sendUserMessage appended a user message: the retry lands in a new
+      // turn with a fresh tool call identity.
+      contextEntries.push({
+        message: {
+          role: "user",
+          content: "I completed break-glass confirmation for the exact previously denied action",
+        },
+      });
+      const callsBeforeRetry = instance.modelContexts.length;
+      const retry = await instance.authorize("bash_escalated", {
+        requestId: "request-retry",
+        toolCallId: "call-retry",
+      });
+      assert.equal(
+        retry.decision.approved,
+        true,
+        "the break-glass authorization must survive the retry shape",
+      );
+      assert.equal(instance.modelContexts.length, callsBeforeRetry);
+      const authorization = instance.reviews.at(-1)?.data
+        .authorization as Record<string, unknown>;
+      assert.equal(authorization.kind, "break-glass");
+      assert.equal(authorization.originalRequestId, "request-bash_escalated");
     } finally {
       instance.dispose();
     }

@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { BoundaryGrant, BoundaryRequest } from "./types.ts";
 
+// Retry stability: a retried action mints a fresh requestId and toolCallId (the
+// model issues a new tool call), so neither may take part in the exact-match
+// hash. Everything else must be identical for an authorization to apply.
 function stableValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stableValue);
   if (!value || typeof value !== "object") return value;
@@ -25,7 +28,6 @@ export function boundaryRequestHash(request: BoundaryRequest): string {
     destinationHost: request.destinationHost,
     destinationPort: request.destinationPort,
     destinationProtocol: request.destinationProtocol,
-    toolCallId: request.toolCallId,
     toolName: request.toolName,
     skillName: request.skillName,
     toolInputPreview: request.toolInputPreview,

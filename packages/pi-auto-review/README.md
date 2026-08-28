@@ -192,7 +192,9 @@ The host-generated override:
 - expires after 60 seconds and is consumed once;
 - remains separate from untrusted user/tool evidence;
 - still goes through deterministic hard denies and model review; and
-- cannot be reissued for the same request semantics in that session.
+- cannot be reissued while a previous authorization for it is pending, or
+  again after consumption until the same action is denied afresh (one approval
+  per denial).
 
 It is authorization evidence, not a direct allow.
 
@@ -202,11 +204,15 @@ same session made in the last five minutes. After showing the rationale,
 surface, cwd, command or target summary, and request-hash fingerprint, it
 requires an explicit confirmation and a random `BREAK-GLASS <CODE>` phrase
 within 60 seconds. Successful confirmation creates a 60-second, one-use
-authorization bound to the complete request hash, session, scope, and original
-request ID. The exact retry reruns local hard-deny checks, then allows directly
-without calling the reviewer and, for sandbox adapters, still issues the normal
-one-shot grant. Break glass does not reset circuit-breaker history and can be
-disabled in trusted or project configuration with `breakGlassEnabled: false`.
+authorization bound to the complete request hash, session, and original
+request ID. The request hash deliberately excludes the per-attempt `id` and
+`toolCallId` fields: the exact retry is a brand-new model tool call issued in
+a later turn, so retry-minted identifiers cannot participate in the match.
+The exact retry reruns local hard-deny checks, then allows directly without
+calling the reviewer and, for sandbox adapters, still issues the normal
+one-shot grant. A break-glass allow resets the turn circuit breaker (a human
+re-authorized the scope), and break glass can be disabled in trusted or
+project configuration with `breakGlassEnabled: false`.
 
 ## Boundary broker API
 
