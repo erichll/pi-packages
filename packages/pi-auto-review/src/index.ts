@@ -1964,6 +1964,69 @@ export type PiAutoReviewExtensionOptions = {
 
 const POLICY_AUDIT_ENTRY_TYPE = "pi-auto-review-policy-audit";
 
+// Headings flagged for "this is actionable" emphasis. The visual weight
+// otherwise matches the rest of the report and a user skimming the TUI can
+// miss the two sections that actually drive decisions.
+const EMPHASIS_HEADINGS = new Set([
+  "Suggested allow rules",
+  "Keep ask",
+]);
+
+function wrapWidth(text: string, width: number): string[] {
+  if (width <= 0) return [text];
+  const lines: string[] = [];
+  for (const paragraph of text.split("\n")) {
+    if (paragraph.length === 0) {
+      lines.push("");
+      continue;
+    }
+    const tokens = paragraph.split(/(\s+)/);
+    let current = "";
+    let currentWidth = 0;
+    const flush = () => {
+      lines.push(current);
+      current = "";
+      currentWidth = 0;
+    };
+    for (const token of tokens) {
+      if (token.length === 0) continue;
+      const tokenWidth = [...token].reduce(
+        (sum, ch) => sum + ((ch.codePointAt(0) ?? 0) > 0xff ? 2 : 1),
+        0,
+      );
+      if (tokenWidth > width) {
+        if (current.length > 0) flush();
+        for (const char of token) {
+          const charWidth = (char.codePointAt(0) ?? 0) > 0xff ? 2 : 1;
+          if (currentWidth + charWidth > width) flush();
+          current += char;
+          currentWidth += charWidth;
+        }
+        continue;
+      }
+      if (currentWidth + tokenWidth > width && current.length > 0) flush();
+      current += token;
+      currentWidth += tokenWidth;
+    }
+    if (current.length > 0) flush();
+  }
+  return lines.length > 0 ? lines : [""];
+}
+
+function styleAuditLine(theme: { fg(color: string, text: string): string }, line: string): string {
+  if (line.length === 0) return line;
+  if (line.startsWith("```")) return theme.fg("mdCodeBlockBorder", line);
+  if (line.startsWith("# ")) return theme.fg("mdHeading", line);
+  if (line.startsWith("## ")) {
+    const title = line.slice(3).trim();
+    return theme.fg(EMPHASIS_HEADINGS.has(title) ? "success" : "mdHeading", line);
+  }
+  // JSON payload inside the config code block — color it so it reads as a
+  // config block, not a paragraph the user is expected to read.
+  if (/^[ {]/.test(line) || /^["}{,]/.test(line)) return theme.fg("mdCodeBlock", line);
+  return theme.fg("muted", line);
+}
+
 function renderPolicyAuditEntry(
   entry: { data?: unknown },
   _options: unknown,
@@ -1977,13 +2040,7 @@ function renderPolicyAuditEntry(
   return {
     render(width: number) {
       const max = Math.max(20, width - 2);
-      return markdown.split("\n").flatMap((line) => {
-        const output: string[] = [];
-        for (let offset = 0; offset < Math.max(1, line.length); offset += max) {
-          output.push(theme.fg("muted", line.slice(offset, offset + max)));
-        }
-        return output;
-      });
+      return markdown.split("\n").flatMap((line) => wrapWidth(line, max).map((visual) => styleAuditLine(theme, visual)));
     },
     invalidate() {},
   };
