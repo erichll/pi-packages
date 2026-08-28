@@ -243,10 +243,14 @@ export function buildPolicyAuditReport(
   };
 }
 
-function itemLines(items: readonly PolicyAuditReportItem[]): string[] {
+// Shared renderer helpers — kept terse so the TUI can fit one full report
+// on a typical screen without scrolling past statistics.
+type Row = { label: string; count: number; denied: number; denialRate: number };
+
+function itemLines(items: readonly Row[]): string[] {
   return items.length === 0
     ? ["- None above the minimum count."]
-    : items.map((item) => `- ${item.name}: ${item.count} (${item.denied} denied, ${item.denialRate}% denial)`);
+    : items.map((item) => `- ${item.label}: ${item.count} (${item.denied} denied, ${item.denialRate}% denial)`);
 }
 
 function recommendationLines(items: readonly PolicyRecommendationItem[]): string[] {
@@ -255,33 +259,67 @@ function recommendationLines(items: readonly PolicyRecommendationItem[]): string
     : items.map((item) => `- ${displayRule(item)}: ${item.successfulEvidence} successful, ${item.denied} denied — ${item.reason}`);
 }
 
+// Compress the five "hotspot" rankings (surface / signature / bash category /
+// approval source / low-risk) into one table-like section. Each row keeps the
+// original three fields (count, denied, denial rate); zero-denied rows drop
+// the redundant denial-rate field so the eye can scan allowed-only traffic.
+function hotspotRow(item: PolicyAuditReportItem): string {
+  const denied = `${item.denied} denied`;
+  const rate = item.denied === 0 ? "" : `, ${item.denialRate}% denial`;
+  return `- ${item.name}: ${item.count} (${denied}${rate})`;
+}
+
+function renderHotspotSections(report: PolicyAuditReport): string[] {
+  // Approval sources already encodes the same count as surfaces via a
+  // different key, so skip it when nothing was denied — it is allowed-only
+  // noise in that case. Low-risk review candidates overlap with the generic
+  // keep-ask section and are dropped entirely; the keep-ask section is the
+  // authoritative place for "what still asks".
+  const groups: Array<{ title: string; items: PolicyAuditReportItem[] }> = [
+    { title: "Surface hotspots", items: report.surfaces },
+    { title: "Tool and command signatures", items: report.tools },
+    { title: "Bash semantic categories", items: report.bashCategories },
+  ];
+  if (report.approvalSources.some((item) => item.denied > 0)) {
+    groups.push({ title: "Approval sources with denials", items: report.approvalSources });
+  }
+  if (report.ruleFingerprints.length > 0) {
+    groups.push({ title: "Anonymous rule-hit fingerprints",
+      items: report.ruleFingerprints.map((f) => ({ name: f.fingerprint, count: f.count, denied: 0, denialRate: 0 })) });
+  }
+  return groups.flatMap((group) => ["", `## ${group.title}`, "", ...group.items.map(hotspotRow)]);
+}
+
 export function renderPolicyAuditMarkdown(report: PolicyAuditReport): string {
   const suggested = report.suggestedAllowRules.length === 0
     ? ["- None."]
     : report.suggestedAllowRules.map((item) =>
       `- ${displayRule(item)} = allow: ${item.successfulEvidence} successful ask-path samples, zero denials — ${item.rationale}`
     );
-  const fingerprints = report.ruleFingerprints.length === 0
-    ? ["- None above the minimum count."]
-    : report.ruleFingerprints.map((item) => `- ${item.fingerprint}: ${item.count}`);
+  // The candidate keep-ask list (denied / blocked candidates) is the
+  // actionable one; the generic keep-ask and the ranked recommendations
+  // overlap heavily and are kept only as a single fallback line so the
+  // user sees they exist without a wall of duplicates.
+  const candidateKeepAsk = report.keepAskRules.filter((item) => item.denied > 0 ||
+    /denied|forwarded|unsafe|unparseable|authorization failure|parse_failed/i.test(item.reason));
+  const genericKeepAsk = report.keepAskRules.filter((item) => !candidateKeepAsk.includes(item));
+  const keepAskFallback = genericKeepAsk.length > 0
+    ? [`- ${genericKeepAsk.length} more surface(s) remain ask-by-default with no copyable rule; see full report for details.`]
+    : [];
   return [
     "# Permission policy audit", "",
-    `Scope: **${report.scope}** · Window: **${report.fromDay}–${report.throughDay}** · Collecting since: **${report.collectingSince}** · Recommendations since: **${report.recommendationsSince}**`,
+    `Scope: **${report.scope}** · Window: **${report.fromDay}–${report.throughDay}** · Collecting since: **${report.collectingSince}**`,
     `Decisions: **${report.total}** · Allowed: **${report.allowed}** · Denied: **${report.denied}** · Denial rate: **${report.denialRate}%**`, "",
     "## Suggested allow rules", "", ...suggested, "",
-    "## Copyable permission config", "", `Target: \`${report.configTarget}\``, "",
+    "## Copyable permission config", "", `Target: \`${report.configTarget}\``,
+    "Place narrow allow entries after broader matching ask entries (last-match-wins).", "",
     "```json", report.configFragment, "```", "",
-    "Merge Bash patterns into the existing `permission.bash` map at this same scope. Permission-system uses last-match-wins, so place these narrow allow patterns after any broader ask rule that would match them.", "",
-    "## Keep ask", "",
-    "Denied candidates, authorization failures, structurally unsafe Bash variants, forwarded requests, and values without a valid rule remain ask-by-default.",
-    ...recommendationLines(report.keepAskRules), ...itemLines(report.keepAskRecommendations), "",
-    "## Insufficient evidence", "", ...recommendationLines(report.insufficientEvidence), "",
-    "## Surface hotspots", "", ...itemLines(report.surfaces), "",
-    "## Tool and command signatures", "", ...itemLines(report.tools), "",
-    "## Bash semantic categories", "", ...itemLines(report.bashCategories), "",
-    "## Approval sources", "", ...itemLines(report.approvalSources), "",
-    "## Low-risk review candidates", "", ...itemLines(report.lowRiskReviewCandidates), "",
-    "## Anonymous rule-hit fingerprints", "", ...fingerprints, "",
-    "## Warnings", "", ...report.warnings.map((warning) => `- ${warning}`),
+    "## Keep ask",
+    "Denied candidates, authorization failures, unsafe Bash variants, and forwarded requests remain ask-by-default.",
+    ...recommendationLines(candidateKeepAsk), ...keepAskFallback, "",
+    "## Insufficient evidence", "", ...recommendationLines(report.insufficientEvidence),
+    ...renderHotspotSections(report), "",
+    "## Warnings", "",
+    "- Suggestions are evidence-based decision aids and never modify permission configuration. See the package README for the full list of caveats.",
   ].join("\n");
 }
