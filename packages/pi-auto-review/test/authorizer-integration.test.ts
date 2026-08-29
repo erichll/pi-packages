@@ -12,6 +12,7 @@ import {
 import {
   REVIEWER_NONCRITICAL_DENY_AGENT_INSTRUCTION,
   createPiAutoReviewExtension,
+  estimateReviewerTokens,
   loadConfig,
   type Config,
 } from "../src/index.ts";
@@ -888,7 +889,7 @@ test("real permission-system authorizer chain integration", async (t) => {
       );
       assert.equal(
         (completion?.preflight as Record<string, unknown>).estimator,
-        "conservative:utf8",
+        "conservative:cjk-aware",
       );
 
       await instance.authorize("network", {
@@ -971,7 +972,7 @@ test("real permission-system authorizer chain integration", async (t) => {
           observedInputTokens: 127,
         });
         const preflight = completion.preflight as Record<string, unknown>;
-        assert.equal(preflight.estimator, "conservative:utf8");
+        assert.equal(preflight.estimator, "conservative:cjk-aware");
         assert.equal(preflight.maxReviewerInputTokens, 8_192);
         assert.equal(preflight.framingReserveTokens, 64);
         assert.ok(
@@ -1248,12 +1249,14 @@ test("real permission-system authorizer chain integration", async (t) => {
   });
 
   await t.test("format correction cannot exceed the complete input budget", async () => {
+    const cjkFiller = "中文预算填充内容。".repeat(250);
     const baseline = harness("not json");
     let exactInputTokens = 0;
     try {
       await baseline.authorize("network", {
         requestId: "format-retry-budget",
         value: "example.com:443",
+        toolInputPreview: cjkFiller,
       });
       const completion = baseline.telemetry.find(
         (event) => event.type === "review_complete",
@@ -1275,6 +1278,7 @@ test("real permission-system authorizer chain integration", async (t) => {
       await instance.authorize("network", {
         requestId: "format-retry-budget",
         value: "example.com:443",
+        toolInputPreview: cjkFiller,
       });
       assert.equal(instance.modelContexts.length, 1);
       const attempt = instance.telemetry.find(
@@ -1389,36 +1393,69 @@ test("real permission-system authorizer chain integration", async (t) => {
   });
 
   await t.test("total input budget removes older optional tools but keeps mandatory scope", async () => {
-    const repeated = "optional-context-".repeat(80);
+    // Deterministic by construction: measure the total with only the
+    // mandatory evidence, set the budget one token above it, and the trim
+    // loop must then remove every optional older tool regardless of the
+    // estimator's per-item accounting.
+    const repeated = "optional-context-".repeat(150);
+    const cjkPadding = "中文预算填充。".repeat(300);
+    const request = {
+      requestId: "total-budget-prunes-optional",
+      command: "printf reviewed",
+      toolCallId: "exact",
+      toolName: "bash",
+      toolInputPreview: cjkPadding,
+    };
+    const buildEntries = (ids: string[]) => [
+      { message: { role: "user", content: "Run the exact reviewed command." } },
+      ...ids.map((id) => ({
+        message: {
+          role: "assistant",
+          content: [{
+            type: "toolCall",
+            id,
+            name: "bash",
+            arguments: id === "exact"
+              ? { command: "printf reviewed" }
+              : { command: "printf reviewed", note: `${id}:${repeated}` },
+          }],
+        },
+      })),
+    ];
+    const measuredTotal = async (ids: string[]) => {
+      const instance = harness(allow, {
+        config: config({
+          maxReviewerInputTokens: 32_768,
+          maxToolTranscriptTokens: 8_000,
+        }),
+        contextEntries: buildEntries(ids),
+      });
+      try {
+        await instance.authorize("bash_escalated", request);
+        const completion = instance.telemetry.find(
+          (event) => event.type === "review_complete",
+        );
+        return ((completion?.preflight as Record<string, unknown>)
+          .total as { estimatedTokens: number }).estimatedTokens;
+      } finally {
+        instance.dispose();
+      }
+    };
+    const mandatoryTotal = await measuredTotal(["exact"]);
+    assert.ok(mandatoryTotal >= 2_048);
+    // Slack covers the omissions bookkeeping (budgetRemovals JSON) that the
+    // trim loop itself adds to the estimate.
+    const budget = mandatoryTotal + 256;
+
     const instance = harness(allow, {
       config: config({
-        maxReviewerInputTokens: 3_000,
+        maxReviewerInputTokens: budget,
         maxToolTranscriptTokens: 8_000,
       }),
-      contextEntries: [
-        { message: { role: "user", content: "Run the exact reviewed command." } },
-        ...["older-a", "older-b", "older-c", "exact"].map((id) => ({
-          message: {
-            role: "assistant",
-            content: [{
-              type: "toolCall",
-              id,
-              name: "bash",
-              arguments: id === "exact"
-                ? { command: "printf reviewed" }
-                : { command: "printf reviewed", note: `${id}:${repeated}` },
-            }],
-          },
-        })),
-      ],
+      contextEntries: buildEntries(["older-a", "older-b", "older-c", "exact"]),
     });
     try {
-      const result = await instance.authorize("bash_escalated", {
-        requestId: "total-budget-prunes-optional",
-        command: "printf reviewed",
-        toolCallId: "exact",
-        toolName: "bash",
-      });
+      const result = await instance.authorize("bash_escalated", request);
       assert.equal(result.decision.approved, true);
       assert.equal(instance.modelContexts.length, 1);
       const completion = instance.telemetry.find(
@@ -1427,7 +1464,7 @@ test("real permission-system authorizer chain integration", async (t) => {
       const preflight = completion?.preflight as Record<string, unknown>;
       assert.ok(
         (preflight.total as { estimatedTokens: number }).estimatedTokens <=
-          3_000,
+          budget,
       );
       const transcript = completion?.transcript as Record<string, unknown>;
       assert.equal(transcript.truncated, true);
@@ -1463,7 +1500,7 @@ test("real permission-system authorizer chain integration", async (t) => {
       contextEntries: [{
         message: {
           role: "user",
-          content: `Keep this exact constraint. ${"必须保留范围。".repeat(80)}`,
+          content: "Keep this exact constraint.",
         },
       }],
     });
@@ -1471,6 +1508,10 @@ test("real permission-system authorizer chain integration", async (t) => {
       const result = await instance.authorize("network", {
         requestId: "total-budget-required-overflow",
         value: "example.com:443",
+        // The canonical request cannot be trimmed by the budget loop, so a
+        // CJK-heavy preview overflows deterministically before model
+        // resolution.
+        toolInputPreview: "必须保留范围。".repeat(300),
       });
       assert.equal(result.decision.approved, false);
       assert.equal(instance.modelContexts.length, 0);
@@ -1496,56 +1537,88 @@ test("real permission-system authorizer chain integration", async (t) => {
   });
 
   await t.test("total budget removes optional result and its producer as one unit", async () => {
+    // Deterministic by construction, as in the older-tools test: measure the
+    // total without the optional precheck+result pair, set the budget one
+    // token above it, and the trim loop must remove the pair as one unit.
+    const cjkPadding = "中文预算填充。".repeat(300);
+    const request = {
+      requestId: "total-budget-optional-result",
+      command: "rm /tmp/reviewed-old",
+      path: "/tmp/reviewed-old",
+      toolCallId: "exact-delete",
+      toolName: "bash",
+      toolInputPreview: cjkPadding,
+    };
+    const buildEntries = (withOptionalPair: boolean) => [
+      { message: { role: "user", content: "Delete the reviewed file." } },
+      ...(withOptionalPair
+        ? [{
+            message: {
+              role: "assistant",
+              content: [{
+                type: "toolCall",
+                id: "precheck",
+                name: "bash",
+                arguments: { command: "stat /tmp/reviewed-old" },
+              }],
+            },
+          },
+          {
+            message: {
+              role: "toolResult",
+              toolCallId: "precheck",
+              toolName: "bash",
+              content: [{
+                type: "text",
+                text: `file exists ${"bounded-result ".repeat(500)}`,
+              }],
+            },
+          }]
+        : []),
+      {
+        message: {
+          role: "assistant",
+          content: [{
+            type: "toolCall",
+            id: "exact-delete",
+            name: "bash",
+            arguments: { command: "rm /tmp/reviewed-old" },
+          }],
+        },
+      },
+    ];
+    const measuredTotal = async (withOptionalPair: boolean) => {
+      const instance = harness(allow, {
+        config: config({
+          maxReviewerInputTokens: 32_768,
+          maxRelevantResultTokens: 8_000,
+        }),
+        contextEntries: buildEntries(withOptionalPair),
+      });
+      try {
+        await instance.authorize("bash_escalated", request);
+        const completion = instance.telemetry.find(
+          (event) => event.type === "review_complete",
+        );
+        return ((completion?.preflight as Record<string, unknown>)
+          .total as { estimatedTokens: number }).estimatedTokens;
+      } finally {
+        instance.dispose();
+      }
+    };
+    const mandatoryTotal = await measuredTotal(false);
+    assert.ok(mandatoryTotal >= 2_048);
+    const budget = mandatoryTotal + 256;
+
     const instance = harness(allow, {
       config: config({
-        maxReviewerInputTokens: 3_000,
+        maxReviewerInputTokens: budget,
         maxRelevantResultTokens: 8_000,
       }),
-      contextEntries: [
-        { message: { role: "user", content: "Delete the reviewed file." } },
-        {
-          message: {
-            role: "assistant",
-            content: [{
-              type: "toolCall",
-              id: "precheck",
-              name: "bash",
-              arguments: { command: "stat /tmp/reviewed-old" },
-            }],
-          },
-        },
-        {
-          message: {
-            role: "toolResult",
-            toolCallId: "precheck",
-            toolName: "bash",
-            content: [{
-              type: "text",
-              text: `file exists ${"bounded-result ".repeat(140)}`,
-            }],
-          },
-        },
-        {
-          message: {
-            role: "assistant",
-            content: [{
-              type: "toolCall",
-              id: "exact-delete",
-              name: "bash",
-              arguments: { command: "rm /tmp/reviewed-old" },
-            }],
-          },
-        },
-      ],
+      contextEntries: buildEntries(true),
     });
     try {
-      const result = await instance.authorize("bash_escalated", {
-        requestId: "total-budget-optional-result",
-        command: "rm /tmp/reviewed-old",
-        path: "/tmp/reviewed-old",
-        toolCallId: "exact-delete",
-        toolName: "bash",
-      });
+      const result = await instance.authorize("bash_escalated", request);
       assert.equal(result.decision.approved, true);
       const completion = instance.telemetry.find(
         (event) => event.type === "review_complete",
@@ -1573,7 +1646,7 @@ test("real permission-system authorizer chain integration", async (t) => {
     }
   });
 
-  await t.test("UTF-8 estimator covers Chinese, long JSON, paths, code, and framing", async () => {
+  await t.test("CJK-aware estimator covers Chinese, long JSON, paths, code, and framing", async () => {
     const cases = [
       "中文授权边界与撤销。".repeat(20),
       JSON.stringify({ payload: "english-json-value-".repeat(60) }),
@@ -1612,14 +1685,102 @@ test("real permission-system authorizer chain integration", async (t) => {
           .total as { estimatedTokens: number }).estimatedTokens;
         assert.equal(
           total,
-          Buffer.byteLength(context.systemPrompt, "utf8") +
-            Buffer.byteLength(context.messages[0].content, "utf8") +
+          estimateReviewerTokens(context.systemPrompt) +
+            estimateReviewerTokens(context.messages[0].content) +
             64,
         );
         assert.ok(total >= 100);
+        // CJK text must no longer be inflated by its UTF-8 byte length.
+        assert.ok(
+          estimateReviewerTokens("中文授权边界与撤销。") <
+            Buffer.byteLength("中文授权边界与撤销。", "utf8"),
+        );
       } finally {
         instance.dispose();
       }
+    }
+  });
+
+  await t.test("a large CJK tool input passes the default input-budget preflight", async () => {
+    // Regression: a multi-kilobyte mostly-CJK tool input (e.g. a Chinese plan
+    // document) used to trip reviewer_input_budget_exceeded synchronously
+    // under byte-for-token estimation before the reviewer model was called.
+    const cjkPreview = "中文计划文档，包含大量授权边界描述。".repeat(180);
+    assert.ok(Buffer.byteLength(cjkPreview, "utf8") > 8_192);
+    const instance = harness(allow);
+    try {
+      const result = await instance.authorize("bash_escalated", {
+        requestId: "cjk-large-preview",
+        toolInputPreview: cjkPreview,
+      });
+      assert.equal(result.decision.approved, true);
+      const completion = instance.telemetry.find(
+        (event) =>
+          event.type === "review_complete" &&
+          event.requestId === "cjk-large-preview",
+      );
+      assert.equal(completion?.attempts, 1);
+      const transcript = completion?.transcript as Record<string, unknown>;
+      assert.equal(transcript.failureCode, undefined);
+      assert.ok(
+        (completion?.preflight as Record<string, unknown>).total !== undefined,
+      );
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  await t.test("a human override bypasses the input-budget preflight failure", async () => {
+    // Without the override the CJK payload cannot fit the tiny budget and the
+    // review fails closed before any model call; with the override the exact
+    // retry must reach the reviewer instead of being vetoed by an estimate.
+    const cjkPreview = "中文计划文档，包含大量授权边界描述。".repeat(500);
+    const instance = harness(allow, {
+      config: config({ maxReviewerInputTokens: 2_048 }),
+    });
+    try {
+      const first = await instance.authorize("bash_escalated", {
+        requestId: "cjk-budget-override",
+        toolInputPreview: cjkPreview,
+      });
+      assert.equal(first.decision.approved, false);
+      const firstCompletion = instance.telemetry.filter(
+        (event) => event.type === "review_complete",
+      ).at(-1);
+      assert.equal(firstCompletion?.attempts, 0);
+      assert.equal(
+        ((firstCompletion?.transcript as Record<string, unknown>)
+          .failureCode as string | undefined),
+        "reviewer_input_budget_exceeded",
+      );
+
+      const command = instance.commands.get("auto-review-approve");
+      assert.ok(command);
+      await command.handler("", {
+        ...instance.context,
+        hasUI: true,
+        mode: "tui",
+        isIdle: () => true,
+        ui: {
+          async select(_title: string, choices: string[]) {
+            return choices[0];
+          },
+          notify() {},
+        },
+      });
+
+      const retry = await instance.authorize("bash_escalated", {
+        requestId: "cjk-budget-override",
+        toolInputPreview: cjkPreview,
+      });
+      assert.equal(retry.decision.approved, true);
+      const retryCompletion = instance.telemetry.filter(
+        (event) => event.type === "review_complete",
+      ).at(-1);
+      assert.equal(retryCompletion?.attempts, 1);
+      assert.equal(retryCompletion?.outcome, "allow");
+    } finally {
+      instance.dispose();
     }
   });
 

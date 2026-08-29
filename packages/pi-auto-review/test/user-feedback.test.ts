@@ -299,6 +299,14 @@ function renderLastWidget(harness: ReturnType<typeof widgetHarness>, width = 80)
   return component.render(width) as string[];
 }
 
+/** Widget rendering embeds ANSI accents and fake theme markers; strip both. */
+function renderedText(harness: ReturnType<typeof widgetHarness>, width = 80) {
+  return renderLastWidget(harness, width)
+    .join("\n")
+    .replace(/\x1b\[[0-9;]*m/g, "")
+    .replace(/\[(muted|success|warning|error)\]/g, "");
+}
+
 test("reviewing widget uses dynamic model, above-editor placement, and wrapping", () => {
   const harness = widgetHarness();
   harness.controller.begin("request-a", harness.ctx as never, {
@@ -372,6 +380,88 @@ test("controller overwrites checks, retains completion, and rejects stale update
   assert.equal(harness.widgets.at(-1)?.content === undefined, false);
   harness.controller.clear(harness.ctx as never);
   assert.equal(harness.widgets.at(-1)?.content, undefined);
+});
+
+test("waiting overlay flips the reviewing widget to waiting-for-you and restores it", () => {
+  const harness = widgetHarness();
+  harness.controller.begin("request-a", harness.ctx as never, {
+    surface: "bash",
+    target: "printf a",
+    model: "provider/reviewer",
+  });
+  harness.controller.promptStart({ kind: "custom", title: "Permission Required" });
+  const waitingLines = renderedText(harness);
+  assert.match(waitingLines, /Auto-review · waiting for you · Permission Required/);
+  assert.doesNotMatch(waitingLines, /Waiting for reviewer/);
+  assert.match(renderLastWidget(harness)[0] ?? "", /\[muted\]waiting/);
+
+  harness.controller.promptEnd();
+  const restored = renderedText(harness);
+  assert.match(restored, /Auto-review · reviewing · bash/);
+  assert.match(restored, /Waiting for reviewer…/);
+});
+
+test("waiting overlay prefers the prompt title, falls back to kind, and truncates", () => {
+  const harness = widgetHarness();
+  harness.controller.begin("request-a", harness.ctx as never, {
+    surface: "bash",
+    model: "provider/reviewer",
+  });
+  harness.controller.promptStart({ kind: "select" });
+  assert.match(renderedText(harness), /waiting for you · select/);
+  harness.controller.promptEnd();
+  harness.controller.promptStart({
+    kind: "confirm",
+    title: `x`.repeat(120),
+  });
+  const rendered = renderedText(harness, 200);
+  assert.match(rendered, /waiting for you · x+…$/);
+  assert.ok(rendered.length < 200);
+});
+
+test("completed outcomes are never overlaid by the waiting state", () => {
+  const harness = widgetHarness();
+  const generation = harness.controller.begin("request-a", harness.ctx as never, {
+    surface: "bash",
+    model: "provider/reviewer",
+  });
+  const input = { outcome: "allow" as const, surface: "bash" };
+  harness.controller.complete(
+    "request-a",
+    generation,
+    harness.ctx as never,
+    buildUserReviewNotice(input),
+    buildUserReviewWidgetData(input),
+  );
+  harness.controller.promptStart({ kind: "confirm", title: "Confirm?" });
+  assert.match(renderedText(harness), /allowed/);
+  assert.doesNotMatch(renderedText(harness), /waiting for you/);
+  harness.controller.promptEnd();
+  assert.match(renderedText(harness), /allowed/);
+});
+
+test("prompt events without a live widget and stray ends are no-ops", () => {
+  const harness = widgetHarness();
+  harness.controller.promptStart({ kind: "confirm" });
+  assert.equal(harness.widgets.length, 0);
+  harness.controller.promptEnd();
+  assert.equal(harness.widgets.length, 0);
+
+  // A review starting while a prompt span is open shows the overlay, and
+  // clear resets the waiting state so later reviews render normally.
+  harness.controller.promptStart({ kind: "confirm", title: "Confirm?" });
+  harness.controller.begin("request-a", harness.ctx as never, {
+    surface: "bash",
+    model: "provider/reviewer",
+  });
+  assert.match(renderedText(harness), /waiting for you · Confirm/);
+  harness.controller.clear(harness.ctx as never);
+  assert.equal(harness.widgets.at(-1)?.content, undefined);
+  harness.controller.begin("request-b", harness.ctx as never, {
+    surface: "bash",
+    model: "provider/reviewer",
+  });
+  assert.match(renderedText(harness), /reviewing · bash/);
 });
 
 test("group member summaries preserve auto-confirm detail on one line", () => {

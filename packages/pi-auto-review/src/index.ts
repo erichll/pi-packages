@@ -178,7 +178,7 @@ type ReviewAttemptObservation = {
 type PreflightPart = { characters: number; estimatedTokens: number };
 
 type ReviewPreflight = {
-  estimator: "conservative:utf8";
+  estimator: "conservative:cjk-aware";
   maxReviewerInputTokens: number;
   framingReserveTokens: number;
   fixedPrompt: PreflightPart;
@@ -898,10 +898,51 @@ function sharedReviewContext(
   });
 }
 
+/**
+ * Conservative token estimate for reviewer prompt sizing.
+ *
+ * CJK code points are estimated at one token each: UTF-8 encodes them as
+ * three bytes, so the previous byte-for-token estimator overestimated
+ * CJK-heavy review payloads ~3x and synchronously failed the input-budget
+ * preflight ("reviewer_input_budget_exceeded") for large CJK tool inputs
+ * such as long Chinese plan documents — before the reviewer model was ever
+ * called. Remaining code points are estimated from their UTF-8 byte length
+ * at 3 bytes per token, slightly conservative for ASCII (typical tokenizers
+ * average ~4 bytes per token) and safely conservative for 2-4 byte scripts.
+ */
+const OTHER_BYTES_PER_TOKEN = 3;
+
+function codePointUtf8Bytes(code: number): number {
+  return code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+}
+
+function isCjkCodePoint(code: number): boolean {
+  return (
+    (code >= 0x3000 && code <= 0x9fff) || // CJK symbols, punctuation, ideographs
+    (code >= 0x3400 && code <= 0x4dbf) || // CJK extension A
+    (code >= 0xf900 && code <= 0xfaff) || // CJK compatibility ideographs
+    (code >= 0xac00 && code <= 0xd7af) || // Hangul syllables
+    (code >= 0x3040 && code <= 0x30ff) || // Hiragana + Katakana
+    (code >= 0xff00 && code <= 0xffef) // fullwidth/halfwidth forms
+  );
+}
+
+/** Exported for tests; see the estimator doc comment above. */
+export function estimateReviewerTokens(text: string): number {
+  let tokens = 0;
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    tokens += isCjkCodePoint(code)
+      ? 1
+      : codePointUtf8Bytes(code) / OTHER_BYTES_PER_TOKEN;
+  }
+  return Math.ceil(tokens);
+}
+
 function preflightPart(text: string): PreflightPart {
   return {
     characters: text.length,
-    estimatedTokens: Buffer.byteLength(text, "utf8"),
+    estimatedTokens: estimateReviewerTokens(text),
   };
 }
 
@@ -910,7 +951,7 @@ function combinedPreflightPart(values: readonly string[]): PreflightPart {
     (total, value) => ({
       characters: total.characters + value.length,
       estimatedTokens:
-        total.estimatedTokens + Buffer.byteLength(value, "utf8"),
+        total.estimatedTokens + estimateReviewerTokens(value),
     }),
     { characters: 0, estimatedTokens: 0 },
   );
@@ -966,7 +1007,7 @@ function reviewPreflight(
       REVIEWER_FRAMING_RESERVE_TOKENS,
   };
   return {
-    estimator: "conservative:utf8",
+    estimator: "conservative:cjk-aware",
     maxReviewerInputTokens,
     framingReserveTokens: REVIEWER_FRAMING_RESERVE_TOKENS,
     fixedPrompt,
@@ -1489,7 +1530,7 @@ function noModelSummary(): ReviewExecutionSummary {
       compactionState: "none",
     },
     preflight: {
-      estimator: "conservative:utf8",
+      estimator: "conservative:cjk-aware",
       maxReviewerInputTokens: DEFAULT_CONFIG.maxReviewerInputTokens,
       framingReserveTokens: REVIEWER_FRAMING_RESERVE_TOKENS,
       fixedPrompt: zero,
@@ -1726,7 +1767,12 @@ async function complete(
   });
 
   try {
-    if (transcript.failureCode) {
+    // A budget preflight failure is a sizing estimate, not a safety verdict.
+    // When a human explicitly authorized this exact retry, their decision
+    // must not be vetoed by an estimator: proceed with the truncated
+    // evidence and let the reviewer see the override. The failureCode stays
+    // on the transcript for observability.
+    if (transcript.failureCode && !reviewerContext?.userOverride) {
       incrementError(errorCounts, transcript.failureCode);
       throw new ReviewExecutionError(
         transcript.failureCode,
@@ -2082,6 +2128,20 @@ export function createPiAutoReviewExtension(
     () => config.autoConfirmBoundedAllows,
   );
   const reviewWidget = new UserReviewWidgetController();
+  // pi >= 0.84.4 notification-only events: while a ctx.ui prompt blocks the
+  // session during an active review, show "waiting for you" instead of the
+  // misleading "Waiting for <model>…". Best-effort registration: on older
+  // pi these event names do not exist and the overlay stays off.
+  try {
+    pi.on("ui_prompt_start", (event) => {
+      reviewWidget.promptStart(event);
+    });
+    pi.on("ui_prompt_end", () => {
+      reviewWidget.promptEnd();
+    });
+  } catch {
+    // Older pi: widget behavior is unchanged.
+  }
   const policyAudit = new PolicyAuditController({
     config: () => config.policyAudit,
     cwd: () => context?.cwd,

@@ -543,8 +543,32 @@ export function notifyUserReview(
 }
 
 export type UserReviewWidgetData = UserReviewEntryData & {
-  phase: "reviewing" | "complete";
+  phase: "reviewing" | "waiting_user" | "complete";
 };
+
+/**
+ * Overlay shown while a `ctx.ui` prompt blocks the session during an active
+ * review. Without it the widget kept claiming "Waiting for <model>…" while
+ * pi was actually waiting on the user (permission dialog, /review-denials,
+ * break-glass challenge, ...). Driven by the notification-only
+ * `ui_prompt_start` / `ui_prompt_end` events (pi >= 0.84.4).
+ */
+export function buildUserWaitingWidgetData(input: {
+  kind?: unknown;
+  title?: unknown;
+}): UserReviewWidgetData {
+  const kind = typeof input.kind === "string" ? input.kind.trim() : "";
+  const title = typeof input.title === "string" ? input.title.trim() : "";
+  const label = truncateReviewText(title || kind || "input", 48);
+  return {
+    phase: "waiting_user",
+    outcome: "defer",
+    type: "info",
+    lines: joinNoticeLines([
+      `Auto-review · waiting for you · ${label}`,
+    ]),
+  };
+}
 
 export function buildUserReviewingWidgetData(input: {
   surface: string;
@@ -582,10 +606,12 @@ export function renderUserReviewWidgetLines(
   const rendered: string[] = [];
   const verb = data.phase === "reviewing"
     ? "reviewing"
+    : data.phase === "waiting_user"
+    ? "waiting"
     : outcomeVerb(data.outcome);
-  const accent = data.phase === "reviewing"
-    ? "muted"
-    : outcomeAccent(data.outcome);
+  const accent = data.phase === "complete"
+    ? outcomeAccent(data.outcome)
+    : "muted";
   const verbAnsi = theme.getFgAnsi(accent);
   const mutedAnsi = theme.getFgAnsi("muted");
   for (const [index, line] of data.lines.entries()) {
@@ -629,6 +655,8 @@ function setWidget(
 /** Owns the single live widget and rejects stale concurrent completions. */
 export class UserReviewWidgetController {
   #generation = 0;
+  /** Set while a `ctx.ui` prompt blocks the session (ui_prompt span). */
+  #waiting?: { kind?: unknown; title?: unknown };
   #current?: {
     requestId: string;
     generation: number;
@@ -643,9 +671,36 @@ export class UserReviewWidgetController {
     input: { surface: string; target?: string; model?: string },
   ): number {
     const generation = ++this.#generation;
-    this.#current = { requestId, generation, ctx };
-    setWidget(ctx, buildUserReviewingWidgetData(input));
+    this.#current = { requestId, generation, ctx, data: buildUserReviewingWidgetData(input) };
+    this.#render();
     return generation;
+  }
+
+  /**
+   * Flip the reviewing widget to a "waiting for you" state while a
+   * `ctx.ui` prompt blocks the session. Only overlays the reviewing phase:
+   * completed outcome summaries make no running claim, and without a live
+   * widget there is nothing misleading to correct.
+   */
+  promptStart(event: { kind?: unknown; title?: unknown }): void {
+    this.#waiting = { kind: event?.kind, title: event?.title };
+    this.#render();
+  }
+
+  promptEnd(): void {
+    if (!this.#waiting) return;
+    this.#waiting = undefined;
+    this.#render();
+  }
+
+  /** Single render path; ordering of begin/complete/prompt events is irrelevant. */
+  #render(): void {
+    const current = this.#current;
+    if (!current) return;
+    const data = this.#waiting && current.data?.phase === "reviewing"
+      ? buildUserWaitingWidgetData(this.#waiting)
+      : current.data;
+    if (data) setWidget(current.ctx, data);
   }
 
   complete(
@@ -689,6 +744,7 @@ export class UserReviewWidgetController {
 
   clear(ctx?: ExtensionContext): void {
     ++this.#generation;
+    this.#waiting = undefined;
     const current = this.#current;
     this.#current = undefined;
     if (current) setWidget(ctx ?? current.ctx, undefined);

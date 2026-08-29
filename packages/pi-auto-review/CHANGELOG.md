@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- Fix a deterministic reviewer-unavailable denial for large CJK tool inputs.
+  The reviewer input estimator counted one token per UTF-8 byte, tripling the
+  estimate for CJK text, so multi-kilobyte Chinese payloads (e.g. a long plan
+  document submitted through a tool call) synchronously failed the
+  `reviewer_input_budget_exceeded` preflight before the reviewer model was
+  ever called, and the request was denied as "Automatic review is
+  unavailable." CJK code points now estimate at one token each and remaining
+  code points at their UTF-8 byte length over three (estimator
+  `conservative:cjk-aware`).
+- Record the denial when a reviewer-unavailable review fails closed, so
+  `/auto-review-approve` — the recovery command that verdict recommends —
+  actually has a matching denial to approve. Previously the recommendation
+  was dead text for this failure class.
+- Let an explicit human override (`/auto-review-approve` trusted exact retry)
+  bypass the reviewer input-budget preflight failure. A sizing estimate is
+  not a safety verdict and must not veto an already-authorized retry; the
+  review proceeds with truncated evidence.
+- Show "waiting for you" in the review widget while a `ctx.ui` prompt blocks
+  the session during an active review (pi >= 0.84.4 `ui_prompt_start` /
+  `ui_prompt_end`). The widget previously kept claiming "Waiting for
+  <model>…" while pi was actually waiting on the user (permission dialog,
+  `/review-denials`, break-glass challenge). Completed outcome summaries and
+  sessions without a live widget are unaffected.
 - Fix `/auto-review-approve` and `/auto-review-break-glass` never applying in
   real TUI sessions. The exact-match request hash included `toolCallId`, but a
   retry is always a brand-new model tool call with a fresh tool call ID, so

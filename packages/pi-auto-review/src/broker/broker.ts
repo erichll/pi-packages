@@ -169,9 +169,15 @@ export class BoundaryApprovalBroker {
         };
       }
       const breaker = this.#breaker.record(context.scopeKey, true);
+      // Record the failure denial so /auto-review-approve — the exact recovery
+      // command this verdict recommends — has a matching denial to approve.
+      // Without this the override path was unreachable for reviewer
+      // unavailability, and the recovery advice was dead text.
+      const review = { ...FAILURE_REVIEW, rationale: reason };
+      this.#denials.record(request, context, review);
       return {
         kind: "deny",
-        review: { ...FAILURE_REVIEW, rationale: reason },
+        review,
         circuitBreakerTripped: breaker.tripped,
         denialSource: "reviewer",
         recoveryCommand: "/auto-review-approve",
