@@ -170,6 +170,7 @@
     "todo": "allow",
     "web_search": "allow",
     "get_search_content": "allow",
-    "fetch_content": "ask"
+    "fetch_content": "ask",
+    "plan_mode_complete": "allow"
   }
 }
