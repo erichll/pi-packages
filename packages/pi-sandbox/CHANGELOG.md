@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.0 - 2026-08-29
+
+- Align the package version with `@erichll/pi-auto-review` `0.15.0` and update
+  the exact dependency to inherit CJK-aware reviewer input budgeting, working
+  approve and break-glass retries, and accurate waiting-for-user review status.
+  No pi-sandbox runtime, filesystem/network policy, grant, or public API changes.
+
 ## 0.14.0 - 2026-08-28
 
 - Align the package version with `@erichll/pi-auto-review` `0.14.0` and update

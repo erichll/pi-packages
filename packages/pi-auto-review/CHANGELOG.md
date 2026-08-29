@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.15.0 - 2026-08-29
 
 - Fix a deterministic reviewer-unavailable denial for large CJK tool inputs.
   The reviewer input estimator counted one token per UTF-8 byte, tripling the

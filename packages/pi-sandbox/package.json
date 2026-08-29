@@ -1,6 +1,6 @@
 {
   "name": "@erichll/pi-sandbox",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "Linux (bubblewrap) and macOS (Seatbelt) process sandbox for Pi backed by Anthropic's @anthropic-ai/sandbox-runtime. Fail-closed static filesystem policy plus per-connection network approval from pi-auto-review; sandboxes main-agent Bash and built-in subagent process trees.",
   "type": "module",
   "license": "Apache-2.0",
@@ -51,7 +51,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.73",
-    "@erichll/pi-auto-review": "0.14.0"
+    "@erichll/pi-auto-review": "0.15.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^0.84.1",
