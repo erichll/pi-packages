@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Update the dev-only `pi-subagents` compatibility baseline from `0.60.0` to
+  `0.61.0`. The worker-spawn contract and public external-run registry
+  signatures remain compatible; the deterministic external-isolation gate and
+  full package suites pass against 0.61.0.
+- Use `bg_wait`, the 0.61.0 primary background wait tool, in the model-backed
+  compatibility gate while retaining `subagent_wait` for older supported
+  versions. This changes test/release tooling only, not sandbox runtime policy.
+
 ## 0.15.1 - 2026-08-31
 
 - Align the exact `@erichll/pi-auto-review` dependency with `0.15.1`, inheriting

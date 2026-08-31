@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Declare and verify compatibility with `@gotgenes/pi-permission-system`
+  29.0.0. The removed process-root service accessors were already unused;
+  pi-auto-review continues to resolve the node-local service through
+  `getPermissionsService(sessionId)`. The peer range now accepts 28.x and 29.x,
+  and the exact development baseline is 29.0.0.
+
 ## 0.15.1 - 2026-08-31
 
 - Adapt the policy audit to `@gotgenes/pi-permission-system` v28.0.0. Ask

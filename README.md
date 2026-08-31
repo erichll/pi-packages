@@ -27,7 +27,7 @@ projects. The repository can also be installed as one Git-backed Pi package.
 - Node.js 22.19 or newer
 - npm 11
 - Pi 0.82.1 or newer
-- `@gotgenes/pi-permission-system` 27 or newer
+- `@gotgenes/pi-permission-system` 28.x or 29.x
 - Linux: `bubblewrap`, `socat`, and `ripgrep`
 
 ## Development
@@ -103,9 +103,10 @@ READMEs for provider, platform, and trust-boundary details.
 ## Development and release verification
 
 Run deterministic checks with `npm run check` and `npm test`. The external
-provider runtime contract floor (the `subagent`/`subagent_wait` coexistence
-contract) is `pi-subagents 0.45.0+`; the `pi-sandbox` devDependency is pinned
-exactly to the version the suite and gate are exercised against. Run
+provider runtime floor published by `pi-sandbox` is `pi-subagents 0.50.0+`; its
+devDependency is pinned exactly to `0.61.0`, the version the suite and gate are
+exercised against. The model gate uses `bg_wait` with `0.61.0+` and retains
+`subagent_wait` for older compatible installations. Run
 `npm run gate:external-isolation` to verify the external-worker-isolation
 (`PI_SUBAGENT_PI_BINARY`) contract seam without any model credential. Before a
 release, run `npm run gate:pi-subagents` with `PI_SUBAGENTS_GATE_MODEL` and its

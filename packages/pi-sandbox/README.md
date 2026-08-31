@@ -9,7 +9,7 @@ also run complete process-backed subagent trees inside independent sandboxes.
 - [Security model](#security-model)
 - [Linux requirements](#linux-requirements)
 - [Subagent provider](#subagent-provider)
-  - [`pi-subagents` 0.53.0 capability boundary](#pi-subagents-0530-capability-boundary)
+  - [`pi-subagents` 0.61.0 capability boundary](#pi-subagents-0610-capability-boundary)
 - [Network domain policy](#network-domain-policy)
 - [Optional host IPC fallback](#optional-host-ipc-fallback)
 - [Additional trusted read paths](#additional-trusted-read-paths)
@@ -96,7 +96,7 @@ Supported modes:
   itself is not wrapped while `externalWorkerIsolation` is `off`.
 - `off`: protect Bash only.
 
-### `pi-subagents` 0.53.0 capability boundary
+### `pi-subagents` 0.61.0 capability boundary
 
 `pi-sandbox` verifies the following combination in its test suite and release
 gate. This version boundary is pinned exactly (see the package
@@ -107,19 +107,19 @@ gate. This version boundary is pinned exactly (see the package
 published peer range remains `>=0.50.0`; this documents the current tested
 development baseline, not a runtime minimum.
 
-| Capability | `builtin` | `pi-subagents` 0.53.0 |
+| Capability | `builtin` | `pi-subagents` 0.61.0 |
 | --- | --- | --- |
 | Outer worker sandbox | Yes | Opt-in (`externalWorkerIsolation: "enforce"`) |
 | Bash sandbox | Yes | Yes |
 | Persistent follow-up | Yes | Yes |
 | `workflowScript`, missions, schedules | No | Yes |
+| Named workflow resources | No | Yes |
 | permission-system parent forwarding | Not required | Verified by compatibility gate |
 
-Upgrading across a capability boundary (for example `0.49.0` → `0.50.0`, or
-moving the tested baseline to `0.53.0`) requires re-running
-`npm run gate:external-isolation` and, before a release, the model-backed
-`npm run gate:pi-subagents`. See `docs/compat-notes.md` for the recorded
-compatibility seams and how each is verified on upgrade.
+Moving the tested baseline requires re-running `npm run gate:external-isolation`
+and, before a release, the model-backed `npm run gate:pi-subagents`. See
+`docs/compat-notes.md` for the recorded compatibility seams and how each is
+verified on upgrade.
 
 For the external provider, `off` leaves the worker process outside the outer
 Sandbox Runtime boundary. Do not treat inherited Bash sandboxing as complete
@@ -127,10 +127,11 @@ worker isolation unless the trusted global configuration explicitly enables
 `enforce`.
 
 Note on the external provider's public execution surface: pi-subagents 0.43.0
-removed top-level `agent`/`task` direct execution. Every public `subagent`
-launch — including a minimal single child — is expressed as a `workflowScript`
-such as `return runs.run('main', { agent, task })`. The compatibility gate's
-"direct single child" probe uses that single-run form.
+removed the old static multi-agent controls; `workflowScript` remains the
+public multi-agent orchestration surface. Current releases also accept a direct
+single-child `{ agent, task }` launch. The compatibility gate deliberately uses
+`return runs.run('main', { agent, task })` so the single-child probe continues
+to exercise the workflow executor and its isolation seam.
 
 The configuration parser rejects malformed JSON, unknown fields, and unknown
 providers instead of silently weakening isolation.

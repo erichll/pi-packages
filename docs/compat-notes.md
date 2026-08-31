@@ -6,16 +6,16 @@ This document records every point at which `pi-packages` (specifically
 verifiable on upgrade so that a `pi-subagents` release cannot silently break
 the outer worker isolation boundary or the compatibility gates.
 
-Current pinned baseline: `pi-subagents 0.56.0` (exact pin in
-`packages/pi-sandbox` `devDependencies`, test/CI only). The `0.55.0 → 0.56.0`
-upgrade was verified by diffing the two published releases: the coupled seams
-below are byte-identical (`pi-spawn.ts` incl. `PI_SUBAGENT_PI_BINARY`,
-`api/external-runs.ts`, `api/external-job-provider.ts`, and `package.json`
-`exports`). The new `fast` launch and bounded extension-binding features are
-additive and only affect native OpenAI-Codex child launches, not the external
-worker (`PI_SUBAGENT_PI_BINARY`) seam pi-sandbox couples to. The
-`gate:external-isolation` probe and the full test suite pass against the
-installed `0.56.0`.
+Current pinned baseline: `pi-subagents 0.61.0` (exact pin in
+`packages/pi-sandbox` `devDependencies`, test/CI only). The `0.60.0 → 0.61.0`
+upgrade was verified against the published packages: `pi-spawn.ts` (including
+`PI_SUBAGENT_PI_BINARY`) and `api/external-job-provider.ts` are byte-identical;
+the `pi-subagents/external-runs` export and register/unregister signatures are
+unchanged while its snapshot implementation adds trusted-record caching and
+malformed-record isolation. Version 0.61.0 makes `bg_wait` the primary wait
+tool and retains `subagent_wait` as a compatibility alias, so the model gate
+selects the primary name from the installed version. The deterministic gate,
+type checks, and package tests pass against installed `0.61.0`.
 
 ## Seam registry
 
@@ -24,7 +24,7 @@ installed `0.56.0`.
 | package root `exports["."]` | Public | `0.45.0` | compat gate loads entry | `import.meta.resolve` + model gate | `pi-subagents` root entry |
 | `src/runs/shared/pi-spawn.ts` | Internal | `0.47.x` | probe single-point dependency | `gate:external-isolation` probe + upstream D1 | — |
 | `PI_SUBAGENT_PI_BINARY` | Env contract | `0.47.x` | external isolation requires it | `gate:external-isolation` probe | — |
-| `subagent_wait` / `details.completions` | Tool-result contract | `0.45.0` | model gate enforces | model-backed compat gate | `>=0.45.0` |
+| `bg_wait` / `subagent_wait` / `details.completions` | Tool-result contract | `0.45.0` (`bg_wait` primary in `0.61.0`) | model gate selects by version | model-backed compat gate | `>=0.45.0` |
 | `pi-subagents/external-runs` | Public, `0.50+` | `0.50.0` | active runtime seam (C1 landed) | unit + supervisor integration tests | C1 (FleetView) |
 
 The seam registry lists `pi-subagents/external-runs` as a public `0.50+`
@@ -34,7 +34,7 @@ subpath; with C1 implemented it is now an active runtime seam.
 
 ### 1. Package root `exports["."]`
 
-- **First introduced:** `0.45.0` (the `subagent`/`subagent_wait` coexistence
+- **First introduced:** `0.45.0` (the `subagent` plus wait-tool coexistence
   contract).
 - **Local files:** `scripts/pi-subagents-compat-gate.ts` resolves the gate
   entry via `import.meta.resolve("pi-subagents")` and asserts it lives inside
@@ -71,12 +71,13 @@ subpath; with C1 implemented it is now an active runtime seam.
   the previous `pi-subagents` version (revert upgrade commit, then re-run
   `npm ci`).
 
-### 4. `subagent_wait` / `details.completions` (tool-result contract)
+### 4. `bg_wait` / `subagent_wait` / `details.completions` (tool-result contract)
 
-- **First introduced:** `0.45.0`.
-- **Local files:** `scripts/pi-subagents-compat-gate.ts` (async probes assert
-  `subagent_wait` surfaces and that `details.completions` carries the completion
-  payload).
+- **First introduced:** `subagent_wait` in `0.45.0`; `bg_wait` is primary from
+  `0.61.0` while that release still registers the compatibility alias.
+- **Local files:** `scripts/pi-subagents-compat-gate.ts` selects `bg_wait` for
+  `0.61.0+` and `subagent_wait` for earlier compatible versions, then asserts
+  that `details.completions` carries the completion payload.
 - **Failure impact:** the model gate reports `FAIL` on the async-completion
   checks; release acceptance is blocked.
 - **Rollback:** revert upgrade commit and re-run the gate against the prior

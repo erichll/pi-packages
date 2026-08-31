@@ -522,7 +522,7 @@ test("request hashes bind forwarded requester sessions", () => {
   );
 });
 
-test("27.x ready registration is session-scoped and idempotent", async () => {
+test("ready registration is session-scoped and idempotent", async () => {
   const instance = harness(allow);
   try {
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -543,7 +543,7 @@ test("27.x ready registration is session-scoped and idempotent", async () => {
   assert.equal(instance.disposalCalls, 1);
 });
 
-test("shutdown invalidates a late 27.x registration task", async () => {
+test("shutdown invalidates a late session-scoped registration task", async () => {
   const instance = harness(allow, { emitReady: false });
   instance.dispose();
   // A permissions:ready that arrives after shutdown must not register.

@@ -366,8 +366,8 @@ type CompletionEvidence = {
 
 /**
  * Recursively collect every object whose `completions` key holds the
- * `WaitCompletion[]` payload pi-subagents 0.45.0+ surfaces on the
- * `subagent_wait` tool-result details. Scanning is shape-agnostic so it stays
+ * `WaitCompletion[]` payload surfaced on the selected wait tool's result
+ * details. Scanning is shape-agnostic so it stays
  * stable across the parent-session records and any transient async result
  * artifacts, without depending on the exact serialized session shape.
  */
@@ -408,14 +408,18 @@ function collectCompletions(value: unknown, out: CompletionEvidence[]): void {
 }
 
 /**
- * Scan the parent/child session artifacts for (a) the `subagent_wait` tool
- * call, (b) any structured `details.completions` completion payload that
- * pi-subagents 0.45.0+ delivered for the async wait, and (c) literal child
+ * Scan the parent/child session artifacts for (a) the version-selected wait
+ * tool call, (b) any structured `details.completions` completion payload that
+ * pi-subagents delivered for the async wait, and (c) literal child
  * output markers that prove the async children actually produced and delivered
  * their results. Scanning is shape-agnostic so it stays stable across the
  * parent-session records and any transient async result artifacts.
  */
-async function waitCompletionEvidence(sessionDir: string, markers: string[]): Promise<{
+async function waitCompletionEvidence(
+  sessionDir: string,
+  markers: string[],
+  waitToolName: "bg_wait" | "subagent_wait",
+): Promise<{
   waitToolCalls: number;
   completions: CompletionEvidence[];
   markersSeen: string[];
@@ -424,7 +428,7 @@ async function waitCompletionEvidence(sessionDir: string, markers: string[]): Pr
   const markersSeen = new Set<string>();
   let waitToolCalls = 0;
   const considerToolCall = (name: unknown): void => {
-    if (typeof name === "string" && name === "subagent_wait") waitToolCalls++;
+    if (typeof name === "string" && name === waitToolName) waitToolCalls++;
   };
   const considerText = (text: unknown): void => {
     if (typeof text !== "string") return;
@@ -541,6 +545,9 @@ async function main(): Promise<void> {
     resolve("node_modules/pi-subagents/package.json"),
     "utf8",
   ).then((raw) => (JSON.parse(raw) as { version?: unknown }).version).catch(() => "unknown");
+  const waitToolName = piSubagentsAtLeast(piSubagentsVersion, 0, 61)
+    ? "bg_wait"
+    : "subagent_wait";
   let passed = false;
 
   try {
@@ -598,6 +605,7 @@ async function main(): Promise<void> {
           // workflowScript is not deferred merely because the generic tool
           // preview is truncated; child Bash remains an explicit forwarded ask.
           subagent: "allow",
+          bg_wait: "allow",
           subagent_wait: "allow",
           bash: "ask",
           bash_escalated: "ask",
@@ -762,20 +770,20 @@ async function main(): Promise<void> {
     // baseline prevents the four foreground approvals from satisfying this.
     const asyncWorkflow = await runPi([
       ...common,
-      `Make exactly one subagent tool call that launches a background workflow; do not call status, list agents, retry, or create replacement runs.${providerNetworkAuthorization}\n\n${exactWorkflowToolInput(true, asyncScript)}\n\nFrom the returned control record, read the run id. Then call subagent_wait({ id: <that run id>, nonBlocking: false }) and wait for it to return the completed result. Report each child's run id, the markers ASYNC-LEFT and ASYNC-RIGHT, and note whether the subagent_wait result carried structured completion details. Then end your response with exactly ${asyncCompletionMarker}.`,
+      `Make exactly one subagent tool call that launches a background workflow; do not call status, list agents, retry, or create replacement runs.${providerNetworkAuthorization}\n\n${exactWorkflowToolInput(true, asyncScript)}\n\nFrom the returned control record, read the run id. Then call ${waitToolName}({ id: <that run id>, nonBlocking: false }) and wait for it to return the completed result. Report each child's run id, the markers ASYNC-LEFT and ASYNC-RIGHT, and note whether the ${waitToolName} result carried structured completion details. Then end your response with exactly ${asyncCompletionMarker}.`,
     ], env, asyncTimeoutMs, workspaceDir, forwardingLog, 2, sessionDir, asyncCompletionMarker);
     const asyncMarkers = ["ASYNC-LEFT", "ASYNC-RIGHT"];
-    const completionEvidence = await waitCompletionEvidence(sessionDir, asyncMarkers);
+    const completionEvidence = await waitCompletionEvidence(sessionDir, asyncMarkers, waitToolName);
     // Hard gate: pi-subagents >= 0.45.0 must surface the structured completion
-    // surface (#915) — the explicit subagent_wait call and its
-    // details.completions payload. With the pinned 0.45.1 dependency this is
+    // surface (#915) through the wait tool selected for the installed version
+    // and its details.completions payload. This is
     // mandatory; the check is version-gated so an unexpected downgrade fails
     // loudly rather than silently skipping the new contract.
     const requiresCompletionContract = piSubagentsAtLeast(piSubagentsVersion, 0, 45);
     if (requiresCompletionContract) {
       if (completionEvidence.waitToolCalls < 1) {
         throw new Error(
-          `async probe: pi-subagents ${String(piSubagentsVersion)} >= 0.45.0 must surface subagent_wait, but no subagent_wait tool call was recorded (sessionDir=${sessionDir})`,
+          `async probe: pi-subagents ${String(piSubagentsVersion)} >= 0.45.0 must surface ${waitToolName}, but no ${waitToolName} tool call was recorded (sessionDir=${sessionDir})`,
         );
       }
       if (completionEvidence.completions.length < 1) {
