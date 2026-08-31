@@ -91,16 +91,68 @@ async function assistantReportedMarker(sessionDir: string, marker: string): Prom
   return false;
 }
 
-function runPi(
+async function forwardedApprovalCount(forwardingLog: string): Promise<number> {
+  const log = await readFile(forwardingLog, "utf8").catch(() => "");
+  return (log.match(/"event":"forwarded_permission\.approved"/g) ?? []).length;
+}
+
+type ChildBashEvidence = {
+  calls: number;
+  successful: number;
+  failed: number;
+  exactPwdCalls: number;
+};
+
+async function childBashEvidence(sessionDir: string): Promise<ChildBashEvidence> {
+  const evidence: ChildBashEvidence = { calls: 0, successful: 0, failed: 0, exactPwdCalls: 0 };
+  const artifactDir = join(sessionDir, "subagent-artifacts");
+  try {
+    const entries = await readdir(artifactDir, { withFileTypes: true });
+    const transcripts = entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith("_transcript.jsonl"))
+      .map((entry) => join(artifactDir, entry.name));
+    for (const transcript of transcripts) {
+      for (const line of (await readFile(transcript, "utf8")).split("\n")) {
+        try {
+          const event = JSON.parse(line) as {
+            recordType?: unknown;
+            toolName?: unknown;
+            isError?: unknown;
+            argsPreview?: unknown;
+          };
+          if (event.toolName !== "bash") continue;
+          if (event.recordType === "tool_start" && event.argsPreview === "pwd") {
+            evidence.exactPwdCalls++;
+          }
+          if (event.recordType !== "tool_end") continue;
+          evidence.calls++;
+          if (event.isError === false) evidence.successful++;
+          else evidence.failed++;
+        } catch {
+          // A transcript may end with a partial record while its child exits.
+        }
+      }
+    }
+  } catch {
+    // Artifacts are created lazily after the first child starts.
+  }
+  return evidence;
+}
+
+async function runPi(
   args: string[],
   env: NodeJS.ProcessEnv,
   timeoutMs: number,
   cwd: string,
   forwardingLog: string,
-  expectedForwardedApprovals: number,
+  expectedNewForwardedApprovals: number,
   sessionDir: string,
   completionMarker: string,
-): Promise<{ stdout: string; stderr: string }> {
+): Promise<{ stdout: string; stderr: string; forwardedApprovals: number }> {
+  // The review log is shared by all three probes. Snapshot it per probe so a
+  // later phase cannot satisfy its completion condition with earlier approvals.
+  const initialForwardedApprovals = await forwardedApprovalCount(forwardingLog);
+  const initialChildBash = await childBashEvidence(sessionDir);
   return new Promise((resolveRun, reject) => {
     const prompt = args.at(-1);
     if (!prompt) {
@@ -167,10 +219,9 @@ function runPi(
     const completionEvidencePoll = setInterval(() => {
       if (completionCheckRunning) return;
       completionCheckRunning = true;
-      void readFile(forwardingLog, "utf8").then(async (log) => {
-        const approvals = (log.match(/"event":"forwarded_permission\.approved"/g) ?? []).length;
+      void forwardedApprovalCount(forwardingLog).then(async (approvals) => {
         if (
-          approvals >= expectedForwardedApprovals &&
+          approvals - initialForwardedApprovals >= expectedNewForwardedApprovals &&
           await assistantReportedMarker(sessionDir, completionMarker)
         ) {
           finalPane = await capturePane();
@@ -178,6 +229,19 @@ function runPi(
         }
       }).catch(() => undefined).finally(() => { completionCheckRunning = false; });
     }, 250);
+    let terminalPromptCheckRunning = false;
+    const terminalPromptPoll = setInterval(() => {
+      if (terminalPromptCheckRunning || exitQueued) return;
+      terminalPromptCheckRunning = true;
+      void capturePane().then((pane) => {
+        if (!pane.includes("Permission Required")) return;
+        finalPane = pane;
+        void tmux(["kill-session", "-t", tmuxSession]);
+        reject(new Error(
+          `Headless gate reached an unresolved permission prompt before ${completionMarker}: ${JSON.stringify(pane.slice(-2_000))}`,
+        ));
+      }).catch(() => undefined).finally(() => { terminalPromptCheckRunning = false; });
+    }, 500);
     const timer = setTimeout(() => {
       void capturePane().then((pane) => {
         void tmux(["kill-session", "-t", tmuxSession]);
@@ -190,6 +254,7 @@ function runPi(
       clearTimeout(timer);
       clearInterval(promptTimer);
       clearInterval(completionEvidencePoll);
+      clearInterval(terminalPromptPoll);
       reject(error);
     });
     child.once("exit", (code, signal) => {
@@ -197,6 +262,7 @@ function runPi(
         clearTimeout(timer);
         clearInterval(promptTimer);
         clearInterval(completionEvidencePoll);
+        clearInterval(terminalPromptPoll);
         reject(new Error(`tmux could not start Pi (${code ?? "null"}${signal ? ` (${signal})` : ""}): ${stderr.slice(-800)}`));
       }
     });
@@ -206,12 +272,42 @@ function runPi(
         clearTimeout(timer);
         clearInterval(promptTimer);
         clearInterval(completionEvidencePoll);
+        clearInterval(terminalPromptPoll);
         clearInterval(completionPoll);
         if (!exitQueued) {
           reject(new Error("Pi exited before reporting the gate completion marker"));
           return;
         }
-        resolveRun({ stdout: finalPane, stderr });
+        void Promise.all([
+          forwardedApprovalCount(forwardingLog),
+          childBashEvidence(sessionDir),
+        ]).then(([approvals, childBash]) => {
+          const forwardedApprovals = approvals - initialForwardedApprovals;
+          if (forwardedApprovals !== expectedNewForwardedApprovals) {
+            reject(new Error(
+              `Expected exactly ${expectedNewForwardedApprovals} new forwarded approvals before ${completionMarker}, observed ${forwardedApprovals}`,
+            ));
+            return;
+          }
+          const bashDelta = {
+            calls: childBash.calls - initialChildBash.calls,
+            successful: childBash.successful - initialChildBash.successful,
+            failed: childBash.failed - initialChildBash.failed,
+            exactPwdCalls: childBash.exactPwdCalls - initialChildBash.exactPwdCalls,
+          };
+          if (
+            bashDelta.calls !== expectedNewForwardedApprovals ||
+            bashDelta.successful !== expectedNewForwardedApprovals ||
+            bashDelta.failed !== 0 ||
+            bashDelta.exactPwdCalls !== expectedNewForwardedApprovals
+          ) {
+            reject(new Error(
+              `Expected ${expectedNewForwardedApprovals} successful exact child Bash pwd calls before ${completionMarker}, observed ${JSON.stringify(bashDelta)}`,
+            ));
+            return;
+          }
+          resolveRun({ stdout: finalPane, stderr, forwardedApprovals });
+        }).catch(reject);
       });
     }, 250);
   });
@@ -423,7 +519,8 @@ async function main(): Promise<void> {
   const workspaceDir = join(agentDir, "workspace");
   const autoReviewAuditFile = join(agentDir, "pi-auto-review-audit.jsonl");
   const permissions = resolve("node_modules/@gotgenes/pi-permission-system/src/index.ts");
-  const permissionPackage = resolve("node_modules/@gotgenes/pi-permission-system");
+  const childPermissionWrapper = resolve("scripts/pi-subagents-gate-permission-wrapper.ts");
+  const parentForwardingAdapter = resolve("scripts/pi-subagents-parent-forwarding-adapter.ts");
   const autoReview = resolve("packages/pi-auto-review/src/index.ts");
   const sandbox = resolve("packages/pi-sandbox/src/index.ts");
   const providerExtension = process.env.PI_SUBAGENTS_GATE_PROVIDER_EXTENSION?.trim();
@@ -456,12 +553,26 @@ async function main(): Promise<void> {
     await mkdir(workspaceDir, { recursive: true });
     await initializeWorkspaceRepository(workspaceDir);
     // pi-subagents resolves this exact package location to auto-inject the
-    // permission system into child workers. The symlink is read-only source,
-    // not a copied installation or credential-bearing configuration.
-    await symlink(
-      permissionPackage,
-      join(agentDir, "npm", "node_modules", "@gotgenes", "pi-permission-system"),
-      "dir",
+    // permission system into child workers. The gate-only package points to a
+    // narrow wrapper around the real installed extension: outer PID namespaces
+    // hide the serving parent's PID, so the wrapper trusts only this gate's
+    // fresh parent-heartbeat PID while leaving heartbeat expiry intact.
+    const childPermissionPackage = join(
+      agentDir,
+      "npm",
+      "node_modules",
+      "@gotgenes",
+      "pi-permission-system",
+    );
+    await mkdir(childPermissionPackage, { recursive: true });
+    await writeFile(
+      join(childPermissionPackage, "package.json"),
+      JSON.stringify({
+        name: "@gotgenes/pi-permission-system",
+        private: true,
+        type: "module",
+        pi: { extensions: [childPermissionWrapper] },
+      }),
     );
     if (providerExtension) {
       const providerPackage = resolve(dirname(providerExtension), "..");
@@ -482,6 +593,12 @@ async function main(): Promise<void> {
       join(agentDir, "extensions", "pi-permission-system", "config.json"),
       JSON.stringify({
         permission: {
+          // The parent orchestration calls are fixed by this gate and are not
+          // the decision under test. Allow them deterministically so a long
+          // workflowScript is not deferred merely because the generic tool
+          // preview is truncated; child Bash remains an explicit forwarded ask.
+          subagent: "allow",
+          subagent_wait: "allow",
           bash: "ask",
           bash_escalated: "ask",
           path: "ask",
@@ -495,9 +612,19 @@ async function main(): Promise<void> {
     );
     // pi-subagents reads a separate config path. Session artifacts make the
     // real child tool calls observable without parsing model prose.
+    //
+    // Since pi-subagents 0.54.0, its external permission-system bridge loads
+    // only when a child has at least one explicit native permission rule. This
+    // mutation deny is both a safety boundary for these read-only probes and
+    // the opt-in that loads the bridge. The children call only Bash, which is
+    // outside pi-subagents' native rule surface and remains governed by the
+    // permission-system `bash: "ask"` policy above.
     await writeFile(
       join(agentDir, "extensions", "subagent", "config.json"),
-      JSON.stringify({ artifactDir: "session" }),
+      JSON.stringify({
+        artifactDir: "session",
+        permissions: { rules: { write: "deny" } },
+      }),
     );
     if (modelsCache) {
       await copyFile(modelsCache, join(agentDir, "cliproxyapi-models.json"));
@@ -530,7 +657,13 @@ async function main(): Promise<void> {
     }
     await writeFile(
       join(agentDir, ".pi", "agent", "extensions", "pi-auto-review", "config.json"),
-      JSON.stringify({ model }),
+      JSON.stringify({
+        model,
+        // Forwarded reviews must see the complete gate authorization. The
+        // package default can truncate the longer parallel workflow prompt,
+        // making an otherwise exact `pwd` request nondeterministically defer.
+        maxUserTranscriptTokens: 4_000,
+      }),
     );
     await writeFile(
       join(agentDir, ".pi", "agent", "extensions", "pi-sandbox", "config.json"),
@@ -539,11 +672,27 @@ async function main(): Promise<void> {
           provider: "pi-subagents",
           externalWorkerIsolation: externalIsolationGate ? "enforce" : "off",
         },
+        // In enforce mode the model-provider endpoint is gate infrastructure,
+        // not a decision under test: children must reach it to run at all.
+        // Routing those connections through the reviewer made headless runs
+        // hang whenever transcript evidence exceeded the reviewer's per-item
+        // budget (reproducible on pi-subagents 0.59.0 too), so the resolved
+        // provider endpoint is policy-allowed instead; every other
+        // destination still requires reviewer or human approval.
+        ...(externalIsolationGate && providerNetworkEndpoint
+          ? { network: { allowedDomains: [providerNetworkEndpoint] } }
+          : {}),
       }),
     );
     const common = [
       "--no-extensions",
       "--extension", piSubagents,
+      // pi-subagents writes the root session id into its own parent-session
+      // environment variable. Load this narrow adapter immediately afterward
+      // so permission-system does not misclassify the interactive root as a
+      // child; child launches still receive the id through pi-subagents'
+      // explicit parentSessionId launch field.
+      "--extension", parentForwardingAdapter,
       ...(providerExtension ? ["--extension", providerExtension] : []),
       "--extension", autoReview,
       "--extension", permissions,
@@ -568,10 +717,14 @@ async function main(): Promise<void> {
     // pi-subagents 0.43.0: workflowScript is now the only public execution
     // surface, including single-child runs. The "direct" probe therefore runs
     // the minimal single-run workflowScript form.
+    // Each child makes exactly one Bash `pwd` call, hence exactly one forwarded
+    // ask. permission-system's pure-reader classification for `pwd` narrows
+    // path-effect handling; it does not override the explicit `bash: "ask"`
+    // command rule exercised here.
     const directScript = [
       "return runs.run(\"single\", {",
       "  agent: \"delegate\",",
-      `  task: ${JSON.stringify(`Run Bash \`pwd\` first, then return its output.${providerNetworkAuthorization}`)},`,
+      `  task: ${JSON.stringify(`Make exactly one Bash tool call with the exact command \`pwd\`, then return its output.${providerNetworkAuthorization}`)},`,
       "});",
     ].join("\n");
     const direct = await runPi([
@@ -582,28 +735,31 @@ async function main(): Promise<void> {
     const workflowCompletionMarker = `PI_SUBAGENTS_GATE_WORKFLOW_COMPLETE_${process.pid}`;
     const workflowScript = [
       "const [alpha, bravo] = await runs.all([",
-      `  { key: "alpha", agent: "delegate", task: ${JSON.stringify(`Run Bash \`pwd\` first, then return its output and the marker CHILD-ALPHA.${providerNetworkAuthorization}`)} },`,
-      `  { key: "bravo", agent: "delegate", task: ${JSON.stringify(`Run Bash \`pwd\` first, then return its output and the marker CHILD-BRAVO.${providerNetworkAuthorization}`)}, worktree: true },`,
+      `  { key: "alpha", agent: "delegate", task: ${JSON.stringify(`Make exactly one Bash tool call with the exact command \`pwd\`, then return its output and the marker CHILD-ALPHA.${providerNetworkAuthorization}`)} },`,
+      `  { key: "bravo", agent: "delegate", task: ${JSON.stringify(`Make exactly one Bash tool call with the exact command \`pwd\`, then return its output and the marker CHILD-BRAVO.${providerNetworkAuthorization}`)}, worktree: true },`,
       "] );",
       "const charlie = await runs.run(\"charlie\", {",
       "  agent: \"delegate\",",
-      `  task: ${JSON.stringify(`Run Bash \`pwd\` first, then summarize these completed children.${providerNetworkAuthorization} ALPHA: `)} + alpha.output + ${JSON.stringify(" BRAVO: ")} + bravo.output`,
+      `  task: ${JSON.stringify(`Make exactly one Bash tool call with the exact command \`pwd\`, then summarize these completed children.${providerNetworkAuthorization} ALPHA: `)} + alpha.output + ${JSON.stringify(" BRAVO: ")} + bravo.output`,
       "});",
       "return { alpha, bravo, charlie };",
     ].join("\n");
+    // alpha, bravo, and charlie each contribute one new forwarded approval.
     const workflow = await runPi([
       ...common,
       `Make exactly one subagent tool call; do not list agents, launch a background workflow, call status, retry, or create replacement runs.\n\n${exactWorkflowToolInput(false, workflowScript)}\n\nWait for that foreground tool call to return. Report every run id and output, then end the response with exactly ${workflowCompletionMarker}.`,
-    ], env, workflowTimeoutMs, workspaceDir, forwardingLog, 4, sessionDir, workflowCompletionMarker);
+    ], env, workflowTimeoutMs, workspaceDir, forwardingLog, 3, sessionDir, workflowCompletionMarker);
     console.log("gate: async workflow completion payloads");
     const asyncCompletionMarker = `PI_SUBAGENTS_GATE_ASYNC_COMPLETE_${process.pid}`;
     const asyncScript = [
       "const [left, right] = await runs.all([",
-      `  { key: "left", agent: "delegate", task: ${JSON.stringify(`Run Bash \`pwd\` first, then return your output and the marker ASYNC-LEFT.${providerNetworkAuthorization}`)} },`,
-      `  { key: "right", agent: "delegate", task: ${JSON.stringify(`Run Bash \`pwd\` first, then return your output and the marker ASYNC-RIGHT.${providerNetworkAuthorization}`)} },`,
+      `  { key: "left", agent: "delegate", task: ${JSON.stringify(`Make exactly one Bash tool call with the exact command \`pwd\`, then return your output and the marker ASYNC-LEFT.${providerNetworkAuthorization}`)} },`,
+      `  { key: "right", agent: "delegate", task: ${JSON.stringify(`Make exactly one Bash tool call with the exact command \`pwd\`, then return your output and the marker ASYNC-RIGHT.${providerNetworkAuthorization}`)} },`,
       "] );",
       "return { left, right };",
     ].join("\n");
+    // left and right each contribute one new forwarded approval; the per-run
+    // baseline prevents the four foreground approvals from satisfying this.
     const asyncWorkflow = await runPi([
       ...common,
       `Make exactly one subagent tool call that launches a background workflow; do not call status, list agents, retry, or create replacement runs.${providerNetworkAuthorization}\n\n${exactWorkflowToolInput(true, asyncScript)}\n\nFrom the returned control record, read the run id. Then call subagent_wait({ id: <that run id>, nonBlocking: false }) and wait for it to return the completed result. Report each child's run id, the markers ASYNC-LEFT and ASYNC-RIGHT, and note whether the subagent_wait result carried structured completion details. Then end your response with exactly ${asyncCompletionMarker}.`,
@@ -648,6 +804,14 @@ async function main(): Promise<void> {
     }
     console.log("gate: forwarded permission audit");
     const audit = await auditEvidence(join(agentDir, "extensions", "pi-permission-system", "logs"));
+    const expectedForwardedApprovalTotal =
+      direct.forwardedApprovals + workflow.forwardedApprovals + asyncWorkflow.forwardedApprovals;
+    const forwardedApprovalTotal = (audit.match(/"event":"forwarded_permission\.approved"/g) ?? []).length;
+    if (forwardedApprovalTotal !== expectedForwardedApprovalTotal) {
+      throw new Error(
+        `forwarded permission audit total changed after phase completion: expected ${expectedForwardedApprovalTotal}, observed ${forwardedApprovalTotal}`,
+      );
+    }
     const autoReviewAudit = await readFile(autoReviewAuditFile, "utf8").catch(() => "");
     if (!/"command"\s*:/.test(autoReviewAudit)) {
       const events = autoReviewAudit
@@ -671,6 +835,11 @@ async function main(): Promise<void> {
       directOutputBytes: direct.stdout.length,
       workflowOutputBytes: workflow.stdout.length,
       asyncOutputBytes: asyncWorkflow.stdout.length,
+      forwardedApprovals: {
+        direct: direct.forwardedApprovals,
+        workflow: workflow.forwardedApprovals,
+        async: asyncWorkflow.forwardedApprovals,
+      },
       asyncWaitToolCalls: completionEvidence.waitToolCalls,
       asyncCompletionPayloads: completionEvidence.completions.length,
       asyncMarkersSeen: completionEvidence.markersSeen,

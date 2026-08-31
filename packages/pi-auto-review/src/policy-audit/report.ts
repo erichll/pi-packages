@@ -42,6 +42,11 @@ export type PolicyAuditReportOptions = {
   scope: "current" | "all"; days: number; top: number; minCount: number;
 };
 
+// Suggestion evidence must stay strictly human/session-based. Since
+// permission-system v28, decisions made by a registered authorizer chain link
+// (including pi-auto-review's own model review) resolve to `authorizer_allowed`
+// instead of `user_approved`. Counting those here would create a feedback loop:
+// machine review allows → evidence → suggested auto-allow rule → review bypassed.
 const SUCCESS_RESOLUTIONS = new Set([
   "user_approved", "user_approved_for_session", "session_approved", "auto_approved",
 ]);
@@ -70,8 +75,15 @@ function rank(
     .slice(0, top);
 }
 
+// "Reviewed" marks ask-path rows that some reviewer resolved — human clicks and,
+// since permission-system v28, named authorizer links alike — so low-risk
+// candidates stay visible even when only the machine authorizer decides them.
+// Display-only: SUCCESS_RESOLUTIONS still gates suggestion evidence.
 function reviewed(row: PolicyAuditAggregateRow): boolean {
-  return ["user_approved", "user_approved_for_session", "user_denied", "auto_approved"].includes(row.resolution);
+  return [
+    "user_approved", "user_approved_for_session", "user_denied", "auto_approved",
+    "authorizer_allowed", "authorizer_denied",
+  ].includes(row.resolution);
 }
 
 type CandidateGroup = {

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.15.1 - 2026-08-31
+
+- Align the exact `@erichll/pi-auto-review` dependency with `0.15.1`, inheriting
+  compatibility with `@gotgenes/pi-permission-system` v28 authorizer
+  resolutions while keeping machine-authorizer allows out of policy-audit
+  suggestion evidence.
+- Update the dev-only `pi-subagents` compatibility baseline from `0.56.0` to
+  `0.60.0`. No pi-sandbox runtime, filesystem/network policy, grant, or public
+  API changes.
+
 ## 0.15.0 - 2026-08-29
 
 - Align the package version with `@erichll/pi-auto-review` `0.15.0` and update

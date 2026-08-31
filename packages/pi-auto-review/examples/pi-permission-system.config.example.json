@@ -171,6 +171,7 @@
     "web_search": "allow",
     "get_search_content": "allow",
     "fetch_content": "ask",
+    "plan_mode_question": "allow",
     "plan_mode_complete": "allow"
   }
 }

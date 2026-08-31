@@ -247,6 +247,37 @@ test("controller disables and warns once when node:sqlite is unavailable", async
   }
 });
 
+test("authorizer resolutions are recorded verbatim and never become suggestion evidence", async () => {
+  const directory = temp("pi-policy-authorizer-");
+  try {
+    const controller = new PolicyAuditController({
+      config: () => ({ enabled: true, retentionDays: 180 }), cwd: () => "/work/project",
+      directory, warn: () => assert.fail("unexpected audit warning"),
+    });
+    for (let index = 0; index < 5; index++) {
+      controller.record({
+        requestId: `auth-allow-${index}`, surface: "fetch_content", value: "https://example.test",
+        result: "allow", resolution: "authorizer_allowed", origin: "package",
+      });
+    }
+    controller.record({
+      requestId: "auth-deny", surface: "bash", value: "company-cli deploy",
+      result: "deny", resolution: "authorizer_denied", origin: "package",
+    });
+    const { report } = await controller.report({ days: 30, top: 20, minCount: 5, scope: "current" });
+    assert.equal(
+      report.approvalSources.some((item) => item.name === "authorizer_allowed/default"),
+      true,
+      "authorizer_allowed is persisted instead of collapsing into unknown",
+    );
+    assert.equal(report.suggestedAllowRules.length, 0);
+    assert.equal(report.insufficientEvidence.length, 0);
+    await controller.close();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("controller returns a redacted command report", async () => {
   const directory = temp("pi-policy-self-exclusion-");
   try {
@@ -400,14 +431,20 @@ test("recommendations require ask-path success and zero denials, failures, unsaf
   assert.equal(mixedForwarding.suggestedAllowRules[0]?.successfulEvidence, 5);
 });
 
-test("policy and infrastructure allows do not count as evidence while session and auto approvals do", () => {
+test("policy, infrastructure, and authorizer allows do not count as evidence while session and auto approvals do", () => {
   const report = reportFor([
     aggregate({ resolution: "policy_allow", count: 20 }),
     aggregate({ resolution: "infrastructure_auto_allowed", count: 20 }),
+    aggregate({ resolution: "authorizer_allowed", count: 20 }),
     aggregate({ resolution: "session_approved", count: 2 }),
     aggregate({ resolution: "auto_approved", count: 3 }),
   ]);
   assert.equal(report.suggestedAllowRules[0]?.successfulEvidence, 5);
+  assert.equal(
+    report.approvalSources.some((item) => item.name.startsWith("authorizer_allowed/")),
+    true,
+    "authorizer decisions stay visible in approval sources",
+  );
 
   const insufficient = reportFor([aggregate({ count: 4 })]);
   assert.equal(insufficient.suggestedAllowRules.length, 0);

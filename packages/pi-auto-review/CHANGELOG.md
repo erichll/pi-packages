@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.15.1 - 2026-08-31
+
+- Adapt the policy audit to `@gotgenes/pi-permission-system` v28.0.0. Ask
+  decisions made by a registered authorizer chain link — including
+  pi-auto-review's own model review — now broadcast `authorizer_allowed` /
+  `authorizer_denied` instead of `user_approved` / `user_denied`. The audit
+  whitelist records both new values verbatim instead of collapsing them into
+  `unknown`, and approval sources surface them under their own name.
+- Keep suggestion evidence strictly human/session-based: `authorizer_allowed`
+  deliberately does not join `SUCCESS_RESOLUTIONS`, because counting the
+  extension's own machine review as evidence would create a feedback loop
+  (model review allows → evidence → suggested auto-allow rule → future review
+  bypassed). Authorizer-resolved rows still count as "reviewed" for the
+  display-only low-risk candidate list so those surfaces stay visible.
+- Bump the `@gotgenes/pi-permission-system` peer range to `^28.0.0`.
+
 ## 0.15.0 - 2026-08-29
 
 - Fix a deterministic reviewer-unavailable denial for large CJK tool inputs.

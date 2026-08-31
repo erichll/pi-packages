@@ -32,6 +32,8 @@ const PERMISSION_RESOLUTIONS = new Set([
   "user_approved_for_session",
   "user_denied",
   "auto_approved",
+  "authorizer_allowed",
+  "authorizer_denied",
   "confirmation_unavailable",
   "gate_error",
 ]);
