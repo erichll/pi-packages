@@ -202,10 +202,20 @@ function exactKeys(
   );
 }
 
+// Some reviewer models (notably any routed through Claude Code, which always
+// markdown-fences JSON) wrap the decision object in a ```json ... ``` block
+// despite the prompt forbidding markdown. Strip a single enclosing fence before
+// parsing; the strict shape validation below is unchanged.
+function stripReviewerFence(text: string): string {
+  const t = text.trim();
+  const fenced = t.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i);
+  return (fenced ? fenced[1] : t).trim();
+}
+
 export function parseDecision(text: string): ModelDecision {
   let value: unknown;
   try {
-    value = JSON.parse(text.trim());
+    value = JSON.parse(stripReviewerFence(text));
   } catch {
     throw new Error("reviewer returned non-JSON output");
   }
