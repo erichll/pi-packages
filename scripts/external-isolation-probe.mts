@@ -17,7 +17,7 @@ const require = createRequire(import.meta.url);
 // not the root package.json (which reports the monorepo version 0.1.0).
 const pkg = require(resolve("packages/pi-sandbox/package.json"));
 const piSubagentsVersion = require(resolve("node_modules/pi-subagents/package.json")).version;
-const PI_SUBAGENTS_BASELINE = { major: 0, minor: 61, patch: 0 };
+const PI_SUBAGENTS_BASELINE = { major: 0, minor: 63, patch: 0 };
 
 function versionAtLeast(value, required) {
   if (typeof value !== "string") return false;

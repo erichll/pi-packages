@@ -219,6 +219,56 @@ sandboxTest("external launcher permits Pi project-state creation in a new worksp
   }
 });
 
+sandboxTest("external launcher passes a temp-file task argument verbatim and permits reading it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-sandbox-external-task-file-"));
+  const workspace = join(root, "workspace");
+  const agentDir = join(root, "agent");
+  const task = join(workspace, "task.md");
+  const worker = join(workspace, "worker.mjs");
+  const supervisor = await createExternalWorkerSupervisor(() => ({
+    command: "external worker",
+    cwd: workspace,
+    sessionId: "parent",
+    scopeKey: "parent:turn:1",
+  }));
+  try {
+    await mkdir(workspace);
+    await mkdir(agentDir);
+    await writeFile(task, "read task from temp file", "utf8");
+    await writeFile(worker, [
+      'import { readFileSync } from "node:fs";',
+      'const args = process.argv.slice(2);',
+      'if (args.length !== 1 || args[0] !== "@task.md") throw new Error(`unexpected args: ${JSON.stringify(args)}`);',
+      'process.stdout.write(readFileSync(args[0].slice(1), "utf8"));',
+    ].join("\n"), "utf8");
+    const child = spawn(process.execPath, [launcher, "@task.md"], {
+      cwd: workspace,
+      env: {
+        ...process.env,
+        HOME: root,
+        PI_CODING_AGENT_DIR: agentDir,
+        PI_SANDBOX_EXTERNAL_REAL_PI_BINARY: process.execPath,
+        PI_SANDBOX_EXTERNAL_REAL_PI_PREFIX: JSON.stringify([worker]),
+        PI_SANDBOX_EXTERNAL_SUPERVISOR_SOCKET: supervisor.socketPath,
+        PI_SANDBOX_EXTERNAL_SUPERVISOR_CAPABILITY: supervisor.capability,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const [code] = await once(child, "exit") as [number | null];
+    assert.equal(code, 0, stderr);
+    assert.equal(stdout, "read task from temp file");
+  } finally {
+    await supervisor.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 sandboxTest("external launcher blocks first-time security configuration creation", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-sandbox-external-security-create-"));
   const workspace = join(root, "workspace");

@@ -6,16 +6,16 @@ This document records every point at which `pi-packages` (specifically
 verifiable on upgrade so that a `pi-subagents` release cannot silently break
 the outer worker isolation boundary or the compatibility gates.
 
-Current pinned baseline: `pi-subagents 0.61.0` (exact pin in
-`packages/pi-sandbox` `devDependencies`, test/CI only). The `0.60.0 → 0.61.0`
-upgrade was verified against the published packages: `pi-spawn.ts` (including
-`PI_SUBAGENT_PI_BINARY`) and `api/external-job-provider.ts` are byte-identical;
-the `pi-subagents/external-runs` export and register/unregister signatures are
-unchanged while its snapshot implementation adds trusted-record caching and
-malformed-record isolation. Version 0.61.0 makes `bg_wait` the primary wait
-tool and retains `subagent_wait` as a compatibility alias, so the model gate
-selects the primary name from the installed version. The deterministic gate,
-type checks, and package tests pass against installed `0.61.0`.
+Current pinned baseline: `pi-subagents 0.63.0` (exact pin in
+`packages/pi-sandbox` `devDependencies`, test/CI only). The published 0.63.0
+package keeps the Linux/macOS `PI_SUBAGENT_PI_BINARY` command-and-verbatim-args
+contract, while its private `pi-spawn.ts` seam adds package-root candidate
+resolution and Windows-specific Node-script/fail-closed behavior.
+`api/external-runs.ts` is byte-identical to 0.61.0. The active wait seam is
+`bg_wait` with completion data in `details.completions`; `subagent_wait` was a
+historical name and its deprecated alias is absent from 0.63.0. The
+deterministic gate, type checks, package tests, temp-file launcher test, and
+standard Git worktree isolation test verify the 0.63.0 development baseline.
 
 ## Seam registry
 
@@ -24,7 +24,7 @@ type checks, and package tests pass against installed `0.61.0`.
 | package root `exports["."]` | Public | `0.45.0` | compat gate loads entry | `import.meta.resolve` + model gate | `pi-subagents` root entry |
 | `src/runs/shared/pi-spawn.ts` | Internal | `0.47.x` | probe single-point dependency | `gate:external-isolation` probe + upstream D1 | — |
 | `PI_SUBAGENT_PI_BINARY` | Env contract | `0.47.x` | external isolation requires it | `gate:external-isolation` probe | — |
-| `bg_wait` / `subagent_wait` / `details.completions` | Tool-result contract | `0.45.0` (`bg_wait` primary in `0.61.0`) | model gate selects by version | model-backed compat gate | `>=0.45.0` |
+| `bg_wait` / `details.completions` | Tool-result contract | `details.completions` in `0.45.0`; `bg_wait` in `0.61.0` | active; `subagent_wait` is legacy history only | model-backed compat gate | installed version |
 | `pi-subagents/external-runs` | Public, `0.50+` | `0.50.0` | active runtime seam (C1 landed) | unit + supervisor integration tests | C1 (FleetView) |
 
 The seam registry lists `pi-subagents/external-runs` as a public `0.50+`
@@ -57,6 +57,10 @@ subpath; with C1 implemented it is now an active runtime seam.
   subpath). After upstream publishes it, migrate to
   `import { getPiSpawnCommand } from "pi-subagents/pi-spawn"` and delete the
   last internal source-path import.
+- **0.63.0 drift:** resolution now tries explicit/package-root candidates,
+  validates the package name, and treats Windows JavaScript launchers and
+  unresolved CLI paths specially. The external-isolation probe verifies the
+  unchanged Linux/macOS override and verbatim-argument behavior.
 
 ### 3. `PI_SUBAGENT_PI_BINARY` (environment contract)
 
@@ -71,13 +75,15 @@ subpath; with C1 implemented it is now an active runtime seam.
   the previous `pi-subagents` version (revert upgrade commit, then re-run
   `npm ci`).
 
-### 4. `bg_wait` / `subagent_wait` / `details.completions` (tool-result contract)
+### 4. `bg_wait` / `details.completions` (tool-result contract)
 
-- **First introduced:** `subagent_wait` in `0.45.0`; `bg_wait` is primary from
-  `0.61.0` while that release still registers the compatibility alias.
+- **History:** completion details landed with the old `subagent_wait` tool in
+  `0.45.0`; `bg_wait` became primary in `0.61.0`, and 0.63.0 no longer
+  registers the deprecated alias.
 - **Local files:** `scripts/pi-subagents-compat-gate.ts` selects `bg_wait` for
-  `0.61.0+` and `subagent_wait` for earlier compatible versions, then asserts
-  that `details.completions` carries the completion payload.
+  `0.61.0+` (using `subagent_wait` only when testing an older compatible
+  release), then asserts that `details.completions` carries the completion
+  payload.
 - **Failure impact:** the model gate reports `FAIL` on the async-completion
   checks; release acceptance is blocked.
 - **Rollback:** revert upgrade commit and re-run the gate against the prior
@@ -123,6 +129,6 @@ If an upgrade gate fails:
 
 1. Preserve evidence with `PI_SUBAGENTS_GATE_KEEP_ARTIFACTS=1` (model gate).
 2. Record the failure symptoms, versions, command, and key error here.
-3. On an isolated branch/commit, restore `0.49.0` (`pi-subagents` pinned) and
-   re-run to determine whether the failure is upstream version drift. Do not
-   clobber unrelated workspace changes.
+3. On an isolated branch or worktree, restore the immediately previous exact
+   pin and re-run to determine whether the failure is upstream version drift.
+   Do not clobber unrelated workspace changes.

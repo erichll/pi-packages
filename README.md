@@ -104,9 +104,11 @@ READMEs for provider, platform, and trust-boundary details.
 
 Run deterministic checks with `npm run check` and `npm test`. The external
 provider runtime floor published by `pi-sandbox` is `pi-subagents 0.50.0+`; its
-devDependency is pinned exactly to `0.61.0`, the version the suite and gate are
-exercised against. The model gate uses `bg_wait` with `0.61.0+` and retains
-`subagent_wait` for older compatible installations. Run
+devDependency is pinned exactly to `0.63.0`, the version the suite and gate are
+exercised against. The model gate uses `bg_wait` with `0.63.0+` and waits on
+`details.completions`. (`subagent_wait` is a historical alias kept only for
+older compatible releases; the script retains a fallback solely so it can still
+exercise those old versions.) Run
 `npm run gate:external-isolation` to verify the external-worker-isolation
 (`PI_SUBAGENT_PI_BINARY`) contract seam without any model credential. Before a
 release, run `npm run gate:pi-subagents` with `PI_SUBAGENTS_GATE_MODEL` and its
