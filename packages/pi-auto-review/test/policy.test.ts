@@ -48,6 +48,79 @@ test("detailed decisions require an exact consistent schema", () => {
   );
 });
 
+test("a single enclosing markdown fence is stripped before parsing", () => {
+  const decision = {
+    outcome: "allow",
+    risk_level: "low",
+    user_authorization: "unknown",
+    rationale: "local inspection",
+  };
+  const raw = JSON.stringify(decision);
+  // ```json fence, bare fence, uppercase language tag, blank padding lines,
+  // and leading/trailing whitespace are all tolerated.
+  for (const text of [
+    `\`\`\`json\n${raw}\n\`\`\``,
+    `\`\`\`\n${raw}\n\`\`\``,
+    `\`\`\`JSON\n${raw}\n\`\`\``,
+    `\`\`\`json\n\n${raw}\n\n\`\`\``,
+    `  \n\`\`\`json\r\n${raw}\r\n\`\`\`\n  `,
+  ]) {
+    assert.deepEqual(parseDecision(text), decision);
+  }
+  // A fence only helps when it encloses the whole payload: leading or
+  // trailing prose, an unterminated fence, and a doubly nested fence all
+  // stay non-JSON parse failures.
+  for (const text of [
+    `Here is my decision:\n\`\`\`json\n${raw}\n\`\`\``,
+    `\`\`\`json\n${raw}\n\`\`\`\nDone.`,
+    `\`\`\`json\n${raw}`,
+    `\`\`\`json\n\`\`\`json\n${raw}\n\`\`\`\n\`\`\``,
+  ]) {
+    assert.throws(() => parseDecision(text), /non-JSON/);
+  }
+  // An empty or whitespace-only fence is still not a decision.
+  for (const text of ["```json\n```", "```\n   \n```"]) {
+    assert.throws(() => parseDecision(text), /non-JSON/);
+  }
+});
+
+test("fenced reviewer output remains strictly schema-validated", () => {
+  // Unexpected extra fields, invalid enum values, non-objects, and a
+  // critical-risk allow are rejected even inside a well-formed fence.
+  assert.throws(() =>
+    parseDecision(
+      '```json\n{"outcome":"allow","risk_level":"low","user_authorization":"unknown","rationale":"ok","extra":true}\n```',
+    ),
+  );
+  assert.throws(() =>
+    parseDecision(
+      '```json\n{"outcome":"audit","risk_level":"low","user_authorization":"unknown","rationale":"ok"}\n```',
+    ),
+  );
+  assert.throws(() =>
+    parseDecision(
+      '```json\n["outcome","allow"]\n```',
+    ),
+  );
+  assert.throws(() =>
+    parseDecision(
+      '```json\n{"outcome":"allow","risk_level":"critical","user_authorization":"high","rationale":"self-approved"}\n```',
+    ),
+  );
+  // A valid fenced decision still parses with trimmed rationale.
+  assert.deepEqual(
+    parseDecision(
+      '```json\n{"outcome":"defer","risk_level":"high","user_authorization":"low","rationale":"  uncertain  "}\n```',
+    ),
+    {
+      outcome: "defer",
+      risk_level: "high",
+      user_authorization: "low",
+      rationale: "uncertain",
+    },
+  );
+});
+
 test("bash_escalated recovers only a complete structured command preview", () => {
   assert.equal(
     effectiveCommand({
