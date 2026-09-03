@@ -4,12 +4,13 @@
 //   1. pi-subagents getPiSpawnCommand honors sandbox's injected
 //      PI_SUBAGENT_PI_BINARY (the worker-spawn seam that makes
 //      externalWorkerIsolation effective).
-//   2. pi-sandbox enableExternalWorkerIsolation injects the expected env and
+//   2. pi-subagents 0.64 watchdog action=block stops before spawn planning.
+//   3. pi-sandbox enableExternalWorkerIsolation injects the expected env and
 //      a live external-worker-supervisor round-trips register + network.
 import { createRequire } from "node:module";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
 const require = createRequire(import.meta.url);
@@ -17,7 +18,7 @@ const require = createRequire(import.meta.url);
 // not the root package.json (which reports the monorepo version 0.1.0).
 const pkg = require(resolve("packages/pi-sandbox/package.json"));
 const piSubagentsVersion = require(resolve("node_modules/pi-subagents/package.json")).version;
-const PI_SUBAGENTS_BASELINE = { major: 0, minor: 63, patch: 0 };
+const PI_SUBAGENTS_BASELINE = { major: 0, minor: 64, patch: 0 };
 
 function versionAtLeast(value, required) {
   if (typeof value !== "string") return false;
@@ -47,6 +48,9 @@ const { getPiSpawnCommand } = await jiti.import(
 );
 const { createExternalWorkerSupervisor } = await jiti.import(
   resolve("packages/pi-sandbox/src/external-supervisor.ts"),
+);
+const { applyWatchdogLaunchRules } = await jiti.import(
+  resolve("node_modules/pi-subagents/src/watchdog/rules.ts"),
 );
 
 const launcherPath = resolve("packages/pi-sandbox/src/external-worker-launcher.mjs");
@@ -96,9 +100,53 @@ console.log("");
   console.log("");
 }
 
-// --- Seam 2: enableExternalWorkerIsolation injection + supervisor protocol ---
+// --- Seam 2: watchdog launch blocking precedes worker spawn planning ---
 {
-  console.log("Seam 2: pi-sandbox enableExternalWorkerIsolation injection (parent seam)");
+  console.log("Seam 2: pi-subagents watchdog launch rule (pre-spawn contract)");
+  const project = await mkdtemp(join(tmpdir(), "pi-subagents-watchdog-block-"));
+  try {
+    await mkdir(join(project, ".pi"));
+    await writeFile(join(project, ".pi", "settings.json"), JSON.stringify({
+      subagents: {
+        watchdog: {
+          rules: {
+            action: "block",
+            roleModels: { delegate: { deny: ["*"] } },
+          },
+        },
+      },
+    }));
+    const blocked = applyWatchdogLaunchRules({
+      cwd: project,
+      agent: "delegate",
+      model: "test-provider/test-model",
+    });
+    let spawnPlanningCalls = 0;
+    if (!blocked) {
+      spawnPlanningCalls++;
+      getPiSpawnCommand(["run", "blocked"], {
+        env: { ...process.env, PI_SUBAGENT_PI_BINARY: launcherPath },
+      });
+    }
+    check(
+      "action=block returns a launch error",
+      typeof blocked === "string" && blocked.includes("Launch blocked"),
+      JSON.stringify(blocked),
+    );
+    check(
+      "blocked launch never reaches worker spawn planning",
+      spawnPlanningCalls === 0,
+      `spawn planning calls=${spawnPlanningCalls}`,
+    );
+  } finally {
+    await rm(project, { recursive: true, force: true });
+  }
+  console.log("");
+}
+
+// --- Seam 3: enableExternalWorkerIsolation injection + supervisor protocol ---
+{
+  console.log("Seam 3: pi-sandbox enableExternalWorkerIsolation injection (parent seam)");
   // Import index.ts would pull the whole extension; instead inline the exact
   // injection contract from src/index.ts to compare against what pi-subagents
   // honors. We verify the supervisor half for real.

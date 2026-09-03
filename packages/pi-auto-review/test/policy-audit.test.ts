@@ -148,6 +148,31 @@ test("Bash candidates use observed templates and reject structural shell hazards
   assert.equal(classifyPermission("bash_escalated", "rg token", "/work/project").candidate, undefined);
 });
 
+test("permission-system 31 statement operands stay aligned with path gating", () => {
+  const cwd = "/work/project";
+  for (const command of [
+    "for f in /etc/shadow; do cat $f; done",
+    "select f in /etc/shadow; do echo $f; done",
+    "case /etc/shadow in a) echo b;; esac",
+    'case "/etc/shadow" in a) echo b;; esac',
+  ]) {
+    const classified = classifyBash(command, cwd);
+    assert.equal(classified.bashCategory, "structured", command);
+    assert.equal(classified.pathClass, "external", command);
+    assert.equal(classified.candidate?.eligible, false, command);
+  }
+
+  assert.equal(
+    classifyBash("for f in ./src/a.ts ./src/b.ts; do echo $f; done", cwd).pathClass,
+    "workspace",
+  );
+  assert.equal(
+    classifyBash("case $x in /etc/passwd) true;; esac", cwd).pathClass,
+    "unknown",
+    "a case arm glob is not a path operand",
+  );
+});
+
 test("argument parser enforces the public report bounds", () => {
   assert.deepEqual(parsePolicyAuditArguments("", 180), { days: 30, top: 20, minCount: 5, scope: "current" });
   assert.deepEqual(parsePolicyAuditArguments("--days=7 --top 5 --min-count 2 --scope all", 180), {
@@ -437,9 +462,12 @@ test("policy, infrastructure, and authorizer allows do not count as evidence whi
     aggregate({ resolution: "infrastructure_auto_allowed", count: 20 }),
     aggregate({ resolution: "authorizer_allowed", count: 20 }),
     aggregate({ resolution: "session_approved", count: 2 }),
+    // permission-system 30.2 reports both narrow and both-directions human
+    // session grants through this same public decision resolution.
+    aggregate({ resolution: "user_approved_for_session", count: 2 }),
     aggregate({ resolution: "auto_approved", count: 3 }),
   ]);
-  assert.equal(report.suggestedAllowRules[0]?.successfulEvidence, 5);
+  assert.equal(report.suggestedAllowRules[0]?.successfulEvidence, 7);
   assert.equal(
     report.approvalSources.some((item) => item.name.startsWith("authorizer_allowed/")),
     true,

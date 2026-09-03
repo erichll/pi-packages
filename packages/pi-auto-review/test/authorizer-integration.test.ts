@@ -5,6 +5,10 @@ import test from "node:test";
 import { AuthorizerRegistry } from "../../../node_modules/@gotgenes/pi-permission-system/src/authority/authorizer-registry.ts";
 import { composeAuthorizerChain } from "../../../node_modules/@gotgenes/pi-permission-system/src/authority/authorizer-chain.ts";
 import { encloseInDelegationEnvelope } from "../../../node_modules/@gotgenes/pi-permission-system/src/authority/delegation-envelope.ts";
+import { BashProgram } from "../../../node_modules/@gotgenes/pi-permission-system/src/access-intent/bash/program.ts";
+import { capabilitySurfaceForEffect } from "../../../node_modules/@gotgenes/pi-permission-system/src/access-intent/path-surfaces.ts";
+import { posixPathFlavor } from "../../../node_modules/@gotgenes/pi-permission-system/src/path/path-flavor.ts";
+import { PathNormalizer } from "../../../node_modules/@gotgenes/pi-permission-system/src/path-normalizer.ts";
 import {
   publishPermissionsService,
   unpublishPermissionsService,
@@ -504,6 +508,34 @@ function promptPayload(
     annotations: [],
   };
 }
+
+test("permission-system 31 projects statement operands onto existing bounded surfaces", async () => {
+  const normalizer = new PathNormalizer(posixPathFlavor, process.cwd());
+  for (const command of [
+    "for f in /etc/shadow; do cat $f; done",
+    "select f in /etc/shadow; do echo $f; done",
+    "case /etc/shadow in a) echo b;; esac",
+  ]) {
+    const program = await BashProgram.parse(command, normalizer);
+    const pathCandidate = program.pathRuleCandidates().find(({ token }) => token === "/etc/shadow");
+    const externalAccess = program.externalAccesses().find(({ path }) => path.value() === "/etc/shadow");
+    assert.ok(pathCandidate, command);
+    assert.ok(externalAccess, command);
+    assert.equal(pathCandidate.effect.effect, "unproven", command);
+    assert.equal(externalAccess.effect.effect, "unproven", command);
+    assert.equal(capabilitySurfaceForEffect("path", pathCandidate.effect.effect), "path");
+    assert.equal(
+      capabilitySurfaceForEffect("external_directory", externalAccess.effect.effect),
+      "external_directory",
+    );
+  }
+
+  const patternOnly = await BashProgram.parse(
+    "case $x in /etc/passwd) true;; esac",
+    normalizer,
+  );
+  assert.equal(patternOnly.pathRuleCandidates().some(({ token }) => token === "/etc/passwd"), false);
+});
 
 test("request hashes bind forwarded requester sessions", () => {
   const request = {
@@ -2039,6 +2071,22 @@ test("real permission-system authorizer chain integration", async (t) => {
         renderedWidgetLines(instance.widgets.at(-1)).join("\n"),
         /allowed.*auto-confirm.*external_directory/,
       );
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  await t.test("30.2 directional auto-confirm remains one-shot and cannot widen to a session grant", async () => {
+    const instance = harness(allow, { interactiveTui: true });
+    try {
+      const result = await instance.authorize("path_read");
+      assert.equal(result.decision.approved, true);
+      assert.equal(result.decision.state, "approved");
+      assert.equal(result.decision.autoApproved, true);
+      assert.equal("sessionGrantWidth" in result.decision, false);
+      assert.deepEqual(instance.uiDecisions, [
+        { approved: true, state: "approved", autoApproved: true },
+      ]);
     } finally {
       instance.dispose();
     }

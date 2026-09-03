@@ -75,6 +75,62 @@ function shellTokens(command: string): string[] {
   return command.trim().split(/\s+/u);
 }
 
+function normalizedPathToken(token: string): string {
+  let value = token.replace(/^@/, "").replace(/[;)]+$/u, "");
+  if (
+    value.length >= 2 &&
+    ((value.startsWith("\"") && value.endsWith("\"")) ||
+      (value.startsWith("'") && value.endsWith("'")))
+  ) {
+    value = value.slice(1, -1);
+  }
+  return value;
+}
+
+function firstExplicitPathToken(tokens: readonly string[]): string | undefined {
+  return tokens
+    .map(normalizedPathToken)
+    .find((token) =>
+      token.startsWith("/") ||
+      token.startsWith("./") ||
+      token.startsWith("../") ||
+      token.startsWith("~/")
+    );
+}
+
+/**
+ * Recover the path-bearing statement operands added to permission-system 31.
+ * This remains deliberately conservative rather than pretending to be a shell
+ * parser: case-arm patterns are excluded, while the actual path gate's
+ * separate decision event still records paths found in arm/body commands.
+ */
+function statementOperandPathToken(
+  tokens: readonly string[],
+  index: number,
+): { handled: boolean; token?: string } {
+  const statement = tokens[index]?.replace(/^["']|["']$/gu, "");
+  if (statement !== "for" && statement !== "select" && statement !== "case") {
+    return { handled: false };
+  }
+  const inIndex = tokens.findIndex((token, tokenIndex) =>
+    tokenIndex > index && token === "in"
+  );
+  if (inIndex < 0) return { handled: true };
+  if (statement === "case") {
+    return {
+      handled: true,
+      token: firstExplicitPathToken(tokens.slice(index + 1, inIndex)),
+    };
+  }
+  const operands: string[] = [];
+  for (const token of tokens.slice(inIndex + 1)) {
+    if (token === "do") break;
+    operands.push(token);
+    if (/[;]$/u.test(token)) break;
+  }
+  return { handled: true, token: firstExplicitPathToken(operands) };
+}
+
 function executableIndex(tokens: readonly string[]): number {
   let index = 0;
   if (tokens[index] === "env") index++;
@@ -161,9 +217,10 @@ export function classifyBash(command: unknown, cwd: string): ClassifiedPermissio
     eligible: blocker === undefined,
     ...(blocker ? { blocker } : {}),
   } : undefined;
-  const pathToken = tokens.slice(index + 1)
-    .map((token) => token.replace(/^@/, ""))
-    .find((token) => token.startsWith("/") || token.startsWith("./") || token.startsWith("../") || token.startsWith("~/"));
+  const statementOperand = statementOperandPathToken(tokens, index);
+  const pathToken = statementOperand.handled
+    ? statementOperand.token
+    : firstExplicitPathToken(tokens.slice(index + 1));
   return {
     surface: "bash",
     signature: template ?? "<command>",

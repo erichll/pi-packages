@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { createExternalWorkerSupervisor } from "../src/external-supervisor.ts";
@@ -366,6 +366,77 @@ sandboxTest("external launcher permits read-only Git worktree metadata", async (
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     const [code] = await once(child, "exit") as [number | null];
     assert.equal(code, 0, stderr);
+  } finally {
+    await supervisor.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+sandboxTest("pi-subagents 0.64 watchdog_diff reads a worktree inside outer isolation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-sandbox-watchdog-diff-"));
+  const repository = join(root, "repository");
+  const worktree = join(root, "worktree");
+  const agentDir = join(root, "agent");
+  const worker = join(worktree, "worker.mjs");
+  const packageRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../..");
+  const diffToolPath = join(
+    packageRoot,
+    "node_modules/pi-subagents/src/watchdog/diff-tool.ts",
+  );
+  const jitiPath = join(packageRoot, "node_modules/jiti/lib/jiti.cjs");
+  const supervisor = await createExternalWorkerSupervisor(() => ({
+    command: "external worker",
+    cwd: worktree,
+    sessionId: "parent",
+    scopeKey: "parent:turn:1",
+  }));
+  try {
+    await mkdir(repository);
+    await mkdir(agentDir);
+    execFileSync("git", ["init"], { cwd: repository, stdio: "ignore" });
+    execFileSync("git", ["config", "user.email", "test@example.invalid"], { cwd: repository });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: repository });
+    await writeFile(join(repository, "tracked.txt"), "before\n", "utf8");
+    execFileSync("git", ["add", "tracked.txt"], { cwd: repository });
+    execFileSync("git", ["commit", "-m", "initial"], { cwd: repository, stdio: "ignore" });
+    execFileSync("git", ["worktree", "add", "-b", "watchdog-test", worktree], { cwd: repository, stdio: "ignore" });
+    await writeFile(join(worktree, "tracked.txt"), "after\n", "utf8");
+    await writeFile(worker, [
+      'import { createRequire } from "node:module";',
+      'import { resolve } from "node:path";',
+      'const require = createRequire(import.meta.url);',
+      `const { createJiti } = require(${JSON.stringify(jitiPath)});`,
+      'const jiti = createJiti(resolve(".") + "/", { fsCache: false, moduleCache: false, interopDefault: true });',
+      `const { captureWatchdogDiffBaseline, createWatchdogDiffTool } = await jiti.import(${JSON.stringify(diffToolPath)});`,
+      'const baseline = captureWatchdogDiffBaseline(process.cwd());',
+      'if (!baseline) throw new Error("missing watchdog diff baseline");',
+      'const result = await createWatchdogDiffTool(baseline).execute("watchdog-test", { path: "tracked.txt" });',
+      'process.stdout.write(result.content[0]?.text ?? "");',
+    ].join("\n"), "utf8");
+    const child = spawn(process.execPath, [launcher], {
+      cwd: worktree,
+      env: {
+        ...process.env,
+        HOME: root,
+        PI_CODING_AGENT_DIR: agentDir,
+        PI_SANDBOX_EXTERNAL_REAL_PI_BINARY: process.execPath,
+        PI_SANDBOX_EXTERNAL_REAL_PI_PREFIX: JSON.stringify([worker]),
+        PI_SANDBOX_EXTERNAL_ALLOW_READ: packageRoot,
+        PI_SANDBOX_EXTERNAL_SUPERVISOR_SOCKET: supervisor.socketPath,
+        PI_SANDBOX_EXTERNAL_SUPERVISOR_CAPABILITY: supervisor.capability,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const [code] = await once(child, "exit") as [number | null];
+    assert.equal(code, 0, stderr);
+    assert.match(stdout, /-before/);
+    assert.match(stdout, /\+after/);
   } finally {
     await supervisor.close();
     await rm(root, { recursive: true, force: true });

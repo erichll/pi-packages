@@ -6,16 +6,15 @@ This document records every point at which `pi-packages` (specifically
 verifiable on upgrade so that a `pi-subagents` release cannot silently break
 the outer worker isolation boundary or the compatibility gates.
 
-Current pinned baseline: `pi-subagents 0.63.0` (exact pin in
-`packages/pi-sandbox` `devDependencies`, test/CI only). The published 0.63.0
-package keeps the Linux/macOS `PI_SUBAGENT_PI_BINARY` command-and-verbatim-args
-contract, while its private `pi-spawn.ts` seam adds package-root candidate
-resolution and Windows-specific Node-script/fail-closed behavior.
-`api/external-runs.ts` is byte-identical to 0.61.0. The active wait seam is
-`bg_wait` with completion data in `details.completions`; `subagent_wait` was a
-historical name and its deprecated alias is absent from 0.63.0. The
-deterministic gate, type checks, package tests, temp-file launcher test, and
-standard Git worktree isolation test verify the 0.63.0 development baseline.
+Current pinned baseline: `pi-subagents 0.64.0` (exact pin in
+`packages/pi-sandbox` `devDependencies`, test/CI only). The published 0.64.0
+package leaves both the Linux/macOS `PI_SUBAGENT_PI_BINARY` spawn seam and
+`api/external-runs.ts` byte-identical to 0.63.0. The active wait seam remains
+`bg_wait` with completion data in `details.completions`; `subagent_wait` is a
+historical name. The deterministic gate, type checks, package tests, launch
+rule block probe, temp-file launcher test, standard Git worktree isolation
+check, and sandboxed `watchdog_diff` execution verify the 0.64.0 development
+baseline.
 
 ## Seam registry
 
@@ -26,6 +25,8 @@ standard Git worktree isolation test verify the 0.63.0 development baseline.
 | `PI_SUBAGENT_PI_BINARY` | Env contract | `0.47.x` | external isolation requires it | `gate:external-isolation` probe | — |
 | `bg_wait` / `details.completions` | Tool-result contract | `details.completions` in `0.45.0`; `bg_wait` in `0.61.0` | active; `subagent_wait` is legacy history only | model-backed compat gate | installed version |
 | `pi-subagents/external-runs` | Public, `0.50+` | `0.50.0` | active runtime seam (C1 landed) | unit + supervisor integration tests | C1 (FleetView) |
+| watchdog launch `action: "block"` | Launch-order contract | `0.64.0` | must stop before worker spawn | deterministic + model gates | `PI_SUBAGENT_PI_BINARY` |
+| `watchdog_diff` Git reads | Sandbox capability | `0.64.0` | works in managed worktrees | real outer-launcher test | `.git` + `commondir` read policy |
 
 The seam registry lists `pi-subagents/external-runs` as a public `0.50+`
 subpath; with C1 implemented it is now an active runtime seam.
@@ -57,10 +58,12 @@ subpath; with C1 implemented it is now an active runtime seam.
   subpath). After upstream publishes it, migrate to
   `import { getPiSpawnCommand } from "pi-subagents/pi-spawn"` and delete the
   last internal source-path import.
-- **0.63.0 drift:** resolution now tries explicit/package-root candidates,
-  validates the package name, and treats Windows JavaScript launchers and
-  unresolved CLI paths specially. The external-isolation probe verifies the
-  unchanged Linux/macOS override and verbatim-argument behavior.
+- **0.63.0 drift:** resolution began trying explicit/package-root candidates,
+  validating the package name, and treating Windows JavaScript launchers and
+  unresolved CLI paths specially.
+- **0.64.0 drift:** none; the packaged `pi-spawn.ts` is byte-identical to
+  0.63.0. The external-isolation probe still verifies the Linux/macOS override
+  and verbatim-argument behavior.
 
 ### 3. `PI_SUBAGENT_PI_BINARY` (environment contract)
 
@@ -107,6 +110,26 @@ subpath; with C1 implemented it is now an active runtime seam.
   integration tests verify `registered`/`unregistered` flow, duplicate and
   registry-full handling, import failure, and that snapshots carry no
   secrets/prompts.
+
+### 6. Watchdog launch blocking (`0.64+`)
+
+- **Local files:** `scripts/external-isolation-probe.mts` loads the upstream
+  launch-rule evaluator and verifies `action: "block"` prevents spawn planning;
+  `scripts/pi-subagents-compat-gate.ts` exercises the public subagent tool and
+  requires zero child transcripts and zero forwarded child Bash approvals.
+- **Failure impact:** a denied child could start an outer broker/manager process
+  before the launch rule resolves, weakening policy and risking process leaks.
+- **Rollback:** restore the prior exact pin until launch ordering is verified.
+
+### 7. `watchdog_diff` Git reads (`0.64+`)
+
+- **Local files:** `packages/pi-sandbox/test/external-supervisor.test.ts` runs
+  the real upstream `watchdog_diff` implementation under the external worker
+  launcher in a Git worktree and requires its tracked diff output.
+- **Failure impact:** watchdog reviewers lose their intended read-only evidence
+  inside enforced outer isolation even though ordinary child execution works.
+- **Rollback:** keep 0.63.0 pinned or adjust only the narrow read policy proven
+  necessary by a failing test; never make repository Git metadata writable.
 
 ## Upgrade procedure (applies whenever the pinned version changes)
 

@@ -139,6 +139,19 @@ async function childBashEvidence(sessionDir: string): Promise<ChildBashEvidence>
   return evidence;
 }
 
+async function childTranscriptCount(sessionDir: string): Promise<number> {
+  try {
+    const entries = await readdir(join(sessionDir, "subagent-artifacts"), {
+      withFileTypes: true,
+    });
+    return entries.filter(
+      (entry) => entry.isFile() && entry.name.endsWith("_transcript.jsonl"),
+    ).length;
+  } catch {
+    return 0;
+  }
+}
+
 async function runPi(
   args: string[],
   env: NodeJS.ProcessEnv,
@@ -583,18 +596,32 @@ async function main(): Promise<void> {
     );
     if (providerExtension) {
       const providerPackage = resolve(dirname(providerExtension), "..");
-      const providerName = "@router-for-me/pi-cliproxyapi-provider";
       await mkdir(join(agentDir, "npm", "node_modules", "@router-for-me"), { recursive: true });
       await symlink(
         providerPackage,
         join(agentDir, "npm", "node_modules", "@router-for-me", "pi-cliproxyapi-provider"),
         "dir",
       );
-      await writeFile(
-        join(agentDir, "settings.json"),
-        JSON.stringify({ packages: [`npm:${providerName}`] }),
-      );
     }
+    // Keep the launch-block fixture in the disposable user settings. A project
+    // .pi/settings.json would intentionally trigger Pi's project-trust prompt
+    // before this headless gate can submit its first instruction.
+    await writeFile(
+      join(agentDir, "settings.json"),
+      JSON.stringify({
+        ...(providerExtension
+          ? { packages: ["npm:@router-for-me/pi-cliproxyapi-provider"] }
+          : {}),
+        subagents: {
+          watchdog: {
+            rules: {
+              action: "block",
+              roleModels: { delegate: { deny: ["*"] } },
+            },
+          },
+        },
+      }),
+    );
     // The isolated config explicitly enables P0's permission forwarding path.
     await writeFile(
       join(agentDir, "extensions", "pi-permission-system", "config.json"),
@@ -714,6 +741,33 @@ async function main(): Promise<void> {
       "logs",
       "pi-permission-system-permission-review.jsonl",
     );
+    console.log("gate: watchdog launch rule blocks before worker spawn");
+    const blockedTranscriptBaseline = await childTranscriptCount(sessionDir);
+    const blockedCompletionMarker = `PI_SUBAGENTS_GATE_BLOCKED_COMPLETE_${process.pid}`;
+    const blockedScript = [
+      "return runs.run(\"blocked\", {",
+      "  agent: \"delegate\",",
+      '  task: "This child must never start.",',
+      "});",
+    ].join("\n");
+    const blocked = await runPi([
+      ...common,
+      `Make exactly one subagent tool call for the blocked delegate launch; do not list agents, retry, or create a replacement run.\n\n${exactWorkflowToolInput(false, blockedScript)}\n\nConfirm that the tool reports a subagents.watchdog.rules launch block, then end the response with exactly ${blockedCompletionMarker}.`,
+    ], env, directTimeoutMs, workspaceDir, forwardingLog, 0, sessionDir, blockedCompletionMarker);
+    const blockedTranscriptDelta =
+      (await childTranscriptCount(sessionDir)) - blockedTranscriptBaseline;
+    if (blockedTranscriptDelta !== 0) {
+      throw new Error(
+        `watchdog launch-rule probe started ${blockedTranscriptDelta} child transcript(s) despite action=block`,
+      );
+    }
+    await writeFile(
+      join(agentDir, "settings.json"),
+      JSON.stringify(providerExtension
+        ? { packages: ["npm:@router-for-me/pi-cliproxyapi-provider"] }
+        : {}),
+    );
+
     console.log(externalIsolationGate ? "gate: outer-isolated single-run workflowScript child" : "gate: single-run workflowScript child");
     const providerNetworkAuthorization = externalIsolationGate
       ? providerNetworkEndpoint
@@ -840,6 +894,8 @@ async function main(): Promise<void> {
     console.log(JSON.stringify({
       status: "PASS",
       piSubagents: String(piSubagentsVersion),
+      blockedOutputBytes: blocked.stdout.length,
+      blockedChildTranscripts: blockedTranscriptDelta,
       directOutputBytes: direct.stdout.length,
       workflowOutputBytes: workflow.stdout.length,
       asyncOutputBytes: asyncWorkflow.stdout.length,

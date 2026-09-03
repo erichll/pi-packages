@@ -9,7 +9,7 @@ also run complete process-backed subagent trees inside independent sandboxes.
 - [Security model](#security-model)
 - [Linux requirements](#linux-requirements)
 - [Subagent provider](#subagent-provider)
-  - [`pi-subagents` 0.63.0 capability boundary](#pi-subagents-0630-capability-boundary)
+  - [`pi-subagents` 0.64.0 capability boundary](#pi-subagents-0640-capability-boundary)
 - [Network domain policy](#network-domain-policy)
 - [Optional host IPC fallback](#optional-host-ipc-fallback)
 - [Additional trusted read paths](#additional-trusted-read-paths)
@@ -96,7 +96,7 @@ Supported modes:
   itself is not wrapped while `externalWorkerIsolation` is `off`.
 - `off`: protect Bash only.
 
-### `pi-subagents` 0.63.0 capability boundary
+### `pi-subagents` 0.64.0 capability boundary
 
 `pi-sandbox` verifies the following combination in its test suite and release
 gate. This version boundary is pinned exactly (see the package
@@ -107,7 +107,7 @@ gate. This version boundary is pinned exactly (see the package
 published peer range remains `>=0.50.0`; this documents the current tested
 development baseline, not a runtime minimum.
 
-| Capability | `builtin` | `pi-subagents` 0.63.0 |
+| Capability | `builtin` | `pi-subagents` 0.64.0 |
 | --- | --- | --- |
 | Outer worker sandbox | Yes | Opt-in (`externalWorkerIsolation: "enforce"`) |
 | Bash sandbox | Yes | Yes |
@@ -121,10 +121,13 @@ and, before a release, the model-backed `npm run gate:pi-subagents`. See
 `docs/compat-notes.md` for the recorded compatibility seams and how each is
 verified on upgrade.
 
-The 0.63.0 baseline also exercises tasks passed as an `@task.md` argument and
-standard Git worktree metadata (`.git` pointer plus `commondir`) through the
-real outer-sandbox launcher. Worktrunk itself is not a dependency; provider
-selection remains upstream behavior.
+The 0.64.0 baseline also exercises tasks passed as an `@task.md` argument,
+standard Git worktree metadata (`.git` pointer plus `commondir`), and the
+read-only `watchdog_diff` tool through the real outer-sandbox launcher. Its
+watchdog `action: "block"` launch rule is checked before worker spawn planning,
+and the model-backed gate verifies that a blocked child creates no transcript
+before running the normal isolated-worker probes. Worktrunk itself is not a
+dependency; provider selection remains upstream behavior.
 
 For the external provider, `off` leaves the worker process outside the outer
 Sandbox Runtime boundary. Do not treat inherited Bash sandboxing as complete

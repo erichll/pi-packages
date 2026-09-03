@@ -31,7 +31,8 @@ that dependency is a hard prerequisite (see [Install and enable](#install-and-en
 > **Prerequisite:** pi-auto-review is an authorizer inside
 > `@gotgenes/pi-permission-system`. Pi does not auto-install peer packages, so
 > install the permission system separately (once per machine) before this
-> extension. This release line supports permission-system 28.x and 29.x:
+> extension. This release line supports permission-system 29.3.0 through the
+> latest 31.x release:
 
 Node.js 22.13.0 or newer is required. Permission auditing uses Node's built-in
 `node:sqlite`; it does not require a SQLite CLI, system SQLite library, or npm
@@ -75,6 +76,12 @@ Permission-system downgrades authorizer allows on `path` and
 following recognized permission dialog. The bridge is request-ID-bound,
 expires after ten seconds, and is consumed once. Mode, component, request, or
 event-order mismatches leave the original human dialog in place.
+
+Permission-system 31.x also projects paths named directly by `for`/`select`
+word lists and `case` subjects onto the existing `path` and
+`external_directory` surfaces. Those additional requests follow the same
+bounded review and one-shot auto-confirm rules; no new surface is implicitly
+trusted.
 
 Automatic review stops for the current turn after three consecutive denials or
 ten denials in the last fifty reviews. An explicit denial tells the agent that
