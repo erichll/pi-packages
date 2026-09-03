@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.15.3 - 2026-09-03
 
+- Tolerate a single enclosing ```` ```json ```` or bare Markdown code fence
+  around reviewer decisions while preserving strict decision-schema
+  validation (fixes reviewer models that fence JSON despite the prompt,
+  notably when routed through Claude Code).
 - Verify compatibility with `@gotgenes/pi-permission-system` 30.2.0 and
   31.0.0, widen the peer range through 31.x, and move the development baseline
   to 31.0.0.
