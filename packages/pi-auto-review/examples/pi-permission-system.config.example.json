@@ -16,6 +16,7 @@
     "*": "ask",
     "external_directory": {
       "*": "ask",
+      "/tmp": "allow",
       "/tmp/*": "allow"
     },
     "external_directory_read": {
