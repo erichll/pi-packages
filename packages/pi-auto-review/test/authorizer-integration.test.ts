@@ -20,6 +20,7 @@ import {
   loadConfig,
   type Config,
 } from "../src/index.ts";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { getBoundaryBroker } from "../src/broker/index.ts";
 import { boundaryRequestHash } from "../src/broker/grants.ts";
 import { approveSandboxTrap } from "../../pi-sandbox/src/approval.ts";
@@ -211,6 +212,24 @@ function harness(
     env?: Record<string, string>;
   } = { apiKey: "test" };
   const seenModels: Record<string, unknown>[] = [];
+  // Real SessionManager (0.85.0 `inMemory()`) seeded with externally managed
+  // entries, so the extension exercises the production `buildContextEntries()`
+  // path instead of a hand-rolled mock that can drift from the real API.
+  const sessionManager = SessionManager.inMemory(process.cwd(), {
+    id: harnessSessionId,
+  });
+  for (
+    const entry of options.contextEntries ?? [
+      {
+        message: {
+          role: "user",
+          content: "Run the exact operation requested in this test.",
+        },
+      },
+    ]
+  ) {
+    sessionManager.appendMessage(entry.message as Parameters<typeof sessionManager.appendMessage>[0]);
+  }
   const context = {
     cwd: process.cwd(),
     signal: options.signal,
@@ -268,18 +287,7 @@ function harness(
         streamSimple: currentStreamSimple,
       }),
     },
-    sessionManager: {
-      getSessionId: () => harnessSessionId,
-      buildContextEntries: () =>
-        options.contextEntries ?? [
-          {
-            message: {
-              role: "user",
-              content: "Run the exact operation requested in this test.",
-            },
-          },
-        ],
-    },
+    sessionManager,
   };
 
   createPiAutoReviewExtension({
