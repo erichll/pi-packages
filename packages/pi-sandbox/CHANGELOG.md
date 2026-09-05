@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.17.0 - 2026-09-05
+
+- Depend on the coordinated `@erichll/pi-auto-review 0.17.0` release.
+- Accept the whole pi-subagents 0.65.x line for protected native mode instead
+  of pinning exactly 0.65.0: patch updates such as 0.65.1 (background session
+  and worktree-patch fixes) now load normally. Any minor or major bump still
+  fails closed, and the real compatibility gates remain the
+  `./capability-ceiling` export check and the capability-ceiling version
+  check, so the version range only guards against blind accept-on-drift.
+- Widen the `pi-subagents` peer range to `>=0.65.0 <0.66.0` and the dev pin
+  accordingly.
+
 ## 0.16.0 - 2026-09-05
 
 - Depend on the coordinated `@erichll/pi-auto-review 0.16.0` release.

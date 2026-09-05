@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.17.0 - 2026-09-05
+
+- Coordinated release for `@erichll/pi-sandbox 0.17.0`; the broker API and
+  approval behavior are unchanged.
+- Align the development pin of `@gotgenes/pi-permission-system` to the 31.1.x
+  runtime line and update the authorizer-integration test to the 31.1.1
+  internal source layout (the 31.1.1 refactor moved `path-normalizer.ts`).
+- Split the 2,778-line `src/index.ts` into a `src/review/` module directory
+  (`types`, `consts`, `config`, `audit`, `prompts`, `guards`, `input`,
+  `provider`, `complete`) with an internal barrel, matching the existing
+  `broker/` and `policy-audit/` conventions; the public export surface of
+  `src/index.ts` is unchanged.
+- Harden TypeScript checking: enable `noUncheckedIndexedAccess` and
+  `noImplicitOverride` across the workspace and fix all 47 newly surfaced
+  unguarded-index sites.
+- Replace the full custom TypeScript test loader with native Node type
+  transformation (`--experimental-transform-types`); a scoped hook now only
+  handles the TypeScript sources shipped inside `node_modules`, which Node
+  refuses to type-strip.
+
 ## 0.16.0 - 2026-09-05
 
 - Coordinated release for `@erichll/pi-sandbox 0.16.0`; the broker API and
