@@ -407,6 +407,7 @@ test("subagent providers conditionally construct, register, and shut down the bu
 
     await registerPiSandbox(pi, {
       subagentProvider: provider,
+      ...(provider === "pi-subagents" ? { allowedNativeAgents: ["worker"] } : {}),
       createSubagentManager() {
         constructed += 1;
         return manager;
@@ -461,6 +462,7 @@ test("repeated registration does not duplicate managers, tools, or event handler
       user_bash: 1,
       turn_start: 1,
       tool_call: 1,
+      tool_result: 1,
       session_start: 1,
       session_shutdown: 1,
     },
@@ -468,12 +470,19 @@ test("repeated registration does not duplicate managers, tools, or event handler
 });
 
 test("session start diagnoses external subagent ownership and security level", async () => {
+  const agentDir = mkdtempSync(join(tmpdir(), "pi-sandbox-native-config-"));
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  const upstreamConfig = join(agentDir, "extensions", "subagent", "config.json");
+  mkdirSync(dirname(upstreamConfig), { recursive: true });
+  writeFileSync(upstreamConfig, JSON.stringify({ scheduledRuns: { enabled: false } }));
   const cases = [
     {
       activeTools: [] as string[],
       tools: [] as ReturnType<ExtensionAPI["getAllTools"]>,
       expected: /no external subagent tool is active/,
       level: "warning",
+      fails: true,
     },
     {
       activeTools: ["subagent"],
@@ -490,9 +499,9 @@ test("session start diagnoses external subagent ownership and security level", a
           },
         },
       ] as unknown as ReturnType<ExtensionAPI["getAllTools"]>,
-      expected:
-        /External workers are not yet wrapped in an outer Sandbox Runtime sandbox/,
+      expected: /tool boundary, not outer worker process isolation/,
       level: "info",
+      fails: false,
     },
     {
       activeTools: ["subagent"],
@@ -511,9 +520,11 @@ test("session start diagnoses external subagent ownership and security level", a
       ] as unknown as ReturnType<ExtensionAPI["getAllTools"]>,
       expected: /owned by unexpected source npm:other-agents/,
       level: "warning",
+      fails: true,
     },
   ] as const;
 
+  try {
   for (const diagnosticCase of cases) {
     let sessionStart:
       | ((event: unknown, ctx: ExtensionContext) => unknown)
@@ -534,23 +545,69 @@ test("session start diagnoses external subagent ownership and security level", a
         return [...diagnosticCase.tools];
       },
     } as unknown as ExtensionAPI;
-    await registerPiSandbox(pi, { subagentProvider: "pi-subagents" });
+    await registerPiSandbox(pi, {
+      subagentProvider: "pi-subagents",
+      allowedNativeAgents: ["worker"],
+    });
     const ctx = {
+      cwd: process.cwd(),
       hasUI: true,
       ui: {
         notify(message: string, level: string) {
           notifications.push({ message, level });
         },
       },
+      sessionManager: { getSessionId: () => `native-${diagnosticCase.level}` },
     } as unknown as ExtensionContext;
 
-    sessionStart?.({}, ctx);
+    if (diagnosticCase.fails) {
+      await assert.rejects(sessionStart?.({}, ctx) as Promise<unknown>, diagnosticCase.expected);
+      continue;
+    }
+    await sessionStart?.({}, ctx);
 
     const diagnostic = notifications.find(({ message }) =>
       diagnosticCase.expected.test(message),
     );
     assert.ok(diagnostic);
     assert.equal(diagnostic.level, diagnosticCase.level);
+  }
+  } finally {
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("native child acknowledges pi-sandbox without requiring parent orchestration", async () => {
+  const previousChild = process.env.PI_SUBAGENT_CHILD;
+  process.env.PI_SUBAGENT_CHILD = "1";
+  let sessionStart: ((event: unknown, ctx: ExtensionContext) => unknown) | undefined;
+  const acknowledgements: unknown[] = [];
+  const pi = {
+    registerTool() {},
+    on(event: string, handler: (event: unknown, ctx: ExtensionContext) => unknown) {
+      if (event === "session_start") sessionStart = handler;
+    },
+    events: {
+      emit(event: string, payload: unknown) {
+        if (event === "subagent:acknowledge-extension") acknowledgements.push(payload);
+      },
+    },
+    getActiveTools: () => ["bash"],
+    getAllTools: () => [],
+  } as unknown as ExtensionAPI;
+  try {
+    await registerPiSandbox(pi, { subagentProvider: "pi-subagents" });
+    await sessionStart?.({}, {
+      cwd: process.cwd(),
+      hasUI: false,
+      sessionManager: { getSessionId: () => "native-child" },
+    } as unknown as ExtensionContext);
+    assert.deepEqual(acknowledgements, [{ id: "@erichll:pi-sandbox" }]);
+  } finally {
+    if (previousChild === undefined) delete process.env.PI_SUBAGENT_CHILD;
+    else process.env.PI_SUBAGENT_CHILD = previousChild;
   }
 });
 

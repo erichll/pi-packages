@@ -31,8 +31,7 @@
   "scripts": {
     "check": "npm run check --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "gate:pi-subagents": "node --experimental-strip-types scripts/pi-subagents-compat-gate.ts",
-    "gate:external-isolation": "node --experimental-strip-types scripts/external-isolation-probe.mts"
+    "gate:pi-subagents": "node --experimental-strip-types scripts/pi-subagents-compat-gate.ts"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",

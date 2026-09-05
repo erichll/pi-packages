@@ -9,7 +9,7 @@ also run complete process-backed subagent trees inside independent sandboxes.
 - [Security model](#security-model)
 - [Linux requirements](#linux-requirements)
 - [Subagent provider](#subagent-provider)
-  - [`pi-subagents` 0.64.0 capability boundary](#pi-subagents-0640-capability-boundary)
+  - [`pi-subagents` 0.65.0 native-background tool boundary](#pi-subagents-0650-native-background-tool-boundary)
 - [Network domain policy](#network-domain-policy)
 - [Optional host IPC fallback](#optional-host-ipc-fallback)
 - [Additional trusted read paths](#additional-trusted-read-paths)
@@ -81,8 +81,7 @@ new installs.
 ```json
 {
   "subagents": {
-    "provider": "builtin",
-    "externalWorkerIsolation": "off"
+    "provider": "builtin"
   }
 }
 ```
@@ -91,58 +90,57 @@ Supported modes:
 
 - `builtin` (default): register the process-backed `subagent` tool and sandbox
   each complete worker process tree.
-- `pi-subagents`: let the external extension own orchestration. Main-agent and
-  inherited Bash execution remains sandboxed, but the external worker process
-  itself is not wrapped while `externalWorkerIsolation` is `off`.
+- `pi-subagents`: let `pi-subagents 0.65.0` own orchestration under the required
+  native-background tool boundary described below.
 - `off`: protect Bash only.
 
-### `pi-subagents` 0.64.0 capability boundary
+### `pi-subagents` 0.65.0 native-background tool boundary
 
-`pi-sandbox` verifies the following combination in its test suite and release
-gate. This version boundary is pinned exactly (see the package
-`devDependencies`) and additionally exercised against the latest published
-`pi-subagents` on a nightly CI schedule. The `PI_SUBAGENT_PI_BINARY` seam
-(`externalWorkerIsolation: "enforce"`) is re-checked deterministically by the
-`gate:external-isolation` probe on the pinned and latest dependency. The
-published peer range remains `>=0.50.0`; this documents the current tested
-development baseline, not a runtime minimum.
+This provider is intentionally locked to exactly `pi-subagents 0.65.0` and
+fails closed if its public ceiling API or internal discovery layout drifts.
+Configure both the protection mode and a non-empty canonical whitelist:
 
-| Capability | `builtin` | `pi-subagents` 0.64.0 |
+```json
+{
+  "subagents": {
+    "provider": "pi-subagents",
+    "protection": "native-background-tools",
+    "allowedNativeAgents": ["worker", "reviewer", "scout"]
+  }
+}
+```
+
+The `pi-subagents` config at
+`~/.pi/agent/extensions/subagent/config.json` must also contain
+`"scheduledRuns": { "enabled": false }`. Every launch must explicitly set
+`async: true`. Only direct single-agent launches are supported. In 0.65.0,
+public `workflowScript` / `workflowScriptPath` children disable ambient
+extensions, so both are rejected along with named workflows, schedules,
+configuration mutations, resume, nested subagents, and external runners.
+
+Every child is constrained by the upstream capability ceiling to `bash`,
+`read`, `grep`, `find`, and `ls`. The child loads ambient extensions and must
+acknowledge `@erichll:pi-sandbox`; writes can therefore occur only through the
+sandboxed Bash tool. `write`, `edit`, MCP, and other extension tools are not
+available.
+
+| Capability | `builtin` | `pi-subagents` 0.65.0 protected mode |
 | --- | --- | --- |
-| Outer worker sandbox | Yes | Opt-in (`externalWorkerIsolation: "enforce"`) |
+| Outer worker sandbox | Yes | No |
 | Bash sandbox | Yes | Yes |
 | Persistent follow-up | Yes | Yes |
-| `workflowScript`, missions, schedules | No | Yes |
-| Named workflow resources | No | Yes |
-| permission-system parent forwarding | Not required | Verified by compatibility gate |
+| Public async `workflowScript` | No | No (ambient extensions disabled upstream) |
+| Schedules / named workflow resources | No | No |
+| Child tools | Configured parent tools | Fixed five-tool ceiling |
 
-Moving the tested baseline requires re-running `npm run gate:external-isolation`
-and, before a release, the model-backed `npm run gate:pi-subagents`. See
+Before a release, run the deterministic and model-backed portions of
+`npm run gate:pi-subagents`. See
 `docs/compat-notes.md` for the recorded compatibility seams and how each is
 verified on upgrade.
 
-The 0.64.0 baseline also exercises tasks passed as an `@task.md` argument,
-standard Git worktree metadata (`.git` pointer plus `commondir`), and the
-read-only `watchdog_diff` tool through the real outer-sandbox launcher. Its
-watchdog `action: "block"` launch rule is checked before worker spawn planning,
-and the model-backed gate verifies that a blocked child creates no transcript
-before running the normal isolated-worker probes. Worktrunk itself is not a
-dependency; provider selection remains upstream behavior.
-
-For the external provider, `off` leaves the worker process outside the outer
-Sandbox Runtime boundary. Do not treat inherited Bash sandboxing as complete
-worker isolation unless the trusted global configuration explicitly enables
-`enforce`.
-
-Note on the external provider's public execution surface: pi-subagents 0.43.0
-removed the old static multi-agent controls; `workflowScript` remains the
-public multi-agent orchestration surface. Current releases also accept a direct
-single-child `{ agent, task }` launch. The compatibility gate deliberately uses
-`return runs.run('main', { agent, task })` so the single-child probe continues
-to exercise the workflow executor and its isolation seam.
-
 The configuration parser rejects malformed JSON, unknown fields, and unknown
-providers instead of silently weakening isolation.
+providers instead of silently weakening isolation. All legacy
+`externalWorkerIsolation` configurations produce a migration error.
 
 ## Network domain policy
 
@@ -180,9 +178,8 @@ The precedence is deterministic:
 
 Both arrays default to empty. That preserves the prior behavior: no persistent
 network authorization, with every eligible public connection reviewed once.
-The same trusted arrays are copied into main-agent Bash, built-in subagents,
-and external `pi-subagents` workers when outer isolation is enforced. Missing
-or malformed external-worker policy transport hard-denies network access.
+The same trusted arrays govern main-agent Bash, built-in subagents, and the
+sandboxed Bash tool loaded by protected native `pi-subagents` children.
 
 Domain allowlists are not a complete data-loss-prevention boundary. A
 multi-tenant or user-uploadable destination such as `github.com` can itself be
@@ -191,28 +188,9 @@ Real package-manager traffic may require additional hosts—for example, PyPI
 downloads commonly use `files.pythonhosted.org`. `pi-sandbox` never infers or
 silently adds those domains.
 
-To opt in to outer worker isolation for the external provider, use:
-
-```json
-{
-  "subagents": {
-    "provider": "pi-subagents",
-    "externalWorkerIsolation": "enforce"
-  }
-}
-```
-
-`enforce` installs a session-scoped `PI_SUBAGENT_PI_BINARY` wrapper which
-starts the real Pi worker under a dedicated Sandbox Runtime broker. Bootstrap
-failure is terminal for that worker; it never falls back to host execution.
-The wrapper is preserved for nested child launches. This is opt-in while the
-permission-forwarding supervisor and managed-worktree gate continue to mature.
-
-Managed worktrees receive their own writable checkout plus the smallest known
-Git metadata paths as read-only access so `git status` works. The main
-repository `.git` is never made writable by this policy; Git mutation from an
-outer-sandboxed external worker is therefore intentionally unsupported for
-now.
+Native background runner initialization itself is outside the OS sandbox.
+Only the child's Bash modification channel is sandboxed. Select `builtin` when
+the entire worker process tree must be contained by Sandbox Runtime.
 
 ## Optional host IPC fallback
 
@@ -298,17 +276,11 @@ npm test
 npm run gate:pi-subagents
 ```
 
-`gate:pi-subagents` is a release/manual integration check, not a default CI
-test. Set `PI_SUBAGENTS_GATE_MODEL` to a configured test model and provide its
-normal Pi credential environment. The command creates a dedicated temporary
-agent directory, never reads or updates your production Pi config, and prints
-`SKIP` when those prerequisites are absent.
-
-It allows 10 minutes for the direct-child phase and 15 minutes for the
-multi-stage workflow, and exits only after the parent reports returned child
-results. Override those bounds with positive millisecond values in
-`PI_SUBAGENTS_GATE_DIRECT_TIMEOUT_MS` and
-`PI_SUBAGENTS_GATE_WORKFLOW_TIMEOUT_MS` when needed for a dedicated provider.
+`gate:pi-subagents` verifies the pinned package layout, discovery behavior,
+capability ceiling, and protected launch policy in an isolated temporary agent
+directory. It never reads or updates production Pi configuration. Model-backed
+acceptance requires `PI_SUBAGENTS_GATE_MODEL` and an already-exported matching
+credential; missing prerequisites are reported as `SKIP`.
 
 The test suite covers real Linux Sandbox Runtime enforcement when its native
 dependencies are installed, plus deterministic broker, network approval,

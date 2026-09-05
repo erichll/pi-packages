@@ -94,39 +94,25 @@ network connections through Sandbox Runtime's reviewed proxy. Its default
 `builtin` provider also owns process-backed subagent execution, including
 persistent background RPC sessions, follow-up, and nested handoff. Set the
 trusted global provider to `pi-subagents` to let that extension own
-orchestration while `pi-sandbox` continues protecting Bash; whole-worker
-isolation for external subagents is opt-in through the trusted
-`externalWorkerIsolation: "enforce"` setting. Its default remains off. Do not
-load another extension that also replaces Pi's Bash tool. See the package
-READMEs for provider, platform, and trust-boundary details.
+orchestration under the required 0.65.0 native-background protection mode.
+That mode validates a canonical agent whitelist and restricts children to
+`bash`, `read`, `grep`, `find`, and `ls`; writes go through sandboxed Bash. It
+is not whole-worker process isolation. Keep the default `builtin` provider for
+that guarantee. Do not load another extension that also replaces Pi's Bash
+tool. See the package READMEs for provider, platform, and trust-boundary details.
 
 ## Development and release verification
 
 Run deterministic checks with `npm run check` and `npm test`. The external
-provider runtime floor published by `pi-sandbox` is `pi-subagents 0.50.0+`; its
-devDependency is pinned exactly to `0.63.0`, the version the suite and gate are
-exercised against. The model gate uses `bg_wait` with `0.63.0+` and waits on
-`details.completions`. (`subagent_wait` is a historical alias kept only for
-older compatible releases; the script retains a fallback solely so it can still
-exercise those old versions.) Run
-`npm run gate:external-isolation` to verify the external-worker-isolation
-(`PI_SUBAGENT_PI_BINARY`) contract seam without any model credential. Before a
-release, run `npm run gate:pi-subagents` with `PI_SUBAGENTS_GATE_MODEL` and its
-normal Pi credential environment. It uses an isolated temporary agent directory
-and prints `SKIP` (rather than pass) when the required model setup is absent.
+provider peer and dev dependencies are both pinned exactly to `pi-subagents
+0.65.0`. The compatibility gate verifies package layout, discovery, ceiling
+registration, launch guards, and child acknowledgement. Its model portion uses
+only already-exported credentials and prints `SKIP` rather than claiming
+success when model setup is absent.
 
 A GitHub Actions workflow (`.github/workflows/compat-latest.yml`) runs the
 deterministic `check` + test suite against the pinned dependency on every push
-and against the **latest** published pi-subagents on a nightly schedule, so
-drift surfaces as an early CI signal without a manual bump. An opt-in
-`model-gate` job runs the end-to-end `gate:pi-subagents` against latest; it only
-activates when `PI_SUBAGENTS_GATE_MODEL` and a matching model credential secret
-are configured.
-
-The gate waits for returned child results, with provider-latency budgets of 10
-minutes for the direct child, 15 minutes for the multi-stage workflow, and 15
-minutes for the async background-workflow completion payload. Set
-`PI_SUBAGENTS_GATE_DIRECT_TIMEOUT_MS`,
-`PI_SUBAGENTS_GATE_WORKFLOW_TIMEOUT_MS`, or
-`PI_SUBAGENTS_GATE_ASYNC_TIMEOUT_MS` to positive millisecond values when a
-dedicated test provider needs different bounds.
+and nightly. Newer upstream releases must be audited and deliberately adopted;
+they are expected to fail closed until then. The optional model job activates
+only when `PI_SUBAGENTS_GATE_MODEL` and a matching credential secret are
+configured.

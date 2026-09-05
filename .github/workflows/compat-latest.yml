@@ -1,12 +1,9 @@
 name: pi-subagents compatibility
 
-# Detects drift against the newest published pi-subagents before it surprises
-# users, without relying on a manual devDependency bump each release.
+# Verifies the exact pi-subagents version supported by protected native mode.
 #
 # Jobs:
 #   - pinned-suite : regression canary against the committed (pinned) deps.
-#   - latest-compat: re-runs the type check + test suite against the *latest*
-#                    pi-subagents to surface early compatibility signals.
 #   - model-gate   : opt-in end-to-end gate. Only activates when
 #                    PI_SUBAGENTS_GATE_MODEL and a matching model credential
 #                    secret are configured; otherwise it is inert.
@@ -41,35 +38,8 @@ jobs:
           echo "Pinned pi-subagents: $(node -p "require('./node_modules/pi-subagents/package.json').version")"
           npm run check
           npm test
-      - name: External-isolation contract probe (pinned)
-        run: npm run gate:external-isolation
-
-  latest-compat:
-    name: Latest pi-subagents drift
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - name: Record pinned version
-        id: pinned
-        run: echo "version=$(node -p "require('./node_modules/pi-subagents/package.json').version")" >> "$GITHUB_OUTPUT"
-      - name: Install latest pi-subagents
-        run: npm install -D -E pi-subagents@latest --workspace packages/pi-sandbox
-      - name: Show version drift
-        run: |
-          echo "Pinned: ${{ steps.pinned.outputs.version }} -> Latest: $(node -p "require('./node_modules/pi-subagents/package.json').version")"
-      - name: Install sandbox runtime host dependencies
-        run: sudo apt-get update && sudo apt-get install -y ripgrep bubblewrap socat
-      - name: Type check + tests (latest)
-        run: |
-          npm run check
-          npm test
-      - name: External-isolation contract probe (latest)
-        run: npm run gate:external-isolation
+      - name: Native-background compatibility gate (pinned)
+        run: npm run gate:pi-subagents
 
   # NOTE: `secrets` cannot be referenced from a job-level `if`. The opt-in is
   # therefore implemented by importing the secrets into a job-level `env` and
@@ -103,9 +73,6 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y tmux ripgrep bubblewrap socat
       - run: npm ci
         if: env.PI_SUBAGENTS_GATE_MODEL != ''
-      - name: Install latest pi-subagents
-        if: env.PI_SUBAGENTS_GATE_MODEL != ''
-        run: npm install -D -E pi-subagents@latest --workspace packages/pi-sandbox
       - name: Install pi binary (PI_SUBAGENTS_GATE_PI_BINARY)
         if: env.PI_SUBAGENTS_GATE_MODEL != ''
         run: npm i -g @earendil-works/pi-coding-agent

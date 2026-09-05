@@ -3,7 +3,6 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { fileURLToPath } from "node:url";
 import {
   createBashToolDefinition,
   createLocalBashOperations,
@@ -35,14 +34,12 @@ import type {
 import { validateSubagentModel } from "./subagent.ts";
 import { Type } from "typebox";
 import {
-  createExternalWorkerSupervisor,
-  type ExternalWorkerSupervisor,
-} from "./external-supervisor.ts";
-import {
-  createExternalRunsView,
-  externalRunsViewEnabledWhen,
-  type ExternalRunsView,
-} from "./external-runs-view.ts";
+  loadPiSubagentsNativeRuntime,
+  nativeSubagentCallBlockReason,
+  PI_SANDBOX_ACKNOWLEDGEMENT,
+  terminalChildrenHaveSandboxAcknowledgement,
+  type CapabilityCeilingHandle,
+} from "./pi-subagents-native.ts";
 
 const EXTENSION_NAME = "pi-sandbox";
 const registrations = new WeakMap<ExtensionAPI, Promise<void>>();
@@ -54,10 +51,17 @@ export type PiSandboxExtensionOptions = {
   sandbox?: Pick<SandboxCommandOptions, "broker" | "platform">;
   /** Test/embedding override. Normal extension loading uses trusted global config. */
   hostIPC?: HostIPCConfig;
+  /** Test/embedding override. Normal extension loading uses trusted global config. */
+  allowedNativeAgents?: readonly string[];
 };
 
 function sessionId(ctx: ExtensionContext): string {
   return ctx.sessionManager.getSessionId();
+}
+
+function piSubagentsSessionId(ctx: ExtensionContext): string {
+  const getSessionFile = (ctx.sessionManager as { getSessionFile?: () => string | null | undefined }).getSessionFile;
+  return getSessionFile?.call(ctx.sessionManager) ?? ctx.sessionManager.getSessionId();
 }
 
 function isPiSubagentsSource(
@@ -91,52 +95,8 @@ function externalSubagentDiagnostic(pi: ExtensionAPI): {
   }
   return {
     message:
-      "pi-subagents orchestration active; pi-sandbox protects Bash execution. External workers are not yet wrapped in an outer Sandbox Runtime sandbox.",
+      "pi-subagents protected native-background mode active; child writes are restricted to sandboxed Bash. This is a tool boundary, not outer worker process isolation.",
     level: "info",
-  };
-}
-
-const EXTERNAL_WORKER_LAUNCHER = fileURLToPath(
-  new URL("./external-worker-launcher.mjs", import.meta.url),
-);
-
-type ExternalWorkerIsolation = {
-  restore(): void;
-};
-
-function enableExternalWorkerIsolation(
-  supervisor: ExternalWorkerSupervisor,
-): ExternalWorkerIsolation {
-  if (process.platform !== "linux" && process.platform !== "darwin") {
-    throw new Error(`external worker isolation is unavailable on ${process.platform}`);
-  }
-  if (process.env.PI_SUBAGENT_PI_BINARY) {
-    throw new Error(
-      "external worker isolation refuses to replace an existing PI_SUBAGENT_PI_BINARY wrapper",
-    );
-  }
-  const entry = process.argv[1];
-  if (!entry) {
-    throw new Error("external worker isolation cannot determine the real Pi CLI entrypoint");
-  }
-  const injected = {
-    PI_SUBAGENT_PI_BINARY: EXTERNAL_WORKER_LAUNCHER,
-    PI_SANDBOX_EXTERNAL_REAL_PI_BINARY: process.execPath,
-    PI_SANDBOX_EXTERNAL_REAL_PI_PREFIX: JSON.stringify([entry]),
-    PI_SANDBOX_EXTERNAL_ALLOW_READ: [
-      process.cwd(),
-      process.env.PI_CODING_AGENT_DIR,
-    ].filter((value): value is string => Boolean(value)).join(":"),
-    PI_SANDBOX_EXTERNAL_SUPERVISOR_SOCKET: supervisor.socketPath,
-    PI_SANDBOX_EXTERNAL_SUPERVISOR_CAPABILITY: supervisor.capability,
-  };
-  Object.assign(process.env, injected);
-  return {
-    restore() {
-      for (const [key, value] of Object.entries(injected)) {
-        if (process.env[key] === value) delete process.env[key];
-      }
-    },
   };
 }
 
@@ -261,11 +221,19 @@ async function performRegistration(
   const config = loadPiSandboxConfig();
   const subagentProvider =
     options.subagentProvider ?? config.subagents.provider;
-  const externalWorkerIsolation = config.subagents.externalWorkerIsolation;
-  const externalRunsViewEnabled = externalRunsViewEnabledWhen(
-    subagentProvider,
-    externalWorkerIsolation,
-  );
+  const isNativeSubagentChild = process.env.PI_SUBAGENT_CHILD === "1";
+  const protectExternalOrchestration =
+    subagentProvider === "pi-subagents" && !isNativeSubagentChild;
+  const allowedNativeAgents = options.allowedNativeAgents ??
+    config.subagents.allowedNativeAgents;
+  if (protectExternalOrchestration && !allowedNativeAgents?.length) {
+    throw new Error(
+      `${EXTENSION_NAME}: pi-subagents protected mode requires allowedNativeAgents`,
+    );
+  }
+  const nativeRuntime = protectExternalOrchestration
+    ? await loadPiSubagentsNativeRuntime(allowedNativeAgents!)
+    : undefined;
   const additionalAllowRead = config.filesystem.additionalAllowRead;
   const network = config.network;
   const hostIPC = options.hostIPC ?? config.hostIPC;
@@ -279,10 +247,8 @@ async function performRegistration(
         }))
       : undefined;
   const cwd = process.cwd();
-  let isolation: ExternalWorkerIsolation | undefined;
-  let supervisor: ExternalWorkerSupervisor | undefined;
-  let fleetView: ExternalRunsView | undefined;
-  let externalIsolationFailure: string | undefined;
+  let capabilityCeiling: CapabilityCeilingHandle | undefined;
+  let validatedNativeAgents: string[] = [];
   const localBash = createBashToolDefinition(cwd);
 
   pi.registerTool({
@@ -560,93 +526,91 @@ async function performRegistration(
     currentTurn = event.turnIndex;
   });
 
-  // pi-subagents owns the public tool, so a failed wrapper bootstrap cannot
-  // be fixed by replacing that tool. Block at Pi's pre-execution boundary:
-  // enforce must never degrade into a host worker launch.
-  pi.on("tool_call", (event) => {
+  pi.on("tool_call", (event, ctx) => {
+    if (event.toolName === "subagent" && protectExternalOrchestration) {
+      const reason = nativeSubagentCallBlockReason(event.input);
+      if (reason) {
+        return { block: true, reason: `${EXTENSION_NAME}: ${reason}` };
+      }
+      if (event.input.action === undefined) {
+        try {
+          validatedNativeAgents = nativeRuntime!.validateAllowedAgents(
+            ctx.cwd,
+            ctx.model?.provider,
+          );
+          capabilityCeiling?.dispose();
+          capabilityCeiling = nativeRuntime!.registerCeiling(
+            piSubagentsSessionId(ctx),
+            validatedNativeAgents,
+          );
+        } catch (error) {
+          return {
+            block: true,
+            reason: `${EXTENSION_NAME}: protected launch validation failed: ${error instanceof Error ? error.message : String(error)}`,
+          };
+        }
+      }
+    }
+    return undefined;
+  });
+
+  pi.on("tool_result", (event) => {
     if (
+      protectExternalOrchestration &&
       event.toolName === "subagent" &&
-      subagentProvider === "pi-subagents" &&
-      externalWorkerIsolation === "enforce" &&
-      !isolation
+      (event.input.action === "status" || event.input.action === "debug.run") &&
+      !event.isError &&
+      !terminalChildrenHaveSandboxAcknowledgement(event.details)
     ) {
       return {
-        block: true,
-        reason: `${EXTENSION_NAME}: external worker isolation is unavailable; refusing host worker launch${externalIsolationFailure ? `: ${externalIsolationFailure}` : ""}`,
+        content: [{
+          type: "text",
+          text: `${EXTENSION_NAME}: child result did not acknowledge ${PI_SANDBOX_ACKNOWLEDGEMENT}; protected execution proof is missing`,
+        }],
+        isError: true,
       };
     }
     return undefined;
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    // A new session may replace a prior supervisor ownership; drop the old
-    // session's FleetView registrations before reconstructing.
-    fleetView?.close();
-    fleetView = undefined;
-    if (
-      subagentProvider === "pi-subagents" &&
-      externalWorkerIsolation === "enforce"
-    ) {
-      try {
-        isolation?.restore();
-        await supervisor?.close();
-        supervisor = undefined;
-        if (externalRunsViewEnabled) {
-          fleetView = await createExternalRunsView(sessionId(ctx));
-        }
-        supervisor = await createExternalWorkerSupervisor(
-          (worker) => ({
-            broker: getBoundaryBroker(),
-            command: "external pi-subagents worker network request",
-            cwd: worker.cwd,
-            sessionId: sessionId(ctx),
-            scopeKey: `${sessionId(ctx)}:turn:${currentTurn}`,
-            agentName: `pi-subagents-worker:${worker.id}`,
-            humanApproval: humanApproval(ctx),
-          }),
-          {
-            // Observability-only: never influences allow/deny, and a failure
-            // here must not stop the supervisor from answering approval RPCs
-            // or make the worker launch on the host.
-            registered: (worker) => fleetView?.registered(worker),
-            unregistered: (worker) => fleetView?.unregistered(worker.id),
-          },
-          network,
-        );
-        isolation = enableExternalWorkerIsolation(supervisor);
-        externalIsolationFailure = undefined;
-      } catch (error) {
-        const message = `${EXTENSION_NAME}: external worker isolation unavailable; child launches will fail closed: ${error instanceof Error ? error.message : String(error)}`;
-        externalIsolationFailure = message;
-        isolation?.restore();
-        isolation = undefined;
-        await supervisor?.close();
-        supervisor = undefined;
-        fleetView?.close();
-        fleetView = undefined;
-        console.error(message);
-        if (ctx.hasUI) ctx.ui.notify(message, "warning");
+    if (isNativeSubagentChild) {
+      pi.events?.emit("subagent:acknowledge-extension", {
+        id: PI_SANDBOX_ACKNOWLEDGEMENT,
+      });
+    }
+    capabilityCeiling?.dispose();
+    capabilityCeiling = undefined;
+    if (protectExternalOrchestration) {
+      validatedNativeAgents = nativeRuntime!.validateAllowedAgents(
+        ctx.cwd,
+        ctx.model?.provider,
+      );
+      capabilityCeiling = nativeRuntime!.registerCeiling(
+        piSubagentsSessionId(ctx),
+        validatedNativeAgents,
+      );
+      const ownership = externalSubagentDiagnostic(pi);
+      if (ownership.level === "warning") {
+        capabilityCeiling.dispose();
+        capabilityCeiling = undefined;
+        throw new Error(`${EXTENSION_NAME}: ${ownership.message}`);
       }
     }
     if (ctx.hasUI) {
-      if (subagentProvider === "pi-subagents") {
+      if (protectExternalOrchestration) {
         const diagnostic = externalSubagentDiagnostic(pi);
-        ctx.ui.notify(
-          externalWorkerIsolation === "enforce" && isolation
-            ? "pi-subagents orchestration active; external worker process trees require outer Sandbox Runtime isolation."
-            : diagnostic.message,
-          externalWorkerIsolation === "enforce" && isolation
-            ? "info"
-            : diagnostic.level,
-        );
-      } else if (subagentProvider === "builtin") {
+        ctx.ui.notify(diagnostic.message, diagnostic.level);
+      } else if (subagentProvider === "builtin" && !isNativeSubagentChild) {
         ctx.ui.notify(
           "pi-sandbox subagent provider: builtin; worker process trees use the outer Sandbox Runtime sandbox",
           "info",
         );
       } else {
         ctx.ui.notify(
-          "pi-sandbox subagent provider: off; pi-sandbox protects Bash execution only",
+          isNativeSubagentChild
+            ? "pi-sandbox active in native subagent child; writes are restricted to sandboxed Bash"
+            : "pi-sandbox subagent provider: off; pi-sandbox protects Bash execution only",
           "info",
         );
       }
@@ -671,12 +635,8 @@ async function performRegistration(
   });
 
   pi.on("session_shutdown", async () => {
-    isolation?.restore();
-    isolation = undefined;
-    fleetView?.close();
-    fleetView = undefined;
-    await supervisor?.close();
-    supervisor = undefined;
+    capabilityCeiling?.dispose();
+    capabilityCeiling = undefined;
     await subagents?.shutdown();
   });
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,7 +43,10 @@ async function loadLocal(
 ): Promise<Extension> {
   return loadExtensionFromFactory(
     (pi: ExtensionAPI) =>
-      registerPiSandbox(pi, { subagentProvider: "pi-subagents" }),
+      registerPiSandbox(pi, {
+        subagentProvider: "pi-subagents",
+        allowedNativeAgents: ["worker"],
+      }),
     process.cwd(),
     eventBus,
     runtime,
@@ -81,6 +84,9 @@ test(
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
     process.env.PI_CODING_AGENT_DIR = agentDir;
     try {
+      const configPath = join(agentDir, "extensions", "subagent", "config.json");
+      mkdirSync(dirname(configPath), { recursive: true });
+      writeFileSync(configPath, JSON.stringify({ scheduledRuns: { enabled: false } }));
       // Compatibility floor: the external provider must be new enough to
       // deliver the 0.45.x async completion surface exercised by the release
       // gate. Assert a >= 0.45.0 version instead of pinning an exact build so
@@ -130,6 +136,7 @@ test(
         const context = {
           cwd: process.cwd(),
           hasUI: true,
+          sessionManager: { getSessionId: () => `coexistence-${order.join("-")}` },
           ui: {
             notify(message: string, level: string) {
               notifications.push({ message, level });
@@ -143,9 +150,9 @@ test(
           notifications.some(
             ({ message, level }) =>
               level === "info" &&
-              message.includes("pi-subagents orchestration active") &&
+              message.includes("pi-subagents protected native-background mode active") &&
               message.includes(
-                "External workers are not yet wrapped in an outer Sandbox Runtime sandbox",
+                "tool boundary, not outer worker process isolation",
               ),
           ),
         );

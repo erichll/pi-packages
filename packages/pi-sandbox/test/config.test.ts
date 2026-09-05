@@ -47,13 +47,13 @@ test("defaults to the builtin provider when configuration is absent", () => {
   const root = makeTempRoot("pi-sandbox-config-");
   try {
     assert.deepEqual(loadPiSandboxConfig({ path: join(root, "missing.json") }), {
-      subagents: { provider: "builtin", externalWorkerIsolation: "off" },
+      subagents: { provider: "builtin" },
       filesystem: { additionalAllowRead: [] },
       network: defaultNetwork,
       hostIPC: defaultHostIPC,
     });
     assert.deepEqual(loadPiSandboxConfig({ home: root }), {
-      subagents: { provider: "builtin", externalWorkerIsolation: "off" },
+      subagents: { provider: "builtin" },
       filesystem: { additionalAllowRead: [] },
       network: defaultNetwork,
       hostIPC: defaultHostIPC,
@@ -80,7 +80,7 @@ test("loads the extension-local config and falls back to the legacy path", () =>
       "utf8",
     );
     assert.deepEqual(loadPiSandboxConfig({ home: root }), {
-      subagents: { provider: "off", externalWorkerIsolation: "off" },
+      subagents: { provider: "off" },
       filesystem: { additionalAllowRead: [] },
       network: {
         allowedDomains: ["github.com"],
@@ -95,7 +95,11 @@ test("loads the extension-local config and falls back to the legacy path", () =>
     writeFileSync(
       legacyPath,
       JSON.stringify({
-        subagents: { provider: "pi-subagents" },
+        subagents: {
+          provider: "pi-subagents",
+          protection: "native-background-tools",
+          allowedNativeAgents: ["worker"],
+        },
         network: {
           allowedDomains: ["github.com"],
           deniedDomains: ["uploads.github.com"],
@@ -104,7 +108,11 @@ test("loads the extension-local config and falls back to the legacy path", () =>
       "utf8",
     );
     assert.deepEqual(loadPiSandboxConfig({ home: root }), {
-      subagents: { provider: "pi-subagents", externalWorkerIsolation: "off" },
+      subagents: {
+        provider: "pi-subagents",
+        protection: "native-background-tools",
+        allowedNativeAgents: ["worker"],
+      },
       filesystem: { additionalAllowRead: [] },
       network: {
         allowedDomains: ["github.com"],
@@ -117,12 +125,12 @@ test("loads the extension-local config and falls back to the legacy path", () =>
   }
 });
 
-test("accepts every supported subagent provider", () => {
-  for (const provider of ["builtin", "pi-subagents", "off"] as const) {
+test("accepts builtin and off without external protection settings", () => {
+  for (const provider of ["builtin", "off"] as const) {
     assert.deepEqual(
       parsePiSandboxConfig({ subagents: { provider } }),
       {
-        subagents: { provider, externalWorkerIsolation: "off" },
+        subagents: { provider },
         filesystem: { additionalAllowRead: [] },
         network: defaultNetwork,
         hostIPC: defaultHostIPC,
@@ -131,34 +139,54 @@ test("accepts every supported subagent provider", () => {
   }
 });
 
-test("external worker isolation is explicit and defaults off", () => {
-  assert.equal(
-    parsePiSandboxConfig({
-      subagents: { provider: "pi-subagents", externalWorkerIsolation: "enforce" },
-    }).subagents.externalWorkerIsolation,
-    "enforce",
+test("pi-subagents requires native background protection and a canonical whitelist", () => {
+  assert.deepEqual(parsePiSandboxConfig({
+    subagents: {
+      provider: "pi-subagents",
+      protection: "native-background-tools",
+      allowedNativeAgents: ["worker", "reviewer", "scout"],
+    },
+  }).subagents, {
+    provider: "pi-subagents",
+    protection: "native-background-tools",
+    allowedNativeAgents: ["worker", "reviewer", "scout"],
+  });
+  assert.throws(
+    () => parsePiSandboxConfig({ subagents: { provider: "pi-subagents" } }),
+    /requires subagents\.protection/,
+  );
+  for (const allowedNativeAgents of [[], ["worker", "worker"], [" worker"], ["bad/name"]]) {
+    assert.throws(() => parsePiSandboxConfig({ subagents: {
+      provider: "pi-subagents",
+      protection: "native-background-tools",
+      allowedNativeAgents,
+    } }), /allowedNativeAgents/);
+  }
+  assert.throws(
+    () => parsePiSandboxConfig({ subagents: { provider: "builtin", protection: "native-background-tools", allowedNativeAgents: ["worker"] } }),
+    /only valid with provider 'pi-subagents'/,
   );
   assert.throws(
-    () => parsePiSandboxConfig({ subagents: { externalWorkerIsolation: "always" } }),
-    /externalWorkerIsolation must be off or enforce/,
+    () => parsePiSandboxConfig({ subagents: { provider: "pi-subagents", externalWorkerIsolation: "enforce" } }),
+    /externalWorkerIsolation was removed.*migrate/s,
   );
 });
 
 test("defaults omitted sections to their secure defaults", () => {
   assert.deepEqual(parsePiSandboxConfig({}), {
-    subagents: { provider: "builtin", externalWorkerIsolation: "off" },
+    subagents: { provider: "builtin" },
     filesystem: { additionalAllowRead: [] },
     network: defaultNetwork,
     hostIPC: defaultHostIPC,
   });
   assert.deepEqual(parsePiSandboxConfig({ subagents: {} }), {
-    subagents: { provider: "builtin", externalWorkerIsolation: "off" },
+    subagents: { provider: "builtin" },
     filesystem: { additionalAllowRead: [] },
     network: defaultNetwork,
     hostIPC: defaultHostIPC,
   });
   assert.deepEqual(parsePiSandboxConfig({ filesystem: {} }), {
-    subagents: { provider: "builtin", externalWorkerIsolation: "off" },
+    subagents: { provider: "builtin" },
     filesystem: { additionalAllowRead: [] },
     network: defaultNetwork,
     hostIPC: defaultHostIPC,
@@ -181,7 +209,7 @@ test("accepts unique absolute additional read paths", () => {
       },
     }),
     {
-      subagents: { provider: "builtin", externalWorkerIsolation: "off" },
+      subagents: { provider: "builtin" },
       filesystem: {
         additionalAllowRead: [
           "/home/user/.local/bin/rtk",
@@ -208,7 +236,7 @@ test("accepts and normalizes the host-IPC configuration", () => {
       },
     }),
     {
-      subagents: { provider: "builtin", externalWorkerIsolation: "off" },
+      subagents: { provider: "builtin" },
       filesystem: { additionalAllowRead: [] },
       network: defaultNetwork,
       hostIPC: {

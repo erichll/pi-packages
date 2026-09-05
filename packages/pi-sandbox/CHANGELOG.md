@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.16.0 - 2026-09-05
+
+- Replace the obsolete `externalWorkerIsolation` integration with the required
+  `native-background-tools` protection mode for `pi-subagents 0.65.0`.
+- Require a validated canonical native-agent whitelist, explicit asynchronous
+  launches, ambient child extensions, disabled nested delegation, and
+  `scheduledRuns.enabled=false`.
+- Register the upstream capability ceiling with only `bash`, `read`, `grep`,
+  `find`, and `ls`; child writes therefore pass through sandboxed Bash while
+  `write`, `edit`, MCP, and extension tools are unavailable.
+- Reject external runners, all workflow forms, schedules, resume, and agent or
+  workflow management mutations. Protected mode supports only explicit async
+  direct-agent launches because 0.65.0 workflow children disable ambient
+  extensions.
+- Remove the obsolete external launcher, supervisor, network-policy transport,
+  and FleetView bridge. This mode is a tool boundary, not OS process isolation;
+  use the default `builtin` provider when whole-worker isolation is required.
+
 ## 0.15.3 - 2026-09-03
 
 - Reviewer decisions on sandbox network boundaries inherit the fenced-JSON

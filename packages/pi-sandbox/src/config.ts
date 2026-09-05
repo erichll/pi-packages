@@ -28,7 +28,8 @@ export type NetworkConfig = {
 export type PiSandboxConfig = {
   subagents: {
     provider: SubagentProvider;
-    externalWorkerIsolation: "off" | "enforce";
+    protection?: "native-background-tools";
+    allowedNativeAgents?: readonly string[];
   };
   filesystem: {
     additionalAllowRead: readonly string[];
@@ -47,7 +48,6 @@ export const DEFAULT_PI_SANDBOX_CONFIG: Readonly<PiSandboxConfig> = Object.freez
   {
     subagents: Object.freeze({
       provider: "builtin",
-      externalWorkerIsolation: "off",
     }),
     filesystem: Object.freeze({
       additionalAllowRead: Object.freeze([]),
@@ -138,9 +138,14 @@ export function parsePiSandboxConfig(value: unknown): PiSandboxConfig {
     );
   }
   const subagents = value.subagents ?? {};
+  if (Object.hasOwn(subagents, "externalWorkerIsolation")) {
+    throw new Error(
+      "invalid pi-sandbox configuration: subagents.externalWorkerIsolation was removed in 0.16.0; migrate pi-subagents to protection 'native-background-tools' with allowedNativeAgents, or use provider 'builtin' for OS-level worker isolation",
+    );
+  }
   rejectUnknownKeys(
     subagents,
-    ["provider", "externalWorkerIsolation"],
+    ["provider", "protection", "allowedNativeAgents"],
     "subagents",
   );
 
@@ -154,16 +159,38 @@ export function parsePiSandboxConfig(value: unknown): PiSandboxConfig {
       `invalid pi-sandbox configuration: subagents.provider must be one of ${SUBAGENT_PROVIDERS.join(", ")}`,
     );
   }
-  const externalWorkerIsolation =
-    subagents.externalWorkerIsolation ??
-    DEFAULT_PI_SANDBOX_CONFIG.subagents.externalWorkerIsolation;
-  if (
-    externalWorkerIsolation !== "off" &&
-    externalWorkerIsolation !== "enforce"
-  ) {
+  const protection = subagents.protection;
+  const allowedNativeAgents = subagents.allowedNativeAgents;
+  if (provider === "pi-subagents" && protection !== "native-background-tools") {
     throw new Error(
-      "invalid pi-sandbox configuration: subagents.externalWorkerIsolation must be off or enforce",
+      "invalid pi-sandbox configuration: provider 'pi-subagents' requires subagents.protection 'native-background-tools'; migrate legacy configurations explicitly",
     );
+  }
+  if (provider !== "pi-subagents" && (protection !== undefined || allowedNativeAgents !== undefined)) {
+    throw new Error(
+      "invalid pi-sandbox configuration: subagents.protection and allowedNativeAgents are only valid with provider 'pi-subagents'",
+    );
+  }
+  if (provider === "pi-subagents") {
+    if (!Array.isArray(allowedNativeAgents) || allowedNativeAgents.length === 0) {
+      throw new Error(
+        "invalid pi-sandbox configuration: subagents.allowedNativeAgents must be a non-empty array of canonical agent names",
+      );
+    }
+    if (allowedNativeAgents.some((name) =>
+      typeof name !== "string" ||
+      name !== name.trim() ||
+      !/^[A-Za-z0-9_.:-]+$/u.test(name)
+    )) {
+      throw new Error(
+        "invalid pi-sandbox configuration: subagents.allowedNativeAgents must contain only canonical agent names",
+      );
+    }
+    if (new Set(allowedNativeAgents).size !== allowedNativeAgents.length) {
+      throw new Error(
+        "invalid pi-sandbox configuration: subagents.allowedNativeAgents must not contain duplicates",
+      );
+    }
   }
 
   if (value.filesystem !== undefined && !isRecord(value.filesystem)) {
@@ -291,7 +318,12 @@ export function parsePiSandboxConfig(value: unknown): PiSandboxConfig {
   return {
     subagents: {
       provider: provider as SubagentProvider,
-      externalWorkerIsolation,
+      ...(provider === "pi-subagents"
+        ? {
+            protection: "native-background-tools" as const,
+            allowedNativeAgents: [...(allowedNativeAgents as string[])],
+          }
+        : {}),
     },
     filesystem: {
       additionalAllowRead: [...new Set(additionalAllowRead)],
@@ -314,8 +346,6 @@ function defaultPiSandboxConfig(): PiSandboxConfig {
   return {
     subagents: {
       provider: DEFAULT_PI_SANDBOX_CONFIG.subagents.provider,
-      externalWorkerIsolation:
-        DEFAULT_PI_SANDBOX_CONFIG.subagents.externalWorkerIsolation,
     },
     filesystem: {
       additionalAllowRead: [
