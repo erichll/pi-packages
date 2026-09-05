@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import {
   hasSandboxAcknowledgement,
+  isCompatiblePiSubagentsVersion,
   loadPiSubagentsNativeRuntime,
   nativeSubagentCallBlockReason,
   NATIVE_CHILD_TOOLS,
@@ -52,6 +53,19 @@ test("acknowledgement proof is found in nested child results", () => {
   }] }), true);
 });
 
+test("version gate accepts the whole 0.65.x line and fails closed outside it", () => {
+  assert.equal(isCompatiblePiSubagentsVersion("0.65.0"), true);
+  assert.equal(isCompatiblePiSubagentsVersion("0.65.1"), true);
+  assert.equal(isCompatiblePiSubagentsVersion("0.65.2-beta.1"), true);
+  assert.equal(isCompatiblePiSubagentsVersion("0.64.9"), false);
+  assert.equal(isCompatiblePiSubagentsVersion("0.66.0"), false);
+  assert.equal(isCompatiblePiSubagentsVersion("1.65.0"), false);
+  assert.equal(isCompatiblePiSubagentsVersion("0.65"), false);
+  assert.equal(isCompatiblePiSubagentsVersion("unknown"), false);
+  assert.equal(isCompatiblePiSubagentsVersion(undefined), false);
+  assert.equal(isCompatiblePiSubagentsVersion(42), false);
+});
+
 test("0.65 runtime validates native agents and registers the strong ceiling", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-sandbox-native-runtime-"));
   const previous = process.env.PI_CODING_AGENT_DIR;
@@ -71,6 +85,7 @@ test("0.65 runtime validates native agents and registers the strong ceiling", as
     const handle = runtime.registerCeiling("native-test-session", ["worker"]);
     const key = Symbol.for("pi-subagents.capability-ceiling.v1");
     const registry = (globalThis as unknown as Record<symbol, Map<string, Map<symbol, { ceiling: { allowedAgents: string[]; allowedTools: string[] } }>>>)[key];
+    assert.ok(registry, "capability ceiling registry must be registered on globalThis");
     const registration = [...registry.get("native-test-session")!.values()][0]!;
     assert.deepEqual(registration.ceiling.allowedAgents, ["worker"]);
     assert.deepEqual(registration.ceiling.allowedTools, [...NATIVE_CHILD_TOOLS].sort());
