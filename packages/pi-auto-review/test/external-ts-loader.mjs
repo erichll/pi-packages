@@ -1,5 +1,16 @@
+// Node refuses to type-strip TypeScript under node_modules
+// (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING), and @gotgenes/pi-permission-system
+// ships its runtime as .ts sources that also use extensionless relative
+// imports. This hook scopes both jobs to node_modules only:
+//   - resolve: retry extensionless relative specifiers with ".ts"
+//   - load: transpile .ts sources via the typescript devDependency
+// Everything else (our own src/ and test/) runs through Node's native
+// TypeScript transform, so local code pays no transpilation cost.
 import { readFile } from "node:fs/promises";
 import ts from "typescript";
+
+const isExternal = (url) => url.includes("/node_modules/");
+const isExternalTypeScript = (url) => isExternal(url) && url.endsWith(".ts");
 
 export async function resolve(specifier, context, nextResolve) {
   try {
@@ -9,7 +20,7 @@ export async function resolve(specifier, context, nextResolve) {
       error?.code !== "ERR_MODULE_NOT_FOUND" ||
       (!specifier.startsWith(".") &&
         !specifier.startsWith("file:") &&
-        !specifier.startsWith("#src/"))
+        !specifier.startsWith("#"))
     ) {
       throw error;
     }
@@ -18,7 +29,7 @@ export async function resolve(specifier, context, nextResolve) {
 }
 
 export async function load(url, context, nextLoad) {
-  if (!url.endsWith(".ts")) return nextLoad(url, context);
+  if (!isExternalTypeScript(url)) return nextLoad(url, context);
   const source = await readFile(new URL(url), "utf8");
   return {
     format: "module",

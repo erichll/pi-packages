@@ -454,7 +454,7 @@ export function buildUserReviewGroupLines(
   data: UserReviewGroupEntryData,
 ): UserReviewEntryData {
   if (data.members.length === 1) {
-    const member = data.members[0];
+    const member = data.members[0]!;
     const lines = buildUserReviewLines(member);
     if (member.permissionResult === "deny" && member.outcome !== "deny") {
       lines.push("Local confirmation · denied");

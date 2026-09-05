@@ -54,7 +54,7 @@ test("exact override is consumed once and retry still uses reviewer", async () =
   assert.equal(recent.length, 1);
   assert.ok(
     broker.authorizeRecentDenial(
-      recent[0].requestId,
+      recent[0]!.requestId,
       context.sessionId,
     ),
   );
@@ -163,7 +163,7 @@ test("recent denial storage is bounded to ten entries", () => {
   }
   const entries = store.list(context.sessionId);
   assert.equal(entries.length, 10);
-  assert.equal(entries[0].requestId, "request-11");
+  assert.equal(entries[0]?.requestId, "request-11");
   assert.equal(entries.at(-1)?.requestId, "request-2");
 });
 

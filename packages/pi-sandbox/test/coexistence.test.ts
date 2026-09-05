@@ -94,6 +94,7 @@ test(
       const version = String(piSubagentsPackage.version ?? "0.0.0");
       const [major, minor] = version.split(".").map((part) => Number.parseInt(part, 10));
       assert.ok(
+        major !== undefined && minor !== undefined &&
         Number.isInteger(major) && major >= 0 && Number.isInteger(minor) && (major > 0 || minor >= 45),
         `expected pi-subagents >= 0.45.0, got ${version}`,
       );

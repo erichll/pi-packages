@@ -145,6 +145,7 @@ export class RecentDenialStore {
     );
     if (index < 0) return;
     const denial = this.#denials[index];
+    if (!denial) return;
     const key = this.key(sessionId, denial.requestHash);
     const pending = this.#breakGlassPending.get(key);
     if (pending) {

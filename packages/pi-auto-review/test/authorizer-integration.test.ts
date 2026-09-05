@@ -2,13 +2,17 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { join } from "node:path";
 import test from "node:test";
+// These deep imports reach pi-permission-system internals that its public
+// entry (".") does not export. They are pinned to the 31.x source layout;
+// the 31.1.1 directory refactor already moved path-normalizer.ts once.
+// When upgrading across minor/major lines, re-verify every path below.
 import { AuthorizerRegistry } from "../../../node_modules/@gotgenes/pi-permission-system/src/authority/authorizer-registry.ts";
 import { composeAuthorizerChain } from "../../../node_modules/@gotgenes/pi-permission-system/src/authority/authorizer-chain.ts";
 import { encloseInDelegationEnvelope } from "../../../node_modules/@gotgenes/pi-permission-system/src/authority/delegation-envelope.ts";
 import { BashProgram } from "../../../node_modules/@gotgenes/pi-permission-system/src/access-intent/bash/program.ts";
 import { capabilitySurfaceForEffect } from "../../../node_modules/@gotgenes/pi-permission-system/src/access-intent/path-surfaces.ts";
 import { posixPathFlavor } from "../../../node_modules/@gotgenes/pi-permission-system/src/path/path-flavor.ts";
-import { PathNormalizer } from "../../../node_modules/@gotgenes/pi-permission-system/src/path-normalizer.ts";
+import { PathNormalizer } from "../../../node_modules/@gotgenes/pi-permission-system/src/path/path-normalizer.ts";
 import {
   publishPermissionsService,
   unpublishPermissionsService,

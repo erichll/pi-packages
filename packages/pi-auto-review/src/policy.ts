@@ -209,7 +209,7 @@ function exactKeys(
 function stripReviewerFence(text: string): string {
   const t = text.trim();
   const fenced = t.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i);
-  return (fenced ? fenced[1] : t).trim();
+  return (fenced?.[1] ?? t).trim();
 }
 
 export function parseDecision(text: string): ModelDecision {
@@ -504,6 +504,7 @@ export function deterministicHardDeny(
   let stagedCredentialVariableUpload = false;
   for (const match of command.matchAll(stagedCredentialVariableRead)) {
     const variable = match[1];
+    if (!variable) continue;
     const suffix = command.slice((match.index ?? 0) + match[0].length);
     const escapedVariable = variable.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const variableUpload = new RegExp(
@@ -533,6 +534,7 @@ export function deterministicHardDeny(
   let stagedCredentialUpload = false;
   for (const match of command.matchAll(stagedCredentialRead)) {
     const target = match[1];
+    if (!target) continue;
     const suffix = command.slice((match.index ?? 0) + match[0].length);
     const escapedTarget = target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const targetUpload = new RegExp(
@@ -798,6 +800,7 @@ function explicitPushBranch(command: string): string | undefined {
   // push. Multi-ref pushes deliberately receive only the generic Git context.
   if (positional.length !== 2) return;
   const refspec = positional[positional.length - 1];
+  if (!refspec) return;
   const destination = refspec.includes(":")
     ? refspec.slice(refspec.lastIndexOf(":") + 1)
     : refspec;
@@ -812,7 +815,7 @@ function providerBranchQuery(command: string): ProviderBranchQuery | undefined {
       /^gh\s+api\s+["']?\/?repos\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/branches\/([^\/\s"']+)(?:\/protection)?["']?$/,
     );
   if (github) {
-    const branch = normalizedBranch(github[1]);
+    const branch = normalizedBranch(github[1] ?? "");
     return branch ? { provider: "github", branch } : undefined;
   }
   const gitlab = command
@@ -821,7 +824,7 @@ function providerBranchQuery(command: string): ProviderBranchQuery | undefined {
       /^glab\s+api\s+["']?\/?projects\/[A-Za-z0-9_.%/-]+\/protected_branches\/([^\/\s"']+)["']?$/,
     );
   if (gitlab) {
-    const branch = normalizedBranch(gitlab[1]);
+    const branch = normalizedBranch(gitlab[1] ?? "");
     return branch ? { provider: "gitlab", branch } : undefined;
   }
   return undefined;
@@ -1248,17 +1251,21 @@ function selectRequestAwareTools(
         (left, right) => priority.indexOf(left) - priority.indexOf(right),
       );
       const call = calls.find((candidate) => candidate.candidateId === item.id)!;
+      // Invariant: reasons entries are only created via addReason, which
+      // always pushes at least one reason, and this item passed the
+      // reasons.has(item.id) filter above — so ordered[0] is defined.
+      const primaryReason = ordered[0]!;
       const linkage = exactToolCallReviewerRepresentation(
         call,
         request,
-        ordered[0],
+        primaryReason,
       );
       return {
         ...item,
         ...(linkage
           ? { text: linkage, representationCharacters: linkage.length }
           : {}),
-        reason: ordered[0],
+        reason: primaryReason,
         secondaryReasons: ordered.slice(1),
         sensitivity:
           ordered.includes("security-combination")
@@ -1384,6 +1391,7 @@ function utf8Suffix(value: string, maxBytes: number): string {
   let result = "";
   for (let index = characters.length - 1; index >= 0; index--) {
     const character = characters[index];
+    if (!character) continue;
     const size = Buffer.byteLength(character, "utf8");
     if (bytes + size > maxBytes) break;
     result = character + result;
@@ -1558,11 +1566,14 @@ function selectEvidence(
       candidates.length > 1
         ? Math.max(1, Math.floor(budgetTokens / 2))
         : budgetTokens;
-    add(candidates[0], firstBudget);
-    if (candidates.length > 1) add(candidates[candidates.length - 1]);
+    const first = candidates[0];
+    if (first) add(first, firstBudget);
+    const last = candidates[candidates.length - 1];
+    if (candidates.length > 1 && last) add(last);
   }
   for (let index = candidates.length - 1; index >= 0; index--) {
-    add(candidates[index]);
+    const candidate = candidates[index];
+    if (candidate) add(candidate);
   }
   return {
     selected: [...selected.values()],

@@ -252,6 +252,7 @@ macosSrtTest("Sandbox Runtime keeps all child temp env vars on the private direc
     });
     assert.equal(result.exitCode, 0);
     const [commandTmpdir, commandTmp, commandTemp] = output.trim().split("\n");
+    assert.ok(commandTmpdir && commandTmp && commandTemp, "expected three tmp-path lines");
     assert.equal(commandTmpdir, commandTmp);
     assert.equal(commandTmp, commandTemp);
     assert.match(commandTmpdir, /(?:^|[/\\])pi-sandbox-tmp-[^/\\]+$/);

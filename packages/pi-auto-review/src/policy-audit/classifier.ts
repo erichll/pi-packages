@@ -134,7 +134,7 @@ function statementOperandPathToken(
 function executableIndex(tokens: readonly string[]): number {
   let index = 0;
   if (tokens[index] === "env") index++;
-  while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=.*/.test(tokens[index])) index++;
+  while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=.*/.test(tokens[index] ?? "")) index++;
   return index;
 }
 

@@ -283,7 +283,7 @@ test("critical model denials are separated and break glass allows one exact retr
   assert.equal(critical.length, 1);
   assert.ok(
     broker.startBreakGlassChallenge(
-      critical[0].requestId,
+      critical[0]!.requestId,
       "session-1",
       "turn-1",
     ),
@@ -291,7 +291,7 @@ test("critical model denials are separated and break glass allows one exact retr
   now += 1_000;
   assert.ok(
     broker.authorizeCriticalDenial(
-      critical[0].requestId,
+      critical[0]!.requestId,
       "session-1",
       "turn-1",
     ),
@@ -553,7 +553,7 @@ test("approve override survives a retried tool call id and a shifted turn scope"
   assert.equal(first.kind, "deny");
   const listed = broker.recentDenials("session-1");
   assert.equal(listed.length, 1);
-  assert.ok(broker.authorizeRecentDenial(listed[0].requestId, "session-1"));
+  assert.ok(broker.authorizeRecentDenial(listed[0]!.requestId, "session-1"));
 
   // The retry is a new tool call (new id + toolCallId) in a later turn (the
   // command flow appended a user message). The approval must still apply.
@@ -656,10 +656,10 @@ test("a break-glass allow lets the turn continue after the breaker tripped", asy
   const critical = broker.recentCriticalDenials("session-1");
   assert.equal(critical.length, 1);
   assert.ok(
-    broker.startBreakGlassChallenge(critical[0].requestId, "session-1", "turn-1"),
+    broker.startBreakGlassChallenge(critical[0]!.requestId, "session-1", "turn-1"),
   );
   assert.ok(
-    broker.authorizeCriticalDenial(critical[0].requestId, "session-1", "turn-1"),
+    broker.authorizeCriticalDenial(critical[0]!.requestId, "session-1", "turn-1"),
   );
   const allowed = await broker.review({ ...request, id: "request-retry" }, context);
   assert.equal(allowed.kind, "allow");

@@ -43,9 +43,10 @@ export function parsePolicyAuditArguments(raw: string, retentionDays: number): P
   const tokens = raw.trim() ? raw.trim().split(/\s+/u) : [];
   for (let index = 0; index < tokens.length; index++) {
     const token = tokens[index];
+    if (token === undefined) continue;
     const [flag, inline] = token.split("=", 2);
     const value = inline ?? tokens[++index];
-    if (!value) throw new Error(`missing value for ${flag}`);
+    if (!flag || !value) throw new Error(`missing value for ${flag}`);
     if (flag === "--scope") {
       if (value !== "current" && value !== "all") throw new Error("--scope must be current or all");
       result.scope = value;

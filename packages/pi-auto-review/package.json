@@ -1,6 +1,6 @@
 {
   "name": "@erichll/pi-auto-review",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "description": "Fail-closed, model-backed approval broker for Pi: deterministically hard-denies dangerous operations, reviews dangerous boundaries with a reviewer model, and issues one-shot expiring grants that OS sandbox adapters must consume before retrying.",
   "type": "module",
   "license": "MIT",
@@ -44,7 +44,7 @@
   },
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "node --disable-warning=ExperimentalWarning --experimental-loader ./test/typescript-loader.mjs --test test/*.test.ts"
+    "test": "node --disable-warning=ExperimentalWarning --experimental-transform-types --import ./test/register-external-ts.mjs --test test/*.test.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "^0.85.0",
@@ -55,7 +55,7 @@
     "@earendil-works/pi-ai": "^0.85.0",
     "@earendil-works/pi-coding-agent": "^0.85.0",
     "@earendil-works/pi-server": "^0.85.0",
-    "@gotgenes/pi-permission-system": "31.0.0",
+    "@gotgenes/pi-permission-system": "31.1.1",
     "@types/node": "^26.2.0",
     "typescript": "^6.0.3"
   }
