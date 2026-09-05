@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.16.0 - 2026-09-05
+
+- Coordinated release for `@erichll/pi-sandbox 0.16.0`; the broker API and
+  approval behavior are unchanged.
+
 ## 0.15.3 - 2026-09-03
 
 - Tolerate a single enclosing ```` ```json ```` or bare Markdown code fence

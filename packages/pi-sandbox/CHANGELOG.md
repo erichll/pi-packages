@@ -2,6 +2,7 @@
 
 ## 0.16.0 - 2026-09-05
 
+- Depend on the coordinated `@erichll/pi-auto-review 0.16.0` release.
 - Replace the obsolete `externalWorkerIsolation` integration with the required
   `native-background-tools` protection mode for `pi-subagents 0.65.0`.
 - Require a validated canonical native-agent whitelist, explicit asynchronous
