@@ -9,7 +9,8 @@ import {
   nativeSubagentCallBlockReason,
   NATIVE_CHILD_TOOLS,
   PI_SANDBOX_ACKNOWLEDGEMENT,
-  PI_SUBAGENTS_VERSION,
+  isCompatiblePiSubagentsVersion,
+  PI_SUBAGENTS_COMPAT_RANGE,
 } from "../packages/pi-sandbox/src/pi-subagents-native.ts";
 
 async function artifactCorpus(root: string): Promise<string> {
@@ -281,7 +282,10 @@ const packageJson = JSON.parse(await readFile(join(packageRoot, "package.json"),
   version?: string;
   exports?: Record<string, unknown>;
 };
-assert.equal(packageJson.version, PI_SUBAGENTS_VERSION);
+assert.ok(
+  isCompatiblePiSubagentsVersion(packageJson.version),
+  `pi-subagents pin must satisfy ${PI_SUBAGENTS_COMPAT_RANGE}; found ${String(packageJson.version)}`,
+);
 assert.equal(packageJson.exports?.["./capability-ceiling"], "./src/api/capability-ceiling.ts");
 
 for (const relative of [
