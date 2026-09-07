@@ -4,12 +4,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createJiti } from "jiti";
 
 /**
- * Compatible pi-subagents line: 0.65.x. Patch updates (e.g. 0.65.1) are accepted;
- * any minor or major bump fails closed until this adapter is revalidated against
- * the new internal layout. The exports/ceiling checks below are the real
- * compatibility gate; this range only guards against blind accept-on-drift.
+ * Compatible pi-subagents line: 0.66.0 and above (no upper pin). Any new minor
+ * is accepted, so the exports/ceiling checks below are the real compatibility
+ * gate; this range only rejects old lines and guards against blind
+ * accept-on-drift. Revalidated against 0.66.0: ceiling registry, discovery,
+ * and config internals unchanged (verified 2026-09-06 against the published
+ * 0.66.0 package).
  */
-export const PI_SUBAGENTS_COMPAT_RANGE = ">=0.65.0 <0.66.0";
+export const PI_SUBAGENTS_COMPAT_RANGE = ">=0.66.0";
 export const NATIVE_CHILD_TOOLS = ["bash", "read", "grep", "find", "ls"] as const;
 export const PI_SANDBOX_ACKNOWLEDGEMENT = "@erichll:pi-sandbox";
 
@@ -63,22 +65,23 @@ function requiredFunction(
   name: string,
 ): asserts value is (...args: never[]) => unknown {
   if (typeof value !== "function") {
-    throw new Error(`pi-subagents 0.65.x compatibility failure: missing ${name}`);
+    throw new Error(`pi-subagents compatibility failure: missing ${name}`);
   }
 }
 
 /**
- * Accept only versions inside PI_SUBAGENTS_COMPAT_RANGE (0.65.x, including
- * prerelease suffixes like 0.65.2-beta.1) without pulling in a semver runtime.
+ * Accept only versions at or above PI_SUBAGENTS_COMPAT_RANGE (>= 0.66.0,
+ * including prerelease suffixes like 0.66.1-beta.1) without pulling in a
+ * semver runtime.
  */
 export function isCompatiblePiSubagentsVersion(version: unknown): boolean {
   if (typeof version !== "string") return false;
   const match = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(version);
   if (!match) return false;
-  return Number(match[1] ?? "") === 0 && Number(match[2] ?? "") === 65;
+  return Number(match[1] ?? "") === 0 && Number(match[2] ?? "") >= 66;
 }
 
-/** Load the public ceiling API and the 0.65.x discovery/config internals.
+/** Load the public ceiling API and the discovery/config internals.
  * This intentionally fails closed on package version, export, or layout drift.
  */
 export async function loadPiSubagentsNativeRuntime(
@@ -96,7 +99,7 @@ export async function loadPiSubagentsNativeRuntime(
   }
   if (packageJson.exports?.["./capability-ceiling"] !== "./src/api/capability-ceiling.ts") {
     throw new Error(
-      "pi-subagents 0.65.x compatibility failure: capability-ceiling export changed",
+      "pi-subagents compatibility failure: capability-ceiling export changed",
     );
   }
 
@@ -110,11 +113,11 @@ export async function loadPiSubagentsNativeRuntime(
     jiti.import(pathToFileURL(join(root, "src/extension/config.ts")).href) as Promise<ConfigModule>,
   ]).catch((error) => {
     throw new Error(
-      `pi-subagents 0.65.x compatibility failure: ${error instanceof Error ? error.message : String(error)}`,
+      `pi-subagents compatibility failure: ${error instanceof Error ? error.message : String(error)}`,
     );
   });
   if (ceiling.SUBAGENT_CAPABILITY_CEILING_VERSION !== 1) {
-    throw new Error("pi-subagents 0.65.x compatibility failure: unsupported capability ceiling version");
+    throw new Error("pi-subagents compatibility failure: unsupported capability ceiling version");
   }
   requiredFunction(ceiling.registerSubagentCapabilityCeiling, "registerSubagentCapabilityCeiling");
   requiredFunction(discovery.discoverAgents, "discoverAgents");
@@ -211,7 +214,7 @@ export function nativeSubagentCallBlockReason(
   }
   const isDirect = typeof input.agent === "string" && input.agent.trim() !== "";
   if (input.workflowScript !== undefined || input.workflowScriptPath !== undefined) {
-    return "workflowScript and workflowScriptPath are disabled because pi-subagents 0.65.x disables ambient extensions for their native children";
+    return "workflowScript and workflowScriptPath are disabled because pi-subagents disables ambient extensions for their native children";
   }
   if (!isDirect) {
     return "protected mode supports only direct agent launches";

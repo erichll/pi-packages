@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.17.1 - 2026-09-06
+
+- Move the `pi-subagents` compatibility floor to 0.66.0 for protected native
+  mode and drop the upper pin: new minors are accepted, and the real
+  compatibility gates remain the `./capability-ceiling` export check and the
+  capability-ceiling version check.
+- Revalidated the adapter against the published pi-subagents 0.66.0 package:
+  the ceiling registry (`SUBAGENT_CAPABILITY_CEILING_VERSION` 1),
+  `registerSubagentCapabilityCeiling` options and handle, agent discovery and
+  resolution, config loading with `scheduledRuns`, and the
+  `runtimeAcknowledgedExtensions` acknowledgement mechanism are unchanged.
+- Widen the `pi-subagents` peer and dev ranges to `>=0.66.0`. Protected mode
+  now requires pi-subagents 0.66.0 or newer; 0.65.x installs fail closed with
+  an explicit version error.
+
 ## 0.17.0 - 2026-09-05
 
 - Depend on the coordinated `@erichll/pi-auto-review 0.17.0` release.
