@@ -100,7 +100,9 @@
       "mcp_describe": "allow",
       "atlassian": "allow",
       "atlassian:*": "allow",
-      "atlassian_*": "allow"
+      "atlassian_*": "allow",
+      "jira_*": "allow",
+      "confluence_*": "allow"
     },
     "skill": {
       "*": "allow"
