@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.18.0 - 2026-09-11
+
+- Coordinated release for `@erichll/pi-sandbox 0.18.0`.
+- Dismiss the above-editor widget eight seconds after an allow or auto-confirm
+  so a successful check does not stay on screen until the next review. Denials,
+  deferrals, and local-confirmation waits still remain until the next check.
+- Raise the `@gotgenes/pi-permission-system` peer floor to `>=30.0.0` and drop
+  the upper bound. 29.x is no longer claimed; 32.x does not change the public
+  authorizer API this package uses, and later majors are no longer excluded by
+  the range.
+
 ## 0.17.0 - 2026-09-05
 
 - Coordinated release for `@erichll/pi-sandbox 0.17.0`; the broker API and

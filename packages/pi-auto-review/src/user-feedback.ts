@@ -3,6 +3,8 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 export const USER_REVIEW_STATUS_KEY = "pi-auto-review";
 export const USER_REVIEW_ENTRY_TYPE = "pi-auto-review";
 export const USER_REVIEW_WIDGET_KEY = "pi-auto-review";
+/** How long a successful completed widget stays above the editor. */
+export const USER_REVIEW_SUCCESS_WIDGET_TTL_MS = 8_000;
 
 export type UserReviewOutcome =
   | "allow"
@@ -652,9 +654,14 @@ function setWidget(
   }
 }
 
+function isTransientCompletedOutcome(outcome: UserReviewOutcome): boolean {
+  return outcome === "allow" || outcome === "auto_confirm";
+}
+
 /** Owns the single live widget and rejects stale concurrent completions. */
 export class UserReviewWidgetController {
   #generation = 0;
+  #dismissTimer: ReturnType<typeof setTimeout> | undefined;
   /** Set while a `ctx.ui` prompt blocks the session (ui_prompt span). */
   #waiting?: { kind?: unknown; title?: unknown };
   #current?: {
@@ -664,6 +671,9 @@ export class UserReviewWidgetController {
     data?: UserReviewWidgetData;
     notice?: UserReviewNotice;
   };
+  constructor(
+    private readonly successTtlMs = USER_REVIEW_SUCCESS_WIDGET_TTL_MS,
+  ) {}
 
   begin(
     requestId: string,
@@ -671,6 +681,7 @@ export class UserReviewWidgetController {
     input: { surface: string; target?: string; model?: string },
   ): number {
     const generation = ++this.#generation;
+    this.#cancelDismiss();
     this.#current = { requestId, generation, ctx, data: buildUserReviewingWidgetData(input) };
     this.#render();
     return generation;
@@ -715,8 +726,12 @@ export class UserReviewWidgetController {
       return;
     }
     if (!this.#isCurrent(requestId, generation)) return;
+    this.#cancelDismiss();
     this.#current = { requestId, generation, ctx, notice, data };
     if (!setWidget(ctx, data)) notifyUserReview(ctx, notice);
+    if (isTransientCompletedOutcome(data.outcome)) {
+      this.#scheduleDismiss(generation, ctx);
+    }
   }
 
   permissionDecision(event: unknown): void {
@@ -738,16 +753,34 @@ export class UserReviewWidgetController {
       type: current.notice?.type ?? data.type,
       message: data.lines.join("\n"),
     };
+    this.#cancelDismiss();
     this.#current = { ...current, data, notice };
     if (!setWidget(current.ctx, data)) notifyUserReview(current.ctx, notice);
   }
 
   clear(ctx?: ExtensionContext): void {
     ++this.#generation;
+    this.#cancelDismiss();
     this.#waiting = undefined;
     const current = this.#current;
     this.#current = undefined;
     if (current) setWidget(ctx ?? current.ctx, undefined);
+  }
+
+  #cancelDismiss(): void {
+    if (this.#dismissTimer === undefined) return;
+    clearTimeout(this.#dismissTimer);
+    this.#dismissTimer = undefined;
+  }
+
+  #scheduleDismiss(generation: number, ctx: ExtensionContext): void {
+    if (this.successTtlMs <= 0) return;
+    this.#dismissTimer = setTimeout(() => {
+      this.#dismissTimer = undefined;
+      if (this.#current?.generation !== generation) return;
+      this.clear(ctx);
+    }, this.successTtlMs);
+    this.#dismissTimer.unref?.();
   }
 
   #isCurrent(requestId: string, generation: number): boolean {

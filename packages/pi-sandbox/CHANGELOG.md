@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.18.0 - 2026-09-11
+
+- Depend on the coordinated `@erichll/pi-auto-review 0.18.0` release.
+- Pin the development `pi-subagents` baseline to `^0.67.0`. The runtime peer
+  remains `>=0.66.0`; protected native mode still fail-closes below 0.66.0.
+
 ## 0.17.1 - 2026-09-06
 
 - Move the `pi-subagents` compatibility floor to 0.66.0 for protected native

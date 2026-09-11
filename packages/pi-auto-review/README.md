@@ -31,8 +31,7 @@ that dependency is a hard prerequisite (see [Install and enable](#install-and-en
 > **Prerequisite:** pi-auto-review is an authorizer inside
 > `@gotgenes/pi-permission-system`. Pi does not auto-install peer packages, so
 > install the permission system separately (once per machine) before this
-> extension. This release line supports permission-system 29.3.0 through the
-> latest 31.x release:
+> extension. This release line supports permission-system 30.0.0 and later:
 
 Node.js 22.13.0 or newer is required. Permission auditing uses Node's built-in
 `node:sqlite`; it does not require a SQLite CLI, system SQLite library, or npm
@@ -178,9 +177,11 @@ Interactive sessions show the current permission check in a single widget
 above the editor. Each check first shows its surface, compact target, and the
 dynamically configured reviewer model, then replaces that content in place
 with the outcome, target and rationale, model, token usage, duration, and any
-extra call count. A new check replaces the previous result; the latest result
-remains visible until then and is cleared when the session changes or shuts
-down. Concurrent older checks cannot overwrite the most recently started one.
+extra call count. A new check replaces the previous result. Allowed and
+auto-confirmed results dismiss after eight seconds so they do not occupy the
+editor; denials, deferrals, and local-confirmation waits stay until the next
+check, a session change, or shutdown. Concurrent older checks cannot overwrite
+the most recently started one.
 
 Every request still has its own model call, verdict, grant, local confirmation,
 and audit record. No new review-result transcript entries are written. Existing

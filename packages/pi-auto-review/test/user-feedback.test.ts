@@ -253,7 +253,7 @@ test("review formatting has no left bar and combines target with rationale", () 
   assert.match(rendered.at(-1) ?? "", /2\.1k toks in/);
 });
 
-function widgetHarness(mode = "tui") {
+function widgetHarness(mode = "tui", successTtlMs = 0) {
   const widgets: Array<{
     key: string;
     content: unknown;
@@ -276,7 +276,7 @@ function widgetHarness(mode = "tui") {
     widgets,
     notifications,
     ctx,
-    controller: new UserReviewWidgetController(),
+    controller: new UserReviewWidgetController(successTtlMs),
   };
 }
 
@@ -380,6 +380,73 @@ test("controller overwrites checks, retains completion, and rejects stale update
   assert.equal(harness.widgets.at(-1)?.content === undefined, false);
   harness.controller.clear(harness.ctx as never);
   assert.equal(harness.widgets.at(-1)?.content, undefined);
+});
+
+test("successful completions dismiss after the success TTL", async () => {
+  const harness = widgetHarness("tui", 20);
+  const generation = harness.controller.begin("request-a", harness.ctx as never, {
+    surface: "external_directory_read",
+    target: "/tmp/x",
+    model: "provider/reviewer",
+  });
+  const input = {
+    outcome: "auto_confirm" as const,
+    surface: "external_directory_read",
+    target: "/tmp/x",
+  };
+  harness.controller.complete(
+    "request-a",
+    generation,
+    harness.ctx as never,
+    buildUserReviewNotice(input),
+    buildUserReviewWidgetData(input),
+  );
+  assert.match(renderedText(harness), /allowed · auto-confirm/);
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(harness.widgets.at(-1)?.content, undefined);
+});
+
+test("denials and confirmation waits stay until the next check", async () => {
+  for (const outcome of ["deny", "needs_confirmation", "defer"] as const) {
+    const harness = widgetHarness("tui", 20);
+    const generation = harness.controller.begin("request-a", harness.ctx as never, {
+      surface: "bash",
+      model: "provider/reviewer",
+    });
+    const input = { outcome, surface: "bash" };
+    harness.controller.complete(
+      "request-a",
+      generation,
+      harness.ctx as never,
+      buildUserReviewNotice(input),
+      buildUserReviewWidgetData(input),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.notEqual(harness.widgets.at(-1)?.content, undefined, outcome);
+    harness.controller.clear(harness.ctx as never);
+  }
+});
+
+test("a new check cancels a pending success dismiss", async () => {
+  const harness = widgetHarness("tui", 30);
+  const first = harness.controller.begin("request-a", harness.ctx as never, {
+    surface: "path",
+    model: "provider/a",
+  });
+  const firstInput = { outcome: "allow" as const, surface: "path" };
+  harness.controller.complete(
+    "request-a",
+    first,
+    harness.ctx as never,
+    buildUserReviewNotice(firstInput),
+    buildUserReviewWidgetData(firstInput),
+  );
+  harness.controller.begin("request-b", harness.ctx as never, {
+    surface: "bash",
+    model: "provider/b",
+  });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.match(renderedText(harness), /reviewing · bash/);
 });
 
 test("waiting overlay flips the reviewing widget to waiting-for-you and restores it", () => {
