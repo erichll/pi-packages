@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.18.1 - 2026-09-11
+
+- Animate the live `reviewing` label in the above-editor widget with a
+  left-to-right light sweep while the reviewer model is evaluating a boundary check.
+- Paint shimmer frames at an 80ms interval cycling theme colors (`accent`,
+  `muted`, `dim`) without altering the label text length or widget layout width.
+- Ensure the animation timer cleanly stops and disposes when the review phase
+  completes or the widget is dismissed.
+- Export `USER_REVIEW_SWEEP_INTERVAL_MS` and `renderReviewingSweep` for testing
+  and custom TUI rendering.
+
 ## 0.18.0 - 2026-09-11
 
 - Coordinated release for `@erichll/pi-sandbox 0.18.0`.

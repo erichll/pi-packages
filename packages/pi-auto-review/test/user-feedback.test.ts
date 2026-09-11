@@ -15,7 +15,9 @@ import {
   buildUserReviewGroupLines,
   renderUserReviewQuoteLines,
   renderUserReviewWidgetLines,
+  renderReviewingSweep,
   reviewTargetFromRequest,
+  USER_REVIEW_SWEEP_INTERVAL_MS,
   truncateReviewText,
   UserReviewWidgetController,
 } from "../src/user-feedback.ts";
@@ -295,8 +297,10 @@ const widgetTheme = {
 function renderLastWidget(harness: ReturnType<typeof widgetHarness>, width = 80) {
   const content = harness.widgets.at(-1)?.content;
   assert.equal(typeof content, "function");
-  const component = (content as Function)({}, widgetTheme);
-  return component.render(width) as string[];
+  const component = (content as Function)({ requestRender() {} }, widgetTheme);
+  const rendered = component.render(width) as string[];
+  component.dispose?.();
+  return rendered;
 }
 
 /** Widget rendering embeds ANSI accents and fake theme markers; strip both. */
@@ -304,8 +308,52 @@ function renderedText(harness: ReturnType<typeof widgetHarness>, width = 80) {
   return renderLastWidget(harness, width)
     .join("\n")
     .replace(/\x1b\[[0-9;]*m/g, "")
-    .replace(/\[(muted|success|warning|error)\]/g, "");
+    .replace(/\[(accent|dim|muted|success|warning|error)\]/g, "");
 }
+
+test("reviewing sweep moves the accent across the label without changing text", () => {
+  const first = renderReviewingSweep(widgetTheme, 2);
+  const later = renderReviewingSweep(widgetTheme, 7);
+  assert.notEqual(first, later);
+  assert.match(first, /\[accent\]r/);
+  assert.match(later, /\[accent\]w/);
+  for (const rendered of [first, later]) {
+    assert.equal(
+      rendered
+        .replace(/\x1b\[[0-9;]*m/g, "")
+        .replace(/\[(accent|dim|muted)\]/g, ""),
+      "reviewing",
+    );
+  }
+});
+
+test("reviewing widget requests animation frames and stops after disposal", async () => {
+  const harness = widgetHarness();
+  harness.controller.begin("request-a", harness.ctx as never, {
+    surface: "bash",
+    model: "provider/reviewer",
+  });
+  const content = harness.widgets.at(-1)?.content;
+  assert.equal(typeof content, "function");
+  let renders = 0;
+  const component = (content as Function)(
+    { requestRender() { renders++; } },
+    widgetTheme,
+  );
+  const initial = component.render(80).join("\n");
+  await new Promise((resolve) =>
+    setTimeout(resolve, USER_REVIEW_SWEEP_INTERVAL_MS + 30)
+  );
+  assert.ok(renders >= 1);
+  assert.notEqual(component.render(80).join("\n"), initial);
+  component.dispose();
+  const stoppedAt = renders;
+  await new Promise((resolve) =>
+    setTimeout(resolve, USER_REVIEW_SWEEP_INTERVAL_MS + 30)
+  );
+  assert.equal(renders, stoppedAt);
+  harness.controller.clear(harness.ctx as never);
+});
 
 test("reviewing widget uses dynamic model, above-editor placement, and wrapping", () => {
   const harness = widgetHarness();

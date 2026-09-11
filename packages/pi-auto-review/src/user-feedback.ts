@@ -5,6 +5,8 @@ export const USER_REVIEW_ENTRY_TYPE = "pi-auto-review";
 export const USER_REVIEW_WIDGET_KEY = "pi-auto-review";
 /** How long a successful completed widget stays above the editor. */
 export const USER_REVIEW_SUCCESS_WIDGET_TTL_MS = 8_000;
+/** Frame interval for the light sweep across the live `reviewing` label. */
+export const USER_REVIEW_SWEEP_INTERVAL_MS = 80;
 
 export type UserReviewOutcome =
   | "allow"
@@ -600,14 +602,36 @@ export function buildUserReviewWidgetData(
   };
 }
 
+const REVIEWING_LABEL = "reviewing";
+const REVIEWING_SWEEP_GAP_FRAMES = 4;
+
+/** Paint one left-to-right shimmer frame without changing the label width. */
+export function renderReviewingSweep(
+  theme: UserReviewTheme,
+  frame: number,
+): string {
+  const center = Math.abs(Math.trunc(frame)) %
+      (REVIEWING_LABEL.length + REVIEWING_SWEEP_GAP_FRAMES) - 2;
+  return [...REVIEWING_LABEL].map((character, index) => {
+    const distance = Math.abs(index - center);
+    const color = distance === 0
+      ? "accent"
+      : distance === 1
+      ? "muted"
+      : "dim";
+    return `${theme.getFgAnsi(color)}${character}`;
+  }).join("") + "\x1b[0m";
+}
+
 export function renderUserReviewWidgetLines(
   data: UserReviewWidgetData,
   theme: UserReviewTheme,
   width: number,
+  reviewingFrame = 0,
 ): string[] {
   const rendered: string[] = [];
   const verb = data.phase === "reviewing"
-    ? "reviewing"
+    ? REVIEWING_LABEL
     : data.phase === "waiting_user"
     ? "waiting"
     : outcomeVerb(data.outcome);
@@ -620,9 +644,12 @@ export function renderUserReviewWidgetLines(
     for (const visual of wrapReviewDisplayText(line, Math.max(1, width))) {
       let painted = `${mutedAnsi}${visual}\x1b[0m`;
       if (index === 0) {
+        const paintedVerb = data.phase === "reviewing"
+          ? renderReviewingSweep(theme, reviewingFrame)
+          : `${verbAnsi}${verb}\x1b[0m`;
         painted = painted.replace(
           verb,
-          `${verbAnsi}${verb}\x1b[0m${mutedAnsi}`,
+          `${paintedVerb}${mutedAnsi}`,
         );
       }
       rendered.push(painted);
@@ -640,11 +667,24 @@ function setWidget(
     ctx.ui.setWidget(
       USER_REVIEW_WIDGET_KEY,
       data
-        ? (_tui, theme) => ({
-            render: (width: number) =>
-              renderUserReviewWidgetLines(data, theme, width),
-            invalidate() {},
-          })
+        ? (tui, theme) => {
+            let frame = 0;
+            const interval = data.phase === "reviewing"
+              ? setInterval(() => {
+                  frame++;
+                  tui.requestRender();
+                }, USER_REVIEW_SWEEP_INTERVAL_MS)
+              : undefined;
+            interval?.unref?.();
+            return {
+              render: (width: number) =>
+                renderUserReviewWidgetLines(data, theme, width, frame),
+              invalidate() {},
+              dispose() {
+                if (interval !== undefined) clearInterval(interval);
+              },
+            };
+          }
         : undefined,
       { placement: "aboveEditor" },
     );
