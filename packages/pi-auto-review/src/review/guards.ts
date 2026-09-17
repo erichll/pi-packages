@@ -31,12 +31,7 @@ export function protectedWriteHardDeny(
     join(agentDir, "extensions", "pi-auto-review"),
   ];
   const protectedFiles = [
-    join(request.cwd, ".pi", "settings.json"),
-    join(request.cwd, ".pi", "sandbox.json"),
     join(request.cwd, PROJECT_CONFIG_PATH),
-    join(agentDir, "settings.json"),
-    join(agentDir, "permissions.json"),
-    join(agentDir, "sandbox.json"),
     userConfigPath(),
   ];
   if (

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.18.1 - 2026-09-17
+
+- Trim redundant paths from default `denyWrite` policy (`settings.json`,
+  agent `settings.json`, `permissions.json`, `sandbox.json`, and legacy
+  `pi-sandbox.json`), reducing unnecessary mount point stubs created by bubblewrap
+  while preserving protection for `.pi/pi-auto-review.json` and agent extensions.
+
 ## 0.18.0 - 2026-09-11
 
 - Depend on the coordinated `@erichll/pi-auto-review 0.18.0` release.

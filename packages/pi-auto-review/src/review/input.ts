@@ -39,7 +39,13 @@ export function sessionConfig(
   const projectPath = join(cwd, PROJECT_CONFIG_PATH);
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(projectPath, "utf8"));
+    const content = readFileSync(projectPath, "utf8");
+    if (!content.trim()) {
+      // Treat empty/whitespace-only file the same as missing — sandbox
+      // runtime may leave 0-byte mount-point stubs for denyWrite paths.
+      return Object.freeze({ ...trusted });
+    }
+    raw = JSON.parse(content);
   } catch (error) {
     if (
       error &&

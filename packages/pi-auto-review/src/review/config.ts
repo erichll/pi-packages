@@ -241,7 +241,13 @@ export function loadTrustedConfig(
   const path = options.userConfigPath ?? userConfigPath();
   let value: unknown;
   try {
-    value = JSON.parse(readFileSync(path, "utf8"));
+    const content = readFileSync(path, "utf8");
+    if (!content.trim()) {
+      // Treat empty/whitespace-only file the same as missing — sandbox
+      // runtime may leave 0-byte mount-point stubs for denyWrite paths.
+      return packageConfig;
+    }
+    value = JSON.parse(content);
   } catch (error) {
     if (
       error &&

@@ -32,22 +32,7 @@ test("the default policy limits writes and protects sandbox configuration", () =
   ]);
   assert.ok(
     policy.filesystem.denyWrite.includes(
-      "/workspace/project/.pi/sandbox.json",
-    ),
-  );
-  assert.ok(
-    policy.filesystem.denyWrite.includes(
-      join(homedir(), ".pi", "agent", "settings.json"),
-    ),
-  );
-  assert.ok(
-    policy.filesystem.denyWrite.includes(
-      join(homedir(), ".pi", "agent", "permissions.json"),
-    ),
-  );
-  assert.ok(
-    policy.filesystem.denyWrite.includes(
-      join(homedir(), ".pi", "agent", "pi-sandbox.json"),
+      "/workspace/project/.pi/pi-auto-review.json",
     ),
   );
   assert.ok(
@@ -65,11 +50,6 @@ test("the default policy limits writes and protects sandbox configuration", () =
         "pi-sandbox",
         "config.json",
       ),
-    ),
-  );
-  assert.ok(
-    policy.filesystem.denyWrite.includes(
-      "/workspace/project/.pi/pi-auto-review.json",
     ),
   );
   assert.deepEqual(policy.network.allowedDomains, []);

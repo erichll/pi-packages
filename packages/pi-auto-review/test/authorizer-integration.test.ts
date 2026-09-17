@@ -2394,7 +2394,7 @@ test("real permission-system authorizer chain integration", async (t) => {
     try {
       const broker = getBoundaryBroker();
       assert.ok(broker);
-      const protectedPath = `${process.cwd()}/.pi/settings.json`;
+      const protectedPath = `${process.cwd()}/.pi/pi-auto-review.json`;
       const result = await approveSandboxTrap(
         {
           kind: "filesystem",
@@ -2403,7 +2403,7 @@ test("real permission-system authorizer chain integration", async (t) => {
           query_id: "78",
           operation: "write",
           path: protectedPath,
-          requested_path: ".pi/settings.json",
+          requested_path: ".pi/pi-auto-review.json",
           syscall: "openat",
           errno: "EACCES",
           flags: ["O_WRONLY"],
@@ -2418,7 +2418,7 @@ test("real permission-system authorizer chain integration", async (t) => {
         },
         {
           broker,
-          command: "touch .pi/settings.json",
+          command: "touch .pi/pi-auto-review.json",
           cwd: process.cwd(),
           sessionId: "integration-session",
           scopeKey: "turn-1",
@@ -2450,7 +2450,7 @@ test("real permission-system authorizer chain integration", async (t) => {
       {
         writeSurface: "external_directory_write",
         readSurface: "external_directory_read",
-        target: join(process.cwd(), ".pi", "settings.json"),
+        target: join(process.cwd(), ".pi", "pi-auto-review.json"),
       },
     ];
 

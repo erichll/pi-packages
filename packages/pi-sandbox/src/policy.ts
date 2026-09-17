@@ -247,14 +247,7 @@ export function createDefaultPolicy(
       ],
       allowWrite: [workspace, "/dev/null"],
       denyWrite: [
-        join(workspace, ".pi", "settings.json"),
-        join(workspace, ".pi", "sandbox.json"),
         join(workspace, ".pi", "pi-auto-review.json"),
-        join(home, ".pi", "agent", "settings.json"),
-        join(home, ".pi", "agent", "permissions.json"),
-        join(home, ".pi", "agent", "sandbox.json"),
-        // Legacy config path kept write-protected during migration.
-        join(home, ".pi", "agent", "pi-sandbox.json"),
         join(home, ".pi", "agent", "logs"),
         // Prevent the sandbox from installing or rewriting trusted extensions
         // (includes ~/.pi/agent/extensions/pi-sandbox/config.json).

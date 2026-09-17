@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.18.2 - 2026-09-17
+
+- Treat empty or whitespace-only `.pi/pi-auto-review.json` files as missing
+  configuration instead of throwing `SyntaxError`. This prevents `session_start`
+  from disabling automatic reviews for an entire session when Linux bubblewrap
+  creates a 0-byte mount point stub for deny-write paths (fixes #6).
+- Apply the same empty-file tolerance to the user-global config loader.
+- Remove redundant files from `protectedFiles` in `guards.ts` (`settings.json`,
+  `permissions.json`, and unused `sandbox.json`) so workspaces can configure
+  standard settings without triggering security tampering hard-denials.
+
 ## 0.18.1 - 2026-09-11
 
 - Animate the live `reviewing` label in the above-editor widget with a
