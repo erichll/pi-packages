@@ -3,9 +3,10 @@ import { EventEmitter } from "node:events";
 import { join } from "node:path";
 import test from "node:test";
 // These deep imports reach pi-permission-system internals that its public
-// entry (".") does not export. They are pinned to the 31.x source layout;
-// the 31.1.1 directory refactor already moved path-normalizer.ts once.
-// When upgrading across minor/major lines, re-verify every path below.
+// entry (".") does not export. They are pinned to the 33.x source layout:
+// 31.1.1 moved path-normalizer.ts, 33.0.0 changed MCP target derivation and
+// rule evaluation (see test/mcp-rule-semantics.test.ts). When upgrading across
+// minor/major lines, re-verify every path below.
 import { AuthorizerRegistry } from "../../../node_modules/@gotgenes/pi-permission-system/src/authority/authorizer-registry.ts";
 import { composeAuthorizerChain } from "../../../node_modules/@gotgenes/pi-permission-system/src/authority/authorizer-chain.ts";
 import { encloseInDelegationEnvelope } from "../../../node_modules/@gotgenes/pi-permission-system/src/authority/delegation-envelope.ts";

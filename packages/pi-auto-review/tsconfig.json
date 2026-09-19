@@ -4,5 +4,5 @@
     "rootDir": "."
   },
   "include": ["src/**/*.ts", "test/**/*.ts"],
-  "exclude": ["test/authorizer-integration.test.ts"]
+  "exclude": ["test/authorizer-integration.test.ts", "test/mcp-rule-semantics.test.ts"]
 }

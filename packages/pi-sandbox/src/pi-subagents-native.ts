@@ -7,9 +7,13 @@ import { createJiti } from "jiti";
  * Compatible pi-subagents line: 0.66.0 and above (no upper pin). Any new minor
  * is accepted, so the exports/ceiling checks below are the real compatibility
  * gate; this range only rejects old lines and guards against blind
- * accept-on-drift. Revalidated against 0.66.0: ceiling registry, discovery,
- * and config internals unchanged (verified 2026-09-06 against the published
- * 0.66.0 package).
+ * accept-on-drift. Revalidated against 0.69.0: ceiling registry
+ * (`SUBAGENT_CAPABILITY_CEILING_VERSION` 1), the `./capability-ceiling` export
+ * path, discovery/canonical resolution, and the config loader with
+ * `scheduledRuns` are unchanged since 0.66.0 (verified 2026-09-19 against the
+ * published 0.69.0 package). Protected mode needs Pi 0.85.1 or newer with
+ * pi-subagents 0.68.0+: 0.85.0 does not ship `@earendil-works/pi-server`, so
+ * background children fail to launch there.
  */
 export const PI_SUBAGENTS_COMPAT_RANGE = ">=0.66.0";
 export const NATIVE_CHILD_TOOLS = ["bash", "read", "grep", "find", "ls"] as const;

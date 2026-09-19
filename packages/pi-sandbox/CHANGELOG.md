@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.18.2 - 2026-09-20
+
+- Pin the development `pi-subagents` baseline to `^0.69.0` and Pi to
+  `^0.85.1`. The runtime peer stays `>=0.66.0`.
+- Revalidated protected native mode against published pi-subagents 0.69.0:
+  the `./capability-ceiling` export path, `SUBAGENT_CAPABILITY_CEILING_VERSION`
+  1, `registerSubagentCapabilityCeiling`, discovery/canonical resolution, and
+  the config loader with `scheduledRuns` are unchanged. The deterministic gate
+  and the package test suite pass against 0.67.0 and 0.69.0.
+- Recorded in `docs/compat-notes.md` that protected mode with pi-subagents
+  0.68.0+ needs Pi 0.85.1 or newer: 0.85.0 does not ship
+  `@earendil-works/pi-server`, so background children fail to launch there.
+
 ## 0.18.1 - 2026-09-17
 
 - Trim redundant paths from default `denyWrite` policy (`settings.json`,

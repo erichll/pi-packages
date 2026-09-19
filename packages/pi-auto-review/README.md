@@ -31,7 +31,8 @@ that dependency is a hard prerequisite (see [Install and enable](#install-and-en
 > **Prerequisite:** pi-auto-review is an authorizer inside
 > `@gotgenes/pi-permission-system`. Pi does not auto-install peer packages, so
 > install the permission system separately (once per machine) before this
-> extension. This release line supports permission-system 30.0.0 and later:
+> extension. This release line supports permission-system 30.0.0 and later,
+> validated through 33.0.1:
 
 Node.js 22.13.0 or newer is required. Permission auditing uses Node's built-in
 `node:sqlite`; it does not require a SQLite CLI, system SQLite library, or npm
@@ -116,6 +117,16 @@ For a complete `@gotgenes/pi-permission-system` config that wires
 read/write/edit, a read-only bash allowlist, an MCP discovery policy, and a
 `path` deny block for secret and credential files — see
 [`examples/pi-permission-system.config.example.json`](examples/pi-permission-system.config.example.json).
+
+MCP rules are evaluated last-match-wins across the candidates derived for one
+call: the tool name, its bare server, and `mcp_call`. Keep `"*"` first in the
+`mcp` block and narrower server or tool entries after it, as the example does,
+so a specific rule cannot be shadowed by the catch-all. A bare server entry
+such as `"atlassian": "allow"` also matches the `mcp connect <server>`
+candidate list, so it auto-allows starting that server — prefer the `server_*`
+and `server:*` forms for tool calls. Any entry meant to narrow a broad allow
+(such as a destructive-tool pattern) must be written after it, or
+last-match-wins shadows it.
 
 Package defaults:
 

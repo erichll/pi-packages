@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.18.3 - 2026-09-20
+
+- Move the `@gotgenes/pi-permission-system` development dependency to
+  `^33.0.1` and refresh the type-check/test surface to Pi `^0.85.1`.
+- Add an MCP rule-semantics regression test that locks the 33.x behavior this
+  package depends on: a prefix-named tool such as `atlassian_getJiraIssue`
+  derives its bare server (`atlassian`) as a candidate instead of an
+  unmatchable double-prefixed alias, and MCP rules are evaluated
+  last-match-wins across those candidates. A ruleset that puts
+  `"*": "allow"` before `"atlassian": "deny"` now denies such a call, and the
+  reviewer is shown the tool name as the boundary value.
+- Sync `examples/pi-permission-system.config.example.json` with the live
+  baseline: add the `mcp__atlassian` namespace-proxy allow and drop the
+  redundant bare `atlassian` allow (after 33.0.0 its only reachable effect was
+  silently allowing `mcp connect atlassian`, which starts the server). Ordinary
+  `atlassian` / `jira` / `confluence` tool calls stay allowed.
+- No runtime behavior change in this package: the public authorizer API it
+  consumes and the normalized evidence shape are unchanged, and the peer range
+  stays `>=30.0.0`. The bump only moves the development surface, so MCP rule
+  semantics come from the installed permission-system (33.0.0 made
+  prefix-named tools resolve to their bare server and evaluated MCP rules
+  last-match-wins).
+
 ## 0.18.2 - 2026-09-17
 
 - Treat empty or whitespace-only `.pi/pi-auto-review.json` files as missing

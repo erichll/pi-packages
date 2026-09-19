@@ -58,6 +58,7 @@ test("version gate accepts 0.66.0 and above and fails closed below it", () => {
   assert.equal(isCompatiblePiSubagentsVersion("0.66.1"), true);
   assert.equal(isCompatiblePiSubagentsVersion("0.66.2-beta.1"), true);
   assert.equal(isCompatiblePiSubagentsVersion("0.67.0"), true);
+  assert.equal(isCompatiblePiSubagentsVersion("0.69.0"), true);
   assert.equal(isCompatiblePiSubagentsVersion("1.66.0"), false);
   assert.equal(isCompatiblePiSubagentsVersion("0.65.9"), false);
   assert.equal(isCompatiblePiSubagentsVersion("0.66"), false);
@@ -66,7 +67,7 @@ test("version gate accepts 0.66.0 and above and fails closed below it", () => {
   assert.equal(isCompatiblePiSubagentsVersion(42), false);
 });
 
-test("0.66 runtime validates native agents and registers the strong ceiling", async () => {
+test("the installed pi-subagents runtime validates native agents and registers the strong ceiling", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-sandbox-native-runtime-"));
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = root;

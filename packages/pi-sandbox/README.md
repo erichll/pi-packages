@@ -9,7 +9,7 @@ also run complete process-backed subagent trees inside independent sandboxes.
 - [Security model](#security-model)
 - [Linux requirements](#linux-requirements)
 - [Subagent provider](#subagent-provider)
-  - [`pi-subagents` 0.65.0 native-background tool boundary](#pi-subagents-0650-native-background-tool-boundary)
+  - [`pi-subagents` native-background tool boundary](#pi-subagents-native-background-tool-boundary)
 - [Network domain policy](#network-domain-policy)
 - [Optional host IPC fallback](#optional-host-ipc-fallback)
 - [Additional trusted read paths](#additional-trusted-read-paths)
@@ -90,14 +90,16 @@ Supported modes:
 
 - `builtin` (default): register the process-backed `subagent` tool and sandbox
   each complete worker process tree.
-- `pi-subagents`: let `pi-subagents 0.65.0` own orchestration under the required
+- `pi-subagents`: let `pi-subagents >=0.66.0` own orchestration under the required
   native-background tool boundary described below.
 - `off`: protect Bash only.
 
-### `pi-subagents` 0.65.0 native-background tool boundary
+### `pi-subagents` native-background tool boundary
 
-This provider is intentionally locked to exactly `pi-subagents 0.65.0` and
-fails closed if its public ceiling API or internal discovery layout drifts.
+This provider supports the `pi-subagents >=0.66.0` line (validated through
+0.69.0) and fails closed if its public ceiling API or internal discovery layout
+drifts. The peer dependency is a floor with no upper pin; the loader's explicit
+export and layout checks are the real gate.
 Configure both the protection mode and a non-empty canonical whitelist:
 
 ```json
@@ -113,9 +115,9 @@ Configure both the protection mode and a non-empty canonical whitelist:
 The `pi-subagents` config at
 `~/.pi/agent/extensions/subagent/config.json` must also contain
 `"scheduledRuns": { "enabled": false }`. Every launch must explicitly set
-`async: true`. Only direct single-agent launches are supported. In 0.65.0,
-public `workflowScript` / `workflowScriptPath` children disable ambient
-extensions, so both are rejected along with named workflows, schedules,
+`async: true`. Only direct single-agent launches are supported. Public
+`workflowScript` / `workflowScriptPath` children disable ambient
+extensions upstream, so both are rejected along with named workflows, schedules,
 configuration mutations, resume, nested subagents, and external runners.
 
 Every child is constrained by the upstream capability ceiling to `bash`,
@@ -124,7 +126,7 @@ acknowledge `@erichll:pi-sandbox`; writes can therefore occur only through the
 sandboxed Bash tool. `write`, `edit`, MCP, and other extension tools are not
 available.
 
-| Capability | `builtin` | `pi-subagents` 0.65.0 protected mode |
+| Capability | `builtin` | `pi-subagents` protected mode |
 | --- | --- | --- |
 | Outer worker sandbox | Yes | No |
 | Bash sandbox | Yes | Yes |
@@ -276,11 +278,13 @@ npm test
 npm run gate:pi-subagents
 ```
 
-`gate:pi-subagents` verifies the pinned package layout, discovery behavior,
+`gate:pi-subagents` verifies the pinned development dependency's package layout,
+discovery behavior,
 capability ceiling, and protected launch policy in an isolated temporary agent
 directory. It never reads or updates production Pi configuration. Model-backed
 acceptance requires `PI_SUBAGENTS_GATE_MODEL` and an already-exported matching
-credential; missing prerequisites are reported as `SKIP`.
+credential; missing prerequisites are reported as `SKIP`. Protected mode with
+pi-subagents 0.68.0 or newer needs Pi 0.85.1 or newer.
 
 The test suite covers real Linux Sandbox Runtime enforcement when its native
 dependencies are installed, plus deterministic broker, network approval,
