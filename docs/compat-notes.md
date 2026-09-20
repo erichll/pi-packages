@@ -46,10 +46,12 @@ default `builtin` provider for complete worker-process-tree isolation.
 | child acknowledgement | event `subagent:acknowledge-extension` | unit/model gate |
 | `bg_wait` completion details | must carry runtime acknowledgement | result guard/model gate |
 
-Host requirement: protected mode with pi-subagents 0.68.0 or newer needs Pi
-0.85.1 or newer. Pi 0.85.0 does not ship `@earendil-works/pi-server`, which
-0.68.0 stopped bundling, so background children fail to launch there with an
-explicit error. The `builtin` provider is unaffected.
+Host requirement: these packages require Pi 0.86.0 or newer (the
+`peerDependencies` floor), which is therefore also the floor for protected mode
+with pi-subagents 0.68.0 or newer. Historically the floor was 0.85.1: Pi 0.85.0
+does not ship `@earendil-works/pi-server`, which 0.68.0 stopped bundling, so
+background children fail to launch there with an explicit error. The `builtin`
+provider is unaffected.
 
 The old `PI_SUBAGENT_PI_BINARY`, external launcher/supervisor, external network
 transport, and FleetView seams were removed because the native-background

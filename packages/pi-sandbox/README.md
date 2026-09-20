@@ -284,7 +284,7 @@ capability ceiling, and protected launch policy in an isolated temporary agent
 directory. It never reads or updates production Pi configuration. Model-backed
 acceptance requires `PI_SUBAGENTS_GATE_MODEL` and an already-exported matching
 credential; missing prerequisites are reported as `SKIP`. Protected mode with
-pi-subagents 0.68.0 or newer needs Pi 0.85.1 or newer.
+pi-subagents 0.68.0 or newer needs Pi 0.86.0 or newer.
 
 The test suite covers real Linux Sandbox Runtime enforcement when its native
 dependencies are installed, plus deterministic broker, network approval,

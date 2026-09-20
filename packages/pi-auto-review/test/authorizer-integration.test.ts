@@ -26,6 +26,7 @@ import {
   type Config,
 } from "../src/index.ts";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { getCurrentSystemPrompt } from "@earendil-works/pi-ai/compat";
 import { getBoundaryBroker } from "../src/broker/index.ts";
 import { boundaryRequestHash } from "../src/broker/grants.ts";
 import { approveSandboxTrap } from "../../pi-sandbox/src/approval.ts";
@@ -71,6 +72,27 @@ class UnrelatedPromptComponent {
   render(): string[] {
     return ["Unrelated custom UI"];
   }
+}
+
+/**
+ * Pi 0.86 normalized provider-facing requests: the reviewer system prompt and
+ * tool declarations travel as the transcript's leading system message instead
+ * of `Context.systemPrompt`, so the harness fakes and these assertions read the
+ * same transcript the real provider adapters receive.
+ */
+function reviewerTranscript(modelContext: unknown): {
+  messages: Array<{ role: string; content: string }>;
+  systemPrompt: string;
+  userPrompt: string;
+} {
+  const messages = (modelContext as {
+    messages: Array<{ role: string; content: string }>;
+  }).messages;
+  return {
+    messages,
+    systemPrompt: getCurrentSystemPrompt(messages),
+    userPrompt: messages.at(-1)?.content ?? "",
+  };
 }
 
 function config(overrides: Partial<Config> = {}): Config {
@@ -844,11 +866,8 @@ test("real permission-system authorizer chain integration", async (t) => {
         toolCallId: "call-current",
         toolName: "bash",
       });
-      const context = instance.modelContexts.at(-1) as {
-        systemPrompt: string;
-        messages: Array<{ content: string }>;
-      };
-      assert.equal(context.messages.length, 1);
+      const context = reviewerTranscript(instance.modelContexts.at(-1));
+      assert.equal(context.messages.length, 2);
       assert.ok(context.systemPrompt.length < 2_011);
       assert.equal(context.systemPrompt.match(/"outcome"/g)?.length, 1);
       assert.match(context.systemPrompt, /\$HOME/);
@@ -864,7 +883,7 @@ test("real permission-system authorizer chain integration", async (t) => {
         context.systemPrompt,
         /destructive\s+root\/home operations/,
       );
-      const prompt = context.messages[0].content;
+      const prompt = context.userPrompt;
       const envelope = JSON.parse(prompt) as Record<string, unknown>;
       assert.deepEqual(Object.keys(envelope), [
         "evidence",
@@ -941,13 +960,10 @@ test("real permission-system authorizer chain integration", async (t) => {
         requestId: "canonical-dedupe-second",
         value: "example.com:443",
       });
-      const second = instance.modelContexts.at(-1) as {
-        systemPrompt: string;
-        messages: Array<{ content: string }>;
-      };
+      const second = reviewerTranscript(instance.modelContexts.at(-1));
       assert.equal(second.systemPrompt, context.systemPrompt);
-      assert.equal(second.messages.length, 1);
-      assert.notEqual(second.messages[0].content, prompt);
+      assert.equal(second.messages.length, 2);
+      assert.notEqual(second.userPrompt, prompt);
     } finally {
       instance.dispose();
     }
@@ -1279,8 +1295,8 @@ test("real permission-system authorizer chain integration", async (t) => {
       });
       assert.equal(result.decision.approved, true);
       assert.equal(instance.modelContexts.length, 2);
-      const prompts = instance.modelContexts.map((context) =>
-        (context as { messages: Array<{ content: string }> }).messages[0].content
+      const prompts = instance.modelContexts.map(
+        (context) => reviewerTranscript(context).userPrompt,
       );
       assert.ok(prompts[1].startsWith(`${prompts[0]}\n\n`));
       assert.match(prompts[1], /Format correction only/);
@@ -1518,8 +1534,7 @@ test("real permission-system authorizer chain integration", async (t) => {
         { reason: "older-structured-tool", count: 3 },
       ]);
       const envelope = JSON.parse(
-        (instance.modelContexts[0] as { messages: Array<{ content: string }> })
-          .messages[0].content,
+        reviewerTranscript(instance.modelContexts[0]).userPrompt,
       ) as {
         evidence: { toolCalls: { items: Array<{ toolCallId?: string }> } };
         omissions: { budgetRemovals: unknown };
@@ -1673,8 +1688,7 @@ test("real permission-system authorizer chain integration", async (t) => {
         [{ reason: "optional-result", count: 1 }],
       );
       const envelope = JSON.parse(
-        (instance.modelContexts[0] as { messages: Array<{ content: string }> })
-          .messages[0].content,
+        reviewerTranscript(instance.modelContexts[0]).userPrompt,
       ) as {
         evidence: {
           toolCalls: { items: Array<{ toolCallId?: string }> };
@@ -1719,10 +1733,7 @@ test("real permission-system authorizer chain integration", async (t) => {
           requestId: `utf8-estimator-${index}`,
           value: "example.com:443",
         });
-        const context = instance.modelContexts[0] as {
-          systemPrompt: string;
-          messages: Array<{ content: string }>;
-        };
+        const context = reviewerTranscript(instance.modelContexts[0]);
         const completion = instance.telemetry.find(
           (event) => event.type === "review_complete",
         );
@@ -1731,7 +1742,7 @@ test("real permission-system authorizer chain integration", async (t) => {
         assert.equal(
           total,
           estimateReviewerTokens(context.systemPrompt) +
-            estimateReviewerTokens(context.messages[0].content) +
+            estimateReviewerTokens(context.userPrompt) +
             64,
         );
         assert.ok(total >= 100);
@@ -2550,10 +2561,9 @@ test("real permission-system authorizer chain integration", async (t) => {
 
       const retry = await instance.authorize("bash_escalated");
       assert.equal(retry.decision.approved, false);
-      const context = instance.modelContexts.at(-1) as {
-        messages: Array<{ content: string }>;
-      };
-      const envelope = JSON.parse(context.messages[0].content) as {
+      const envelope = JSON.parse(
+        reviewerTranscript(instance.modelContexts.at(-1)).userPrompt,
+      ) as {
         override: Record<string, unknown>;
       };
       assert.deepEqual(

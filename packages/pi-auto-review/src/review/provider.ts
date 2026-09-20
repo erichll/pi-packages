@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { completeSimple } from "@earendil-works/pi-ai/compat";
+import { completeSimple, normalizeContext } from "@earendil-works/pi-ai/compat";
 import type { BoundaryRequest } from "../broker/index.ts";
 import type { UserReviewUsage } from "../user-feedback.ts";
 import type {
@@ -572,8 +572,17 @@ export async function modelCall(
       metadata.retryAfterMs = parseRetryAfterMs(response.headers);
     },
   };
+  // 0.86 moved the provider-facing request to a normalized transcript: the
+  // system prompt and tool declarations now travel as the transcript's leading
+  // system message. Providers registered by extensions receive that shape, so
+  // normalize before calling a registered streamSimple. completeSimple still
+  // accepts a Context and normalizes internally.
   return (runtime.streamSimple
-    ? await runtime.streamSimple(runtime.model, context, options).result()
+    ? await runtime.streamSimple(
+        runtime.model,
+        normalizeContext(context),
+        options,
+      ).result()
     : await completeSimple(runtime.model, context, options)) as CompletionMessage;
 }
 

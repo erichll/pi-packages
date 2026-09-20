@@ -11,9 +11,9 @@ import { createJiti } from "jiti";
  * (`SUBAGENT_CAPABILITY_CEILING_VERSION` 1), the `./capability-ceiling` export
  * path, discovery/canonical resolution, and the config loader with
  * `scheduledRuns` are unchanged since 0.66.0 (verified 2026-09-19 against the
- * published 0.69.0 package). Protected mode needs Pi 0.85.1 or newer with
- * pi-subagents 0.68.0+: 0.85.0 does not ship `@earendil-works/pi-server`, so
- * background children fail to launch there.
+ * published 0.69.0 package). Protected mode needs Pi 0.86.0 or newer (the
+ * package peer floor) with pi-subagents 0.68.0+: 0.85.0 does not ship
+ * `@earendil-works/pi-server`, so background children fail to launch there.
  */
 export const PI_SUBAGENTS_COMPAT_RANGE = ">=0.66.0";
 export const NATIVE_CHILD_TOOLS = ["bash", "read", "grep", "find", "ls"] as const;
