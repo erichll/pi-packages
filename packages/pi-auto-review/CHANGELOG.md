@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.19.0 - 2026-09-20
+
+- Require Pi `^0.86.0` for both the development and peer dependency of
+  `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent`.
+- Migrate the reviewer model call to Pi 0.86's normalized `TranscriptContext`:
+  a registered provider `streamSimple` (models.json or extension-registered
+  custom providers) now receives `normalizeContext(...)` so the reviewer system
+  prompt and tool declarations arrive as the transcript's leading system
+  message. Before this change such providers read the removed
+  `context.systemPrompt`/`context.tools` and silently reviewed with a fallback
+  system prompt and no tools.
+- Read the normalized transcript in the authorizer integration tests
+  (`getCurrentSystemPrompt` plus the last user message) and assert the leading
+  system message, so the fake `streamSimple` observes the same shape the real
+  provider adapters receive.
+
 ## 0.18.3 - 2026-09-20
 
 - Move the `@gotgenes/pi-permission-system` development dependency to

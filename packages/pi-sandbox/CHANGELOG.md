@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.19.0 - 2026-09-20
+
+- Require Pi `^0.86.0` for both the development and peer dependency of
+  `@earendil-works/pi-coding-agent`, and depend on `@erichll/pi-auto-review`
+  `^0.19.0` so the pair shares the same Pi floor. The `pi-subagents` runtime
+  peer stays `>=0.66.0`.
+- Revalidated against Pi 0.86.0: the package test suite passes (88 pass, 1
+  skipped), the deterministic `gate:pi-subagents` preflight passes, and the
+  model-backed gate passes both phases (native baseline host-readable,
+  protected sandboxed Bash blocked from the host read) with native
+  acknowledgement `@erichll:pi-sandbox`.
+- Recorded the Pi 0.86.0 floor in `README.md`, `docs/compat-notes.md`, and the
+  `pi-subagents-native.ts` compatibility notes: protected mode with
+  pi-subagents 0.68.0+ needs Pi 0.86.0 or newer.
+
 ## 0.18.2 - 2026-09-20
 
 - Pin the development `pi-subagents` baseline to `^0.69.0` and Pi to
