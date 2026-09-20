@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.19.1 - 2026-09-20
+
+- Pin the development `pi-subagents` baseline to `^0.70.0`. The runtime peer
+  stays `>=0.66.0`.
+- Accept the compiled module layout introduced in 0.70.0: the npm package now
+  ships `src/**/*.js` plus `.d.ts` and publishes `./capability-ceiling` as a
+  `{ types, default }` condition map instead of the 0.69.0 bare
+  `./src/api/capability-ceiling.ts` string. The loader derives the module
+  extension and internal module paths from that export, so the source
+  (0.66.0-0.69.0) and compiled (0.70.0+) layouts share one validated code path;
+  unknown export targets still fail closed.
+- Revalidated protected native mode against published pi-subagents 0.70.0:
+  `SUBAGENT_CAPABILITY_CEILING_VERSION` 1, `registerSubagentCapabilityCeiling`,
+  discovery/canonical resolution, and the config loader with `scheduledRuns`
+  are unchanged. The package test suite passes (89 pass, 1 skipped) and the
+  deterministic `gate:pi-subagents` preflight passes with
+  `piSubagentsModuleExtension: ".js"`. The model-backed gate phase was skipped
+  locally because no model credential was exported.
+- Record in `docs/compat-notes.md` that 0.70.0 makes the root
+  `PI_SUBAGENT_PARENT_SESSION` marker self-deleting while detached runners keep
+  receiving it from their exact launch. Protected mode requires `async: true`
+  children, so forwarded-permission routing is unaffected; the gate's
+  parent-forwarding adapter is now a no-op shim for 0.69.0 and earlier.
+
 ## 0.19.0 - 2026-09-20
 
 - Require Pi `^0.86.0` for both the development and peer dependency of

@@ -10,6 +10,8 @@ import {
   nativeSubagentCallBlockReason,
   NATIVE_CHILD_TOOLS,
   PI_SANDBOX_ACKNOWLEDGEMENT,
+  piSubagentsInternalModulePath,
+  resolvePiSubagentsModuleExtension,
   terminalChildrenHaveSandboxAcknowledgement,
 } from "../src/pi-subagents-native.ts";
 
@@ -65,6 +67,39 @@ test("version gate accepts 0.66.0 and above and fails closed below it", () => {
   assert.equal(isCompatiblePiSubagentsVersion("unknown"), false);
   assert.equal(isCompatiblePiSubagentsVersion(undefined), false);
   assert.equal(isCompatiblePiSubagentsVersion(42), false);
+});
+
+test("package layout resolution accepts the source and compiled module layouts", () => {
+  assert.equal(
+    resolvePiSubagentsModuleExtension({
+      "./capability-ceiling": "./src/api/capability-ceiling.ts",
+    }),
+    ".ts",
+  );
+  assert.equal(
+    resolvePiSubagentsModuleExtension({
+      "./capability-ceiling": {
+        types: "./src/api/capability-ceiling.d.ts",
+        default: "./src/api/capability-ceiling.js",
+      },
+    }),
+    ".js",
+  );
+  assert.equal(piSubagentsInternalModulePath("src/agents/agents", ".js"), "src/agents/agents.js");
+  assert.equal(piSubagentsInternalModulePath("src/agents/agents.ts", ".ts"), "src/agents/agents.ts");
+  for (const drift of [
+    undefined,
+    {},
+    { "./capability-ceiling": 42 },
+    { "./capability-ceiling": "./dist/api/capability-ceiling.js" },
+    { "./capability-ceiling": "./src/api/ceiling.ts" },
+    { "./capability-ceiling": { default: "./src/api/capability-ceiling.mjs" } },
+  ]) {
+    assert.throws(
+      () => resolvePiSubagentsModuleExtension(drift as never),
+      /capability-ceiling export changed/,
+    );
+  }
 });
 
 test("the installed pi-subagents runtime validates native agents and registers the strong ceiling", async () => {

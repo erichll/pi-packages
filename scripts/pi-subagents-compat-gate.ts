@@ -11,6 +11,8 @@ import {
   PI_SANDBOX_ACKNOWLEDGEMENT,
   isCompatiblePiSubagentsVersion,
   PI_SUBAGENTS_COMPAT_RANGE,
+  piSubagentsInternalModulePath,
+  resolvePiSubagentsModuleExtension,
 } from "../packages/pi-sandbox/src/pi-subagents-native.ts";
 
 async function artifactCorpus(root: string): Promise<string> {
@@ -286,19 +288,21 @@ assert.ok(
   isCompatiblePiSubagentsVersion(packageJson.version),
   `pi-subagents pin must satisfy ${PI_SUBAGENTS_COMPAT_RANGE}; found ${String(packageJson.version)}`,
 );
-assert.equal(packageJson.exports?.["./capability-ceiling"], "./src/api/capability-ceiling.ts");
+const moduleExtension = resolvePiSubagentsModuleExtension(packageJson.exports);
+const internal = (relative: string): string =>
+  join(packageRoot, piSubagentsInternalModulePath(relative, moduleExtension));
 
 for (const relative of [
-  "src/agents/agents.ts",
-  "src/extension/config.ts",
-  "src/runs/shared/child-tool-plan.ts",
-  "src/runs/foreground/subagent-executor.ts",
-]) await readFile(join(packageRoot, relative), "utf8");
+  "src/agents/agents",
+  "src/extension/config",
+  "src/runs/shared/child-tool-plan",
+  "src/runs/foreground/subagent-executor",
+]) await readFile(internal(relative), "utf8");
 
-const childToolPlan = await readFile(join(packageRoot, "src/runs/shared/child-tool-plan.ts"), "utf8");
+const childToolPlan = await readFile(internal("src/runs/shared/child-tool-plan"), "utf8");
 assert.match(childToolPlan, /capabilityCeiling\?\.denyExtensions/);
 assert.match(childToolPlan, /allowedTools/);
-const executor = await readFile(join(packageRoot, "src/runs/foreground/subagent-executor.ts"), "utf8");
+const executor = await readFile(internal("src/runs/foreground/subagent-executor"), "utf8");
 assert.match(executor, /publicExecutions = new WeakSet/);
 assert.match(executor, /publicExecution \? undefined : runHostCommand/);
 
@@ -331,6 +335,7 @@ try {
     status: "PASS",
     mode: "deterministic",
     piSubagents: packageJson.version,
+    piSubagentsModuleExtension: moduleExtension,
     allowedAgents: allowed,
     allowedTools: [...NATIVE_CHILD_TOOLS],
     acknowledgement: PI_SANDBOX_ACKNOWLEDGEMENT,

@@ -7,17 +7,27 @@ import { createJiti } from "jiti";
  * Compatible pi-subagents line: 0.66.0 and above (no upper pin). Any new minor
  * is accepted, so the exports/ceiling checks below are the real compatibility
  * gate; this range only rejects old lines and guards against blind
- * accept-on-drift. Revalidated against 0.69.0: ceiling registry
- * (`SUBAGENT_CAPABILITY_CEILING_VERSION` 1), the `./capability-ceiling` export
- * path, discovery/canonical resolution, and the config loader with
- * `scheduledRuns` are unchanged since 0.66.0 (verified 2026-09-19 against the
- * published 0.69.0 package). Protected mode needs Pi 0.86.0 or newer (the
- * package peer floor) with pi-subagents 0.68.0+: 0.85.0 does not ship
- * `@earendil-works/pi-server`, so background children fail to launch there.
+ * accept-on-drift. Revalidated against 0.70.0: ceiling registry
+ * (`SUBAGENT_CAPABILITY_CEILING_VERSION` 1), the `./capability-ceiling` export,
+ * discovery/canonical resolution, and the config loader with `scheduledRuns`
+ * are unchanged since 0.66.0, and the published package now ships compiled
+ * `.js`/`.d.ts` modules instead of the TypeScript source layout (verified
+ * 2026-09-20 against the published 0.70.0 package). Protected mode needs Pi
+ * 0.86.0 or newer (the package peer floor) with pi-subagents 0.68.0+: 0.85.0
+ * does not ship `@earendil-works/pi-server`, so background children fail to
+ * launch there.
  */
 export const PI_SUBAGENTS_COMPAT_RANGE = ">=0.66.0";
 export const NATIVE_CHILD_TOOLS = ["bash", "read", "grep", "find", "ls"] as const;
 export const PI_SANDBOX_ACKNOWLEDGEMENT = "@erichll:pi-sandbox";
+
+/**
+ * Module extension of the installed pi-subagents layout. Source checkouts (and
+ * the 0.66.0-0.69.0 npm line) ship `.ts` modules that need a TypeScript loader;
+ * the 0.70.0+ npm package ships compiled `.js` plus `.d.ts` declarations. Both
+ * layouts keep the same package-relative module paths.
+ */
+export type PiSubagentsModuleExtension = ".ts" | ".js";
 
 type Agent = {
   name: string;
@@ -85,6 +95,50 @@ export function isCompatiblePiSubagentsVersion(version: unknown): boolean {
   return Number(match[1] ?? "") === 0 && Number(match[2] ?? "") >= 66;
 }
 
+function capabilityCeilingExportTarget(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const conditions = value as Record<string, unknown>;
+  for (const condition of ["default", "import", "require", "types"]) {
+    const candidate = conditions[condition];
+    if (typeof candidate === "string") return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Resolve the installed module extension from the `./capability-ceiling`
+ * export, which every supported line publishes: a bare `.ts`/`.js` path before
+ * 0.70.0, a `{ types, default }` condition map from 0.70.0 on. Only the known
+ * `./src/api/capability-ceiling.<ext>` target is accepted; anything else fails
+ * closed instead of guessing a layout.
+ */
+export function resolvePiSubagentsModuleExtension(
+  exportsField: Record<string, unknown> | undefined,
+): PiSubagentsModuleExtension {
+  const target = capabilityCeilingExportTarget(exportsField?.["./capability-ceiling"]);
+  const match = typeof target === "string"
+    ? /^\.\/src\/api\/capability-ceiling(?:\.d)?\.(ts|js)$/u.exec(target)
+    : null;
+  if (!match) {
+    throw new Error(
+      "pi-subagents compatibility failure: capability-ceiling export changed",
+    );
+  }
+  return match[1] === "js" ? ".js" : ".ts";
+}
+
+/**
+ * Resolve a package-relative internal module path for the installed layout,
+ * for example `src/agents/agents` on the compiled 0.70.0 line.
+ */
+export function piSubagentsInternalModulePath(
+  relativePath: string,
+  extension: PiSubagentsModuleExtension,
+): string {
+  return `${relativePath.replace(/\.(?:ts|js)$/u, "")}${extension}`;
+}
+
 /** Load the public ceiling API and the discovery/config internals.
  * This intentionally fails closed on package version, export, or layout drift.
  */
@@ -101,20 +155,18 @@ export async function loadPiSubagentsNativeRuntime(
       `pi-subagents protected mode requires ${PI_SUBAGENTS_COMPAT_RANGE}; found ${String(packageJson.version)}`,
     );
   }
-  if (packageJson.exports?.["./capability-ceiling"] !== "./src/api/capability-ceiling.ts") {
-    throw new Error(
-      "pi-subagents compatibility failure: capability-ceiling export changed",
-    );
-  }
+  const extension = resolvePiSubagentsModuleExtension(packageJson.exports);
 
   const jiti = createJiti(import.meta.url, {
     interopDefault: false,
     fsCache: false,
   });
+  const internal = (relative: string): string =>
+    pathToFileURL(join(root, piSubagentsInternalModulePath(relative, extension))).href;
   const [ceiling, discovery, config] = await Promise.all([
-    jiti.import(pathToFileURL(join(root, "src/api/capability-ceiling.ts")).href) as Promise<CeilingModule>,
-    jiti.import(pathToFileURL(join(root, "src/agents/agents.ts")).href) as Promise<DiscoveryModule>,
-    jiti.import(pathToFileURL(join(root, "src/extension/config.ts")).href) as Promise<ConfigModule>,
+    jiti.import(internal("src/api/capability-ceiling")) as Promise<CeilingModule>,
+    jiti.import(internal("src/agents/agents")) as Promise<DiscoveryModule>,
+    jiti.import(internal("src/extension/config")) as Promise<ConfigModule>,
   ]).catch((error) => {
     throw new Error(
       `pi-subagents compatibility failure: ${error instanceof Error ? error.message : String(error)}`,

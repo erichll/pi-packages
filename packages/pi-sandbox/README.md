@@ -97,9 +97,9 @@ Supported modes:
 ### `pi-subagents` native-background tool boundary
 
 This provider supports the `pi-subagents >=0.66.0` line (validated through
-0.69.0) and fails closed if its public ceiling API or internal discovery layout
-drifts. The peer dependency is a floor with no upper pin; the loader's explicit
-export and layout checks are the real gate.
+0.70.0) and fails closed if its public ceiling API, module layout, or internal
+discovery layout drifts. The peer dependency is a floor with no upper pin; the
+loader's explicit export and layout checks are the real gate.
 Configure both the protection mode and a non-empty canonical whitelist:
 
 ```json

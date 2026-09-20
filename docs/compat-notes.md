@@ -2,11 +2,11 @@
 
 `@erichll/pi-sandbox` supports protected external orchestration on the
 `pi-subagents >=0.66.0` line: the peer dependency is a floor with no upper pin,
-and the development dependency is pinned to `^0.69.0`. The real gates are the
-`./capability-ceiling` export path and the capability-ceiling API version,
-which the loader checks at load time; the version range only rejects old lines
-and guards against blind accept-on-drift. Any mismatch disables the whole mode
-rather than reducing protection.
+and the development dependency is pinned to `^0.70.0`. The real gates are the
+`./capability-ceiling` export and the capability-ceiling API version, which the
+loader checks at load time; the version range only rejects old lines and guards
+against blind accept-on-drift. Any mismatch disables the whole mode rather than
+reducing protection.
 
 ## Security contract
 
@@ -37,14 +37,38 @@ default `builtin` provider for complete worker-process-tree isolation.
 
 ## Versioned seams
 
-| Seam | Status on the `>=0.66.0` line (validated on 0.69.0) | Verification |
+| Seam | Status on the `>=0.66.0` line (validated on 0.70.0) | Verification |
 | --- | --- | --- |
 | package version | must be `>=0.66.0`; below it the loader fails closed | runtime loader + deterministic gate |
 | `./capability-ceiling` export | public; expected path and API v1 | runtime loader + tests |
-| `src/agents/agents.ts` | internal discovery and canonical resolution | runtime loader + tests |
-| `src/extension/config.ts` | internal config loader | runtime loader + tests |
+| module layout | `.ts` source (0.66.0-0.69.0) or compiled `.js`/`.d.ts` (0.70.0+) under `src/`, same relative paths | runtime loader + tests |
+| `src/agents/agents.<ext>` | internal discovery and canonical resolution | runtime loader + tests |
+| `src/extension/config.<ext>` | internal config loader | runtime loader + tests |
 | child acknowledgement | event `subagent:acknowledge-extension` | unit/model gate |
 | `bg_wait` completion details | must carry runtime acknowledgement | result guard/model gate |
+
+## Module layout
+
+The npm package changed shape in 0.70.0: instead of publishing the TypeScript
+source checkout, the release is built into `dist-pkg` (the repository package is
+now `private: true`) and ships compiled `.js` plus `.d.ts` modules. The
+`./capability-ceiling` export is therefore a `{ types, default }` condition map
+pointing at `./src/api/capability-ceiling.js` where 0.69.0 published the bare
+string `./src/api/capability-ceiling.ts`.
+
+The loader accepts exactly those two shapes and derives both the module
+extension and the internal module paths from the capability-ceiling export, so
+the source and compiled lines are validated by the same code path. Unknown
+export targets still fail closed instead of probing the filesystem. Extension
+loading stays on `jiti`, which handles the `.ts` source layout and the plain
+ESM `.js` layout identically.
+
+The `PI_SUBAGENT_PARENT_SESSION` marker also changed behavior in 0.70.0: the
+root session deletes its self-referential copy during `session_start` while
+detached runners still receive the marker from their exact launch. Protected
+mode requires `async: true` children (detached runners), so forwarded-permission
+routing is unaffected; `scripts/pi-subagents-parent-forwarding-adapter.ts`
+remains only as a no-op shim for the 0.69.0-and-earlier line.
 
 Host requirement: these packages require Pi 0.86.0 or newer (the
 `peerDependencies` floor), which is therefore also the floor for protected mode

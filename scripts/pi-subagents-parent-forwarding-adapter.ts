@@ -16,9 +16,11 @@ type GateExtensionApi = {
  * process without touching a real inherited parent marker.
  *
  * pi-subagents passes the parent session id explicitly to every child launch;
- * the root-process environment copy is therefore unnecessary. Keeping it on
- * the root makes pi-permission-system classify that root as a child and stop
- * serving the forwarded-permission inbox.
+ * the root-process environment copy was therefore unnecessary. Keeping it on
+ * the root made pi-permission-system classify that root as a child and stop
+ * serving the forwarded-permission inbox. pi-subagents 0.70.0 deletes the
+ * marker itself during root `session_start`, so this adapter is a no-op there
+ * and only remains necessary for the 0.69.0-and-earlier line.
  */
 export function clearSelfReferentialParentSession(
   currentSessionId: string | null | undefined,
