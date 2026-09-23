@@ -114,6 +114,9 @@
     "get_search_content": "allow",
     "fetch_content": "ask",
     "plan_mode_question": "allow",
-    "plan_mode_complete": "allow"
+    "plan_mode_complete": "allow",
+    "goal_complete": "allow",
+    "obs_recall": "allow",
+    "pencil_read_skill": "allow"
   }
 }

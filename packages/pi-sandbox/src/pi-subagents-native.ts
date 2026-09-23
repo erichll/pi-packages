@@ -11,11 +11,14 @@ import { createJiti } from "jiti";
  * (`SUBAGENT_CAPABILITY_CEILING_VERSION` 1), the `./capability-ceiling` export,
  * discovery/canonical resolution, and the config loader with `scheduledRuns`
  * are unchanged since 0.66.0, and the published package now ships compiled
- * `.js`/`.d.ts` modules instead of the TypeScript source layout (verified
- * 2026-09-20 against the published 0.70.0 package). Protected mode needs Pi
- * 0.86.0 or newer (the package peer floor) with pi-subagents 0.68.0+: 0.85.0
- * does not ship `@earendil-works/pi-server`, so background children fail to
- * launch there.
+ * `.js`/`.d.ts` modules instead of the TypeScript source layout (revalidated
+ * 2026-09-23 against the published 0.71.0 package: the ceiling implementation
+ * and the config loader are byte-identical to 0.70.0, `discoverAgents` and
+ * `resolveAgentName` keep their signatures, and the `./capability-ceiling`
+ * export still resolves to `.js`). Protected mode needs Pi 0.86.0 or newer
+ * (the pi-subagents 0.68.0+ floor): 0.85.0 does not ship
+ * `@earendil-works/pi-server`, so background children fail to launch there.
+ * This package's own peer floor is Pi 0.87.1 (validated 2026-09-23).
  */
 export const PI_SUBAGENTS_COMPAT_RANGE = ">=0.66.0";
 export const NATIVE_CHILD_TOOLS = ["bash", "read", "grep", "find", "ls"] as const;

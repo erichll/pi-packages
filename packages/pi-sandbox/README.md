@@ -97,7 +97,7 @@ Supported modes:
 ### `pi-subagents` native-background tool boundary
 
 This provider supports the `pi-subagents >=0.66.0` line (validated through
-0.70.0) and fails closed if its public ceiling API, module layout, or internal
+0.71.0) and fails closed if its public ceiling API, module layout, or internal
 discovery layout drifts. The peer dependency is a floor with no upper pin; the
 loader's explicit export and layout checks are the real gate.
 Configure both the protection mode and a non-empty canonical whitelist:
@@ -284,7 +284,8 @@ capability ceiling, and protected launch policy in an isolated temporary agent
 directory. It never reads or updates production Pi configuration. Model-backed
 acceptance requires `PI_SUBAGENTS_GATE_MODEL` and an already-exported matching
 credential; missing prerequisites are reported as `SKIP`. Protected mode with
-pi-subagents 0.68.0 or newer needs Pi 0.86.0 or newer.
+pi-subagents 0.68.0 or newer needs Pi 0.86.0 or newer. The development
+baseline is validated against Pi 0.87.1.
 
 The test suite covers real Linux Sandbox Runtime enforcement when its native
 dependencies are installed, plus deterministic broker, network approval,

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.20.0 - 2026-09-23
+
+- Require Pi `^0.87.1` for the development and peer dependency of
+  `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` (validated
+  against the published 0.87.1 packages; `compat.d.ts`, the type surface this
+  package builds on, is unchanged from 0.86.1).
+- Validate against `@gotgenes/pi-permission-system` 33.0.8 (runtime peer stays
+  `>=30.0.0`); no rule-semantics change observed.
+- Upgrade the development `typescript` baseline: 7.0.2 was evaluated and kept
+  on 6.0.3 because TS7 (the native Go compiler) removes the stable
+  `transpileModule`/`ModuleKind` JS API used by `test/external-ts-loader.mjs`
+  to transpile `pi-permission-system`'s published `.ts` sources.
+- Sync `examples/pi-permission-system.config.example.json` with the live
+  policy (add `goal_complete`, `obs_recall`, `pencil_read_skill`).
+
 ## 0.19.0 - 2026-09-20
 
 - Require Pi `^0.86.0` for both the development and peer dependency of

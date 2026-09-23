@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.20.0 - 2026-09-23
+
+- Require Pi `^0.87.1` (development and peer) for `@earendil-works/
+  pi-coding-agent`, and upgrade the development `@earendil-works/pi-ai` and
+  `@earendil-works/pi-server` baselines to 0.87.1 (validated against the
+  published packages; type surface unchanged from 0.86.x).
+- Pin the development `pi-subagents` baseline to `^0.71.0`; the runtime peer
+  stays `>=0.66.0`. Revalidated protected native mode against published
+  0.71.0: the ceiling implementation (`SUBAGENT_CAPABILITY_CEILING_VERSION` 1)
+  and the config loader are byte-identical to 0.70.0, and `discoverAgents` /
+  `resolveAgentName` keep their signatures (the new `applyRuntimeAgentSettings`
+  and `completionGuard` removal do not touch validated agent fields). The
+  package test suite passes (89 pass, 1 skipped) and the deterministic
+  `gate:pi-subagents` preflight passes with `piSubagentsModuleExtension
+  ".js"`; the model-backed gate phase was skipped locally for lack of a
+  model credential.
+- Upgrade `@anthropic-ai/sandbox-runtime` from the exact `0.0.75` pin to
+  `^0.0.77` (adds `LinuxSandboxProfileError` exports and an `address` module;
+  `NetworkConfigSchema` surface unchanged).
+- Move the development `typebox` to `^1.3.34` (peer stays `>=1.0.0`).
+- Type checking and the full test suite pass on Pi 0.87.1; the development
+  `typescript` stays 6.0.3 (TS7 was evaluated and rejected, see the
+  pi-auto-review 0.20.0 notes).
+
 ## 0.19.1 - 2026-09-20
 
 - Pin the development `pi-subagents` baseline to `^0.70.0`. The runtime peer

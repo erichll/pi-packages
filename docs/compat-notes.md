@@ -2,7 +2,7 @@
 
 `@erichll/pi-sandbox` supports protected external orchestration on the
 `pi-subagents >=0.66.0` line: the peer dependency is a floor with no upper pin,
-and the development dependency is pinned to `^0.70.0`. The real gates are the
+and the development dependency is pinned to `^0.71.0` (validated on 0.71.0). The real gates are the
 `./capability-ceiling` export and the capability-ceiling API version, which the
 loader checks at load time; the version range only rejects old lines and guards
 against blind accept-on-drift. Any mismatch disables the whole mode rather than
@@ -37,7 +37,7 @@ default `builtin` provider for complete worker-process-tree isolation.
 
 ## Versioned seams
 
-| Seam | Status on the `>=0.66.0` line (validated on 0.70.0) | Verification |
+| Seam | Status on the `>=0.66.0` line (validated on 0.71.0) | Verification |
 | --- | --- | --- |
 | package version | must be `>=0.66.0`; below it the loader fails closed | runtime loader + deterministic gate |
 | `./capability-ceiling` export | public; expected path and API v1 | runtime loader + tests |
@@ -70,9 +70,9 @@ mode requires `async: true` children (detached runners), so forwarded-permission
 routing is unaffected; `scripts/pi-subagents-parent-forwarding-adapter.ts`
 remains only as a no-op shim for the 0.69.0-and-earlier line.
 
-Host requirement: these packages require Pi 0.86.0 or newer (the
-`peerDependencies` floor), which is therefore also the floor for protected mode
-with pi-subagents 0.68.0 or newer. Historically the floor was 0.85.1: Pi 0.85.0
+Host requirement: these packages require Pi 0.87.1 or newer (the
+`peerDependencies` floor, validated 2026-09-23). Historically the floor was
+0.86.0, and before that 0.85.1: Pi 0.85.0
 does not ship `@earendil-works/pi-server`, which 0.68.0 stopped bundling, so
 background children fail to launch there with an explicit error. The `builtin`
 provider is unaffected.
