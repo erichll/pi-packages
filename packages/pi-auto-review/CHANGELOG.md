@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.20.1 - 2026-09-24
+
+- Upgrade the development baseline for `@gotgenes/pi-permission-system` to
+  `^33.1.1` (the runtime peer remains `>=30.0.0`). Version 33.1 changes how
+  permission-system derives its authorizer tool surface and stop-gap
+  `before_agent_start` guidance, while retaining a fail-closed runtime peer
+  check and schema validation.
+- Upgrade the development `@types/node` baseline to `^26.6.2`; the resolved
+  version was already current under the previous range.
+- Keep `typescript` at `6.0.3`, the latest 6.x release. TypeScript 7.0.2
+  remains incompatible with the published-source transform used by the
+  permission-system integration tests.
+- Sync `examples/pi-permission-system.config.example.json` with the current
+  tool split: Pencil and `mcp__pencil`, `update_plan`, and the complete goal
+  lifecycle are explicitly allowed. The example passes the permission-system
+  33.1.1 runtime schema.
+- Type checking and the full package suite pass on the upgraded baselines
+  (186 tests).
+
 ## 0.20.0 - 2026-09-23
 
 - Require Pi `^0.87.1` for the development and peer dependency of

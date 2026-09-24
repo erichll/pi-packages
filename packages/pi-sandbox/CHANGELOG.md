@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.20.1 - 2026-09-24
+
+- Move `@anthropic-ai/sandbox-runtime` from `devDependencies` to runtime
+  `dependencies`. The extension imports the package while loading, so published
+  installs failed with `Cannot find module '@anthropic-ai/sandbox-runtime'`.
+- Pair this release with `@erichll/pi-auto-review` `^0.20.1`, whose development
+  baseline is upgraded to `@gotgenes/pi-permission-system` 33.1.1.
+- Upgrade the development `@types/node` baseline to `^26.6.2`; the resolved
+  version was already current under the previous range. `typescript` remains
+  6.0.3 because the 7.0.2 native compiler is incompatible with the
+  permission-system integration test transform.
+- Type checking and the full suite pass (89 pass, 1 environment-dependent
+  skip). The deterministic `gate:pi-subagents` preflight passes against
+  `pi-subagents` 0.71.0; the model-backed phase was not run because no matching
+  model credential was available in the current environment.
+
 ## 0.20.0 - 2026-09-23
 
 - Require Pi `^0.87.1` (development and peer) for `@earendil-works/

@@ -34,7 +34,7 @@
     "gate:pi-subagents": "node --experimental-strip-types scripts/pi-subagents-compat-gate.ts"
   },
   "devDependencies": {
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.6.2",
     "jiti": "^2.7.0",
     "typescript": "^6.0.3"
   }
