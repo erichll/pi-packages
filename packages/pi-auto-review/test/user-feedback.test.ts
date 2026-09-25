@@ -475,6 +475,29 @@ test("denials and confirmation waits stay until the next check", async () => {
   }
 });
 
+test("permissionDecision with allow schedules dismiss for deferred review widget", async () => {
+  const harness = widgetHarness("tui", 20);
+  const generation = harness.controller.begin("request-defer", harness.ctx as never, {
+    surface: "external_directory_read",
+    target: "/home/user/.pi",
+    model: "provider/reviewer",
+  });
+  const input = { outcome: "defer" as const, surface: "external_directory_read", target: "/home/user/.pi" };
+  harness.controller.complete(
+    "request-defer",
+    generation,
+    harness.ctx as never,
+    buildUserReviewNotice(input),
+    buildUserReviewWidgetData(input),
+  );
+  assert.notEqual(harness.widgets.at(-1)?.content, undefined);
+
+  // User allows in the prompt dialog -> broadcast permissions:decision with result: allow
+  harness.controller.permissionDecision({ requestId: "request-defer", result: "allow" });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(harness.widgets.at(-1)?.content, undefined);
+});
+
 test("a new check cancels a pending success dismiss", async () => {
   const harness = widgetHarness("tui", 30);
   const first = harness.controller.begin("request-a", harness.ctx as never, {

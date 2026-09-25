@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.21.0 - 2026-09-25
+
+- Raise the `@gotgenes/pi-permission-system` peer floor to `>=34.0.0` and update
+  the development baseline to `^34.0.0`. Version 34.0.0 introduces
+  syntax-level role projection for redirect targets so non-existent file
+  targets are governed by path rules without requiring pre-existence probes.
+- Automatically dismiss deferred and pending review widgets when explicit
+  user permission decisions (`permissions:decision` with `allow`) occur or when
+  a new agent turn begins (`turn_start`), preventing stale `deferred` notices
+  from lingering in the TUI indefinitely.
+- Unit tests added for deferred widget dismissal on local user confirmation.
+
 ## 0.20.1 - 2026-09-24
 
 - Upgrade the development baseline for `@gotgenes/pi-permission-system` to

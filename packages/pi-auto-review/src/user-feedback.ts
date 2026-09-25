@@ -779,10 +779,18 @@ export class UserReviewWidgetController {
     const record = event as Record<string, unknown>;
     const current = this.#current;
     if (
-      record.result !== "deny" ||
       typeof record.requestId !== "string" ||
       record.requestId !== current?.requestId ||
-      !current.data ||
+      !current.data
+    ) return;
+
+    if (record.result === "allow") {
+      this.#scheduleDismiss(current.generation, current.ctx);
+      return;
+    }
+
+    if (
+      record.result !== "deny" ||
       current.data.lines.includes("Local confirmation · denied")
     ) return;
     const data = {

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.21.0 - 2026-09-25
+
+- Support project-level configuration at `.pi/extensions/pi-sandbox/config.json`.
+  When present, project configuration is merged with global configuration:
+  array permissions (`additionalAllowRead`, `allowedDomains`, `deniedDomains`,
+  `preflightCommandPrefixes`) form deduplicated unions, and scalar settings
+  (`subagents.provider`, `hostIPC.mode`, `hostIPC.retryOnUnixSocketError`)
+  allow project-level overrides.
+- Harden project-level configuration: added `.pi/extensions/pi-sandbox/config.json`
+  to default sandbox `filesystem.denyWrite` policy. Project configuration is
+  strictly read-only for sandboxed execution processes.
+- Remove legacy configuration compatibility: removed fallback loading for
+  `~/.pi/agent/pi-sandbox.json` and dropped deprecated `externalWorkerIsolation`
+  migration parsing.
+- Pair with `@erichll/pi-auto-review` `^0.21.0`.
+
 ## 0.20.1 - 2026-09-24
 
 - Move `@anthropic-ai/sandbox-runtime` from `devDependencies` to runtime

@@ -9,10 +9,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
-  getLegacyPiSandboxConfigPath,
   getPiSandboxConfigPath,
+  getProjectPiSandboxConfigPath,
   loadPiSandboxConfig,
+  mergePiSandboxConfigs,
   parsePiSandboxConfig,
+  PROJECT_PI_SANDBOX_CONFIG_PATH,
 } from "../src/config.ts";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -32,14 +34,18 @@ function makeTempRoot(prefix: string): string {
   return mkdtempSync(join(parent, prefix));
 }
 
-test("uses the trusted extension-local configuration path", () => {
+test("uses the trusted extension-local configuration path and project path", () => {
   assert.equal(
     getPiSandboxConfigPath("/trusted-home"),
     "/trusted-home/.pi/agent/extensions/pi-sandbox/config.json",
   );
   assert.equal(
-    getLegacyPiSandboxConfigPath("/trusted-home"),
-    "/trusted-home/.pi/agent/pi-sandbox.json",
+    PROJECT_PI_SANDBOX_CONFIG_PATH,
+    join(".pi", "extensions", "pi-sandbox", "config.json"),
+  );
+  assert.equal(
+    getProjectPiSandboxConfigPath("/workspace"),
+    join("/workspace", ".pi", "extensions", "pi-sandbox", "config.json"),
   );
 });
 
@@ -63,8 +69,9 @@ test("defaults to the builtin provider when configuration is absent", () => {
   }
 });
 
-test("loads the extension-local config and falls back to the legacy path", () => {
+test("loads the extension-local config and supports project-level config merge", () => {
   const root = makeTempRoot("pi-sandbox-config-load-");
+  const workspace = makeTempRoot("pi-sandbox-project-");
   try {
     const modernPath = getPiSandboxConfigPath(root);
     mkdirSync(dirname(modernPath), { recursive: true });
@@ -72,6 +79,9 @@ test("loads the extension-local config and falls back to the legacy path", () =>
       modernPath,
       JSON.stringify({
         subagents: { provider: "off" },
+        filesystem: {
+          additionalAllowRead: ["/opt/global-bin"],
+        },
         network: {
           allowedDomains: ["github.com"],
           deniedDomains: ["uploads.github.com"],
@@ -79,9 +89,9 @@ test("loads the extension-local config and falls back to the legacy path", () =>
       }),
       "utf8",
     );
-    assert.deepEqual(loadPiSandboxConfig({ home: root }), {
+    assert.deepEqual(loadPiSandboxConfig({ home: root, cwd: workspace }), {
       subagents: { provider: "off" },
-      filesystem: { additionalAllowRead: [] },
+      filesystem: { additionalAllowRead: ["/opt/global-bin"] },
       network: {
         allowedDomains: ["github.com"],
         deniedDomains: ["uploads.github.com"],
@@ -89,39 +99,45 @@ test("loads the extension-local config and falls back to the legacy path", () =>
       hostIPC: defaultHostIPC,
     });
 
-    rmSync(modernPath, { force: true });
-    const legacyPath = getLegacyPiSandboxConfigPath(root);
-    mkdirSync(dirname(legacyPath), { recursive: true });
+    const projectPath = getProjectPiSandboxConfigPath(workspace);
+    mkdirSync(dirname(projectPath), { recursive: true });
     writeFileSync(
-      legacyPath,
+      projectPath,
       JSON.stringify({
-        subagents: {
-          provider: "pi-subagents",
-          protection: "native-background-tools",
-          allowedNativeAgents: ["worker"],
+        filesystem: {
+          additionalAllowRead: ["/home/erich/.pi", "/opt/global-bin"],
         },
         network: {
-          allowedDomains: ["github.com"],
-          deniedDomains: ["uploads.github.com"],
+          allowedDomains: ["api.example.com", "github.com"],
+        },
+        hostIPC: {
+          mode: "ask",
+          preflightCommandPrefixes: ["tmux"],
+          retryOnUnixSocketError: true,
         },
       }),
       "utf8",
     );
-    assert.deepEqual(loadPiSandboxConfig({ home: root }), {
-      subagents: {
-        provider: "pi-subagents",
-        protection: "native-background-tools",
-        allowedNativeAgents: ["worker"],
+
+    const merged = loadPiSandboxConfig({ home: root, cwd: workspace });
+    assert.deepEqual(merged, {
+      subagents: { provider: "off" },
+      filesystem: {
+        additionalAllowRead: ["/opt/global-bin", "/home/erich/.pi"],
       },
-      filesystem: { additionalAllowRead: [] },
       network: {
-        allowedDomains: ["github.com"],
+        allowedDomains: ["github.com", "api.example.com"],
         deniedDomains: ["uploads.github.com"],
       },
-      hostIPC: defaultHostIPC,
+      hostIPC: {
+        mode: "ask",
+        preflightCommandPrefixes: ["tmux"],
+        retryOnUnixSocketError: true,
+      },
     });
   } finally {
     rmSync(root, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
   }
 });
 
@@ -165,10 +181,6 @@ test("pi-subagents requires native background protection and a canonical whiteli
   assert.throws(
     () => parsePiSandboxConfig({ subagents: { provider: "builtin", protection: "native-background-tools", allowedNativeAgents: ["worker"] } }),
     /only valid with provider 'pi-subagents'/,
-  );
-  assert.throws(
-    () => parsePiSandboxConfig({ subagents: { provider: "pi-subagents", externalWorkerIsolation: "enforce" } }),
-    /externalWorkerIsolation was removed.*migrate/s,
   );
 });
 
@@ -379,3 +391,34 @@ test("rejects malformed configuration instead of using defaults", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("mergePiSandboxConfigs correctly merges array unions and scalar overrides", () => {
+  const base = parsePiSandboxConfig({
+    subagents: { provider: "builtin" },
+    filesystem: { additionalAllowRead: ["/base/read"] },
+    network: { allowedDomains: ["base.com"], deniedDomains: ["bad.base.com"] },
+    hostIPC: { mode: "off", preflightCommandPrefixes: ["ls"], retryOnUnixSocketError: false },
+  });
+  const project = parsePiSandboxConfig({
+    subagents: {
+      provider: "pi-subagents",
+      protection: "native-background-tools",
+      allowedNativeAgents: ["worker"],
+    },
+    filesystem: { additionalAllowRead: ["/project/read", "/base/read"] },
+    network: { allowedDomains: ["project.com"], deniedDomains: [] },
+    hostIPC: { mode: "ask", preflightCommandPrefixes: ["tmux"], retryOnUnixSocketError: true },
+  });
+
+  const merged = mergePiSandboxConfigs(base, project);
+  assert.equal(merged.subagents.provider, "pi-subagents");
+  assert.equal(merged.subagents.protection, "native-background-tools");
+  assert.deepEqual(merged.subagents.allowedNativeAgents, ["worker"]);
+  assert.deepEqual(merged.filesystem.additionalAllowRead, ["/base/read", "/project/read"]);
+  assert.deepEqual(merged.network.allowedDomains, ["base.com", "project.com"]);
+  assert.deepEqual(merged.network.deniedDomains, ["bad.base.com"]);
+  assert.equal(merged.hostIPC.mode, "ask");
+  assert.deepEqual(merged.hostIPC.preflightCommandPrefixes, ["ls", "tmux"]);
+  assert.equal(merged.hostIPC.retryOnUnixSocketError, true);
+});
+

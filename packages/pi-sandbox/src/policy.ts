@@ -10,7 +10,10 @@ import {
 } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
-import type { NetworkConfig } from "./config.ts";
+import {
+  PROJECT_PI_SANDBOX_CONFIG_PATH,
+  type NetworkConfig,
+} from "./config.ts";
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const NODE_INSTALL_ROOT = dirname(dirname(process.execPath));
@@ -248,6 +251,7 @@ export function createDefaultPolicy(
       allowWrite: [workspace, "/dev/null"],
       denyWrite: [
         join(workspace, ".pi", "pi-auto-review.json"),
+        join(workspace, PROJECT_PI_SANDBOX_CONFIG_PATH),
         join(home, ".pi", "agent", "logs"),
         // Prevent the sandbox from installing or rewriting trusted extensions
         // (includes ~/.pi/agent/extensions/pi-sandbox/config.json).

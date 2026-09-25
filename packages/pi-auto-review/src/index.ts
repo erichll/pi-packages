@@ -241,6 +241,9 @@ export function createPiAutoReviewExtension(
     pi.on("ui_prompt_end", () => {
       reviewWidget.promptEnd();
     });
+    pi.on("turn_start", () => {
+      reviewWidget.clear(context);
+    });
   } catch {
     // Older pi: widget behavior is unchanged.
   }

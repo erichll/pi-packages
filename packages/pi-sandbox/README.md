@@ -71,12 +71,7 @@ macOS uses built-in Seatbelt support but still requires `ripgrep`.
 
 ## Subagent provider
 
-The provider is selected only from the trusted global file
-`~/.pi/agent/extensions/pi-sandbox/config.json`:
-
-If that file is missing, `pi-sandbox` still loads the legacy path
-`~/.pi/agent/pi-sandbox.json` when present. Prefer the extension-local path for
-new installs.
+The provider is selected from the configuration (`~/.pi/agent/extensions/pi-sandbox/config.json` globally or `.pi/extensions/pi-sandbox/config.json` project-locally):
 
 ```json
 {
@@ -141,14 +136,13 @@ Before a release, run the deterministic and model-backed portions of
 verified on upgrade.
 
 The configuration parser rejects malformed JSON, unknown fields, and unknown
-providers instead of silently weakening isolation. All legacy
-`externalWorkerIsolation` configurations produce a migration error.
+providers instead of silently weakening isolation.
 
 ## Network domain policy
 
-Persistent domain authorization is accepted only from the trusted global
-`~/.pi/agent/extensions/pi-sandbox/config.json` (or its legacy trusted fallback
-when the new file is absent). Project configuration cannot override it.
+Domain authorization can be configured globally at
+`~/.pi/agent/extensions/pi-sandbox/config.json` or project-locally at
+`.pi/extensions/pi-sandbox/config.json` (merged with union semantics):
 
 ```json
 {
@@ -255,9 +249,23 @@ Persistent built-in sessions support `start`, `follow_up`, `wait`, `status`,
 `stop`, and nested `handoff` operations. At most four sessions are live at
 once, and nesting depth is capped at three.
 
-## Installation
+## Project-level configuration and read-only protection
 
-Load `pi-auto-review` first so its broker is available:
+In addition to user-level configuration at `~/.pi/agent/extensions/pi-sandbox/config.json`,
+`pi-sandbox` supports project-level configuration placed at:
+
+```
+.pi/extensions/pi-sandbox/config.json
+```
+
+When present, project configuration is merged with global configuration:
+- Array policies (`additionalAllowRead`, `allowedDomains`, `deniedDomains`, `preflightCommandPrefixes`) form a deduplicated union.
+- Scalar settings (`provider`, `mode`, `retryOnUnixSocketError`) allow project-level overrides.
+
+**Read-only Security Guarantee**:
+Project-level configuration is explicitly protected in the sandbox policy (`denyWrite`),
+meaning sandboxed tasks can read `.pi/extensions/pi-sandbox/config.json` but can never
+tamper with or overwrite it from within the sandbox.
 
 ```bash
 pi install npm:@erichll/pi-auto-review

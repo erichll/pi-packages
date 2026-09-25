@@ -218,7 +218,8 @@ async function performRegistration(
   options: PiSandboxExtensionOptions,
 ): Promise<void> {
   let currentTurn = 0;
-  const config = loadPiSandboxConfig();
+  const cwd = process.cwd();
+  const config = loadPiSandboxConfig({ cwd });
   const subagentProvider =
     options.subagentProvider ?? config.subagents.provider;
   const isNativeSubagentChild = process.env.PI_SUBAGENT_CHILD === "1";
@@ -246,7 +247,6 @@ async function performRegistration(
           maxDepth: 3,
         }))
       : undefined;
-  const cwd = process.cwd();
   let capabilityCeiling: CapabilityCeilingHandle | undefined;
   let validatedNativeAgents: string[] = [];
   const localBash = createBashToolDefinition(cwd);

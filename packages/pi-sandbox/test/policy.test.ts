@@ -37,6 +37,11 @@ test("the default policy limits writes and protects sandbox configuration", () =
   );
   assert.ok(
     policy.filesystem.denyWrite.includes(
+      "/workspace/project/.pi/extensions/pi-sandbox/config.json",
+    ),
+  );
+  assert.ok(
+    policy.filesystem.denyWrite.includes(
       join(homedir(), ".pi", "agent", "extensions"),
     ),
   );
