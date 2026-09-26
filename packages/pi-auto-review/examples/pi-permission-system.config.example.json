@@ -92,6 +92,9 @@
       "pip upload*": "ask",
       "gh release create*": "ask"
     },
+    "skill": {
+      "*": "allow"
+    },
     "mcp": {
       "*": "ask",
       "mcp_status": "allow",
@@ -105,23 +108,22 @@
       "pencil": "allow",
       "pencil_*": "allow"
     },
-    "skill": {
-      "*": "allow"
-    },
-    "ask_user": "allow",
     "mcpScript": "allow",
     "mcp__atlassian": "allow",
     "mcp__pencil": "allow",
+    "ask_user": "allow",
     "todo": "allow",
-    "web_search": "allow",
-    "get_search_content": "allow",
-    "fetch_content": "ask",
     "plan_mode_question": "allow",
     "plan_mode_complete": "allow",
     "update_plan": "allow",
+    "web_search": "allow",
+    "get_search_content": "allow",
+    "source_check": "allow",
+    "fetch_content": "allow",
     "goal_complete": "allow",
-    "goal_block": "allow",
+    "goal_blocked": "allow",
     "goal_wait": "allow",
-    "obs_recall": "allow"
+    "obs_recall": "allow",
+    "subagent": "allow"
   }
 }
