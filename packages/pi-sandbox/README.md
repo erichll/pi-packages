@@ -94,7 +94,10 @@ Supported modes:
 This provider supports the `pi-subagents >=0.66.0` line (validated through
 0.71.0) and fails closed if its public ceiling API, module layout, or internal
 discovery layout drifts. The peer dependency is a floor with no upper pin; the
-loader's explicit export and layout checks are the real gate.
+loader's explicit export and layout checks are the real gate. The loader also
+aliases `@earendil-works/pi-tui`, a host peer that the `pi-subagents` internals
+import but do not ship, to the copy inside the running Pi package, so installs
+where it is not hoisted next to the extension still load.
 Configure both the protection mode and a non-empty canonical whitelist:
 
 ```json

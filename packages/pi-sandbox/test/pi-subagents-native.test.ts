@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { realpath } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
+import { createJiti } from "jiti";
 import {
+  findPiPackageRootFromEntry,
   hasSandboxAcknowledgement,
   isCompatiblePiSubagentsVersion,
   loadPiSubagentsNativeRuntime,
@@ -11,6 +16,7 @@ import {
   NATIVE_CHILD_TOOLS,
   PI_SANDBOX_ACKNOWLEDGEMENT,
   piSubagentsInternalModulePath,
+  resolvePiSubagentsHostAliases,
   resolvePiSubagentsModuleExtension,
   terminalChildrenHaveSandboxAcknowledgement,
 } from "../src/pi-subagents-native.ts";
@@ -99,6 +105,69 @@ test("package layout resolution accepts the source and compiled module layouts",
       () => resolvePiSubagentsModuleExtension(drift as never),
       /capability-ceiling export changed/,
     );
+  }
+});
+
+test("host alias resolution prefers the running Pi package and degrades without one", async () => {
+  const piEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
+  const piRoot = await findPiPackageRootFromEntry(piEntry);
+  assert.ok(piRoot, "the development @earendil-works/pi-coding-agent install must resolve");
+  assert.equal(await findPiPackageRootFromEntry(tmpdir()), undefined);
+
+  const aliases = await resolvePiSubagentsHostAliases({
+    entry: piEntry,
+    moduleUrl: "file:///nonexistent/pi-sandbox-module.ts",
+    env: {},
+  });
+  const tui = aliases["@earendil-works/pi-tui"];
+  assert.ok(tui, "pi-tui must be aliased from the running Pi package");
+  assert.equal(
+    tui,
+    await realpath(createRequire(join(piRoot, "package.json")).resolve("@earendil-works/pi-tui")),
+    "the alias must point at the pi-tui copy the host loader would use",
+  );
+
+  assert.deepEqual(
+    await resolvePiSubagentsHostAliases({
+      entry: tmpdir(),
+      moduleUrl: "file:///nonexistent/pi-sandbox-module.ts",
+      env: {},
+    }),
+    {},
+    "an unresolvable host must leave resolution to jiti so the load error stays explicit",
+  );
+});
+
+test("host aliases resolve pi-tui where the extension tree alone cannot", async () => {
+  const aliases = await resolvePiSubagentsHostAliases({
+    entry: fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")),
+    moduleUrl: "file:///nonexistent/pi-sandbox-module.ts",
+    env: {},
+  });
+  assert.ok(Object.keys(aliases).length > 0);
+
+  // An isolated tree with no @earendil-works/pi-tui anywhere above it, like an
+  // installed extension whose pi-tui peer was never hoisted next to it.
+  const root = mkdtempSync(join(tmpdir(), "pi-sandbox-host-alias-"));
+  try {
+    writeFileSync(join(root, "package.json"), JSON.stringify({ type: "module" }));
+    const consumer = join(root, "consumer.js");
+    writeFileSync(consumer, [
+      'import { Key } from "@earendil-works/pi-tui";',
+      'export const hasKey = typeof Key !== "undefined";',
+    ].join("\n"));
+    const consumerUrl = pathToFileURL(consumer).href;
+    const options = { interopDefault: false, fsCache: false } as const;
+    await assert.rejects(
+      createJiti(consumerUrl, options).import(consumerUrl),
+      /@earendil-works\/pi-tui/,
+    );
+    const module = (await createJiti(consumerUrl, { ...options, alias: aliases }).import(
+      consumerUrl,
+    )) as { hasKey?: unknown };
+    assert.equal(module.hasKey, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

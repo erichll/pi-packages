@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createJiti } from "jiti";
@@ -23,6 +24,10 @@ import { createJiti } from "jiti";
 export const PI_SUBAGENTS_COMPAT_RANGE = ">=0.66.0";
 export const NATIVE_CHILD_TOOLS = ["bash", "read", "grep", "find", "ls"] as const;
 export const PI_SANDBOX_ACKNOWLEDGEMENT = "@erichll:pi-sandbox";
+
+const HOST_PI_PACKAGE = "@earendil-works/pi-coding-agent";
+/** Host peer that pi-subagents' internal modules import but that is not installed next to it. */
+const HOST_PI_TUI_PACKAGE = "@earendil-works/pi-tui";
 
 /**
  * Module extension of the installed pi-subagents layout. Source checkouts (and
@@ -142,6 +147,89 @@ export function piSubagentsInternalModulePath(
   return `${relativePath.replace(/\.(?:ts|js)$/u, "")}${extension}`;
 }
 
+async function readPackageName(dir: string): Promise<string | undefined> {
+  try {
+    const manifest = JSON.parse(
+      await readFile(join(dir, "package.json"), "utf8"),
+    ) as { name?: unknown };
+    return typeof manifest?.name === "string" ? manifest.name : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Walk up from a Pi entry script (or a Pi package directory) to the running
+ * `@earendil-works/pi-coding-agent` root. Returns undefined for launchers whose
+ * entry is not a real file (compiled binaries, embedded SDK hosts).
+ */
+export async function findPiPackageRootFromEntry(
+  entryPath: string,
+): Promise<string | undefined> {
+  let dir = entryPath;
+  for (;;) {
+    if ((await readPackageName(dir)) === HOST_PI_PACKAGE) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
+}
+
+function resolveFrom(base: string, specifier: string): string | undefined {
+  try {
+    return createRequire(base).resolve(specifier);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Alias map for the jiti instance that loads pi-subagents internals.
+ *
+ * pi-subagents imports `@earendil-works/pi-tui` from its internal modules but,
+ * as a peer dependency, does not ship it. Pi's own extension loader aliases that
+ * specifier to the copy inside the running Pi package (`getAliases()` in the
+ * host loader), so extensions loaded by Pi resolve it; our jiti instance is a
+ * separate resolver and would otherwise fall back to plain Node resolution,
+ * which fails for installs where pi-tui is neither hoisted next to the
+ * extension nor installed beside `@earendil-works/pi-subagents`.
+ *
+ * The alias is computed host-first so the loaded modules share the host's
+ * pi-tui instance, and degrades to an empty map when no copy is reachable: the
+ * hard failure then stays the explicit compatibility error raised on load.
+ */
+export async function resolvePiSubagentsHostAliases(
+  options: { entry?: string; moduleUrl?: string; env?: Record<string, string | undefined> } = {},
+): Promise<Record<string, string>> {
+  const bases: string[] = [];
+  const entry = options.entry ?? process.argv[1];
+  if (entry) {
+    const realEntry = await realpath(entry).catch(() => undefined);
+    const root = realEntry
+      ? await findPiPackageRootFromEntry(realEntry)
+      : undefined;
+    if (root) bases.push(join(root, "package.json"));
+  }
+  const packageDir = (options.env ?? process.env).PI_PACKAGE_DIR?.trim();
+  if (packageDir && (await readPackageName(packageDir)) === HOST_PI_PACKAGE) {
+    bases.push(join(packageDir, "package.json"));
+  }
+  // Extension-local resolution: the development checkout and installs that
+  // provide pi-tui beside the extension or beside pi-subagents.
+  bases.push(options.moduleUrl ?? import.meta.url);
+
+  const seen = new Set<string>();
+  for (const base of bases) {
+    if (seen.has(base)) continue;
+    seen.add(base);
+    const resolved = resolveFrom(base, HOST_PI_TUI_PACKAGE);
+    if (!resolved) continue;
+    const target = await realpath(resolved).catch(() => resolved);
+    return { [HOST_PI_TUI_PACKAGE]: target };
+  }
+  return {};
+}
+
 /** Load the public ceiling API and the discovery/config internals.
  * This intentionally fails closed on package version, export, or layout drift.
  */
@@ -163,6 +251,7 @@ export async function loadPiSubagentsNativeRuntime(
   const jiti = createJiti(import.meta.url, {
     interopDefault: false,
     fsCache: false,
+    alias: await resolvePiSubagentsHostAliases(),
   });
   const internal = (relative: string): string =>
     pathToFileURL(join(root, piSubagentsInternalModulePath(relative, extension))).href;

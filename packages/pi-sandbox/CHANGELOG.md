@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.21.1 - 2026-09-26
+
+- Alias `@earendil-works/pi-tui` for the `jiti` instance that loads the
+  `pi-subagents` internals. `pi-subagents` imports that host peer from its
+  internal modules but does not ship it, and Pi's own extension loader aliases
+  it to the copy inside the running Pi package. The protected-mode loader
+  created its own `jiti` instance without that alias, so installs where the peer
+  is not hoisted next to the extension (for example the global
+  `~/.pi/agent/npm` tree) failed to load as soon as `subagents.provider` was
+  `pi-subagents` with `pi-subagents compatibility failure: Cannot find module
+  '@earendil-works/pi-tui'`. The alias is computed host-first from the running Pi
+  package (`process.argv[1]`, `PI_PACKAGE_DIR`) and falls back to plain
+  resolution from the extension tree; an unresolvable host peer still fails
+  closed with that explicit error.
+- Add regression coverage for host alias resolution, including a `jiti` load in
+  a tree where `@earendil-works/pi-tui` is unreachable without the alias.
+
 ## 0.21.0 - 2026-09-25
 
 - Support project-level configuration at `.pi/extensions/pi-sandbox/config.json`.

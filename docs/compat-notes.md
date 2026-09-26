@@ -42,6 +42,7 @@ default `builtin` provider for complete worker-process-tree isolation.
 | package version | must be `>=0.66.0`; below it the loader fails closed | runtime loader + deterministic gate |
 | `./capability-ceiling` export | public; expected path and API v1 | runtime loader + tests |
 | module layout | `.ts` source (0.66.0-0.69.0) or compiled `.js`/`.d.ts` (0.70.0+) under `src/`, same relative paths | runtime loader + tests |
+| host peer `@earendil-works/pi-tui` | imported by the internal modules but not shipped by pi-subagents; aliased from the running Pi package | runtime loader + tests |
 | `src/agents/agents.<ext>` | internal discovery and canonical resolution | runtime loader + tests |
 | `src/extension/config.<ext>` | internal config loader | runtime loader + tests |
 | child acknowledgement | event `subagent:acknowledge-extension` | unit/model gate |
@@ -80,6 +81,22 @@ provider is unaffected.
 The old `PI_SUBAGENT_PI_BINARY`, external launcher/supervisor, external network
 transport, and FleetView seams were removed because the native-background
 children they targeted no longer use that process-launch contract.
+
+## Host peer resolution
+
+`pi-subagents` imports `@earendil-works/pi-tui` from the internal modules this
+loader loads (`src/extension/config.<ext>` among them) but, as a host peer, does
+not ship it. Pi's own extension loader aliases that specifier to the copy inside
+the running Pi package, and the protected-mode loader creates its own `jiti`
+instance, so it computes the same alias from the host package root discovered
+through `process.argv[1]` (or `PI_PACKAGE_DIR`, which Pi honors for Nix/Guix
+store paths), then falls back to plain Node resolution from the extension tree.
+Without it, installs where the peer is not hoisted next to the extension - for
+example `~/.pi/agent/npm/node_modules` - fail to load with `pi-subagents
+compatibility failure: Cannot find module '@earendil-works/pi-tui'`. An
+unresolvable host peer leaves resolution to `jiti` and keeps that explicit
+failure, so protected mode requires `@earendil-works/pi-tui` to be reachable
+from either the running Pi install or the extension tree.
 
 ## Upgrade procedure
 
