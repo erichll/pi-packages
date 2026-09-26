@@ -1,0 +1,30 @@
+{
+  "subagents": {
+    "provider": "builtin"
+  },
+  "filesystem": {
+    "additionalAllowRead": [
+      "/tmp"
+    ]
+  },
+  "network": {
+    "allowedDomains": [
+      "*.npmjs.org",
+      "github.com",
+      "*.github.com",
+      "*.githubusercontent.com"
+    ],
+    "deniedDomains": [
+      "*:22",
+      "*:21",
+      "*:3389"
+    ]
+  },
+  "hostIPC": {
+    "mode": "ask",
+    "preflightCommandPrefixes": [
+      "tmux"
+    ],
+    "retryOnUnixSocketError": true
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "subagents": {
+    "provider": "pi-subagents",
+    "protection": "native-background-tools",
+    "allowedNativeAgents": [
+      "worker",
+      "reviewer",
+      "scout",
+      "researcher",
+      "delegate"
+    ]
+  },
+  "filesystem": {
+    "additionalAllowRead": [
+      "/tmp"
+    ]
+  },
+  "network": {
+    "allowedDomains": [
+      "*.npmjs.org",
+      "github.com",
+      "*.github.com",
+      "*.githubusercontent.com"
+    ],
+    "deniedDomains": [
+      "*:22",
+      "*:21",
+      "*:3389"
+    ]
+  },
+  "hostIPC": {
+    "mode": "ask",
+    "preflightCommandPrefixes": [
+      "tmux"
+    ],
+    "retryOnUnixSocketError": true
+  }
+}
