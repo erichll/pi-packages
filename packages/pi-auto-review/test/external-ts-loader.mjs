@@ -3,11 +3,11 @@
 // ships its runtime as .ts sources that also use extensionless relative
 // imports. This hook scopes both jobs to node_modules only:
 //   - resolve: retry extensionless relative specifiers with ".ts"
-//   - load: transpile .ts sources via the typescript devDependency
+//   - load: strip .ts sources with Node's built-in stripTypeScriptTypes
 // Everything else (our own src/ and test/) runs through Node's native
 // TypeScript transform, so local code pays no transpilation cost.
 import { readFile } from "node:fs/promises";
-import ts from "typescript";
+import { stripTypeScriptTypes } from "node:module";
 
 const isExternal = (url) => url.includes("/node_modules/");
 const isExternalTypeScript = (url) => isExternal(url) && url.endsWith(".ts");
@@ -34,13 +34,6 @@ export async function load(url, context, nextLoad) {
   return {
     format: "module",
     shortCircuit: true,
-    source: ts.transpileModule(source, {
-      compilerOptions: {
-        module: ts.ModuleKind.ESNext,
-        target: ts.ScriptTarget.ES2022,
-        verbatimModuleSyntax: true,
-      },
-      fileName: new URL(url).pathname,
-    }).outputText,
+    source: stripTypeScriptTypes(source, { mode: "transform" }),
   };
 }
