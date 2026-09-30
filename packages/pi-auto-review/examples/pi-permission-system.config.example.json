@@ -95,22 +95,10 @@
     "skill": {
       "*": "allow"
     },
-    "mcp": {
-      "*": "ask",
-      "mcp_status": "allow",
-      "mcp_list": "allow",
-      "mcp_search": "allow",
-      "mcp_describe": "allow",
-      "atlassian:*": "allow",
-      "atlassian_*": "allow",
-      "jira_*": "allow",
-      "confluence_*": "allow",
-      "pencil": "allow",
-      "pencil_*": "allow"
-    },
-    "mcpScript": "allow",
-    "mcp__atlassian": "allow",
-    "mcp__pencil": "allow",
+    "codemode": "allow",
+    "tool_search": "allow",
+    "mcp__atlassian__*": "allow",
+    "mcp__pencil__*": "allow",
     "ask_user": "allow",
     "todo": "allow",
     "plan_mode_question": "allow",
