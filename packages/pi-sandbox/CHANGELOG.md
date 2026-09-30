@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Fix Bun-compiled Pi launching itself with the Sandbox Runtime broker path as
+  a prompt (#7). Standalone hosts now resolve a separate Node executable from
+  absolute `PATH` entries and use JSON IPC; missing Node fails closed.
+- Launch built-in subagents directly through the standalone Pi executable, and
+  resolve the host's CLI symlink for Node-based Pi.
+- Protect standalone executables individually and derive runtime permissions
+  from the actual Node installation, avoiding root read grants and directory-wide
+  write denials when Pi is installed at a path such as `/tmp/pi-bun`.
+- Clean up command temp directories when broker startup throws, and add a
+  regression test that compiles and runs real Pi when Bun is available.
+
 ## 0.22.0 - 2026-09-30
 
 - Raise the `@earendil-works/pi-coding-agent` peer floor to `^0.99.1` and the

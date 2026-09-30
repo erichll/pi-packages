@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Writable } from "node:stream";
 import type { NetworkEndpoint } from "./approval.ts";
+import { isStandaloneExecutable, type RuntimeProcess } from "./runtime.ts";
 import {
   runSandboxedCommand,
   type SandboxCommandOptions,
@@ -201,19 +203,30 @@ export function validateSubagentModel(
   };
 }
 
-export function resolvePiInvocation(): ProcessInvocation {
-  const currentEntry = process.argv[1];
+export function resolvePiInvocation(host: RuntimeProcess = process): ProcessInvocation {
+  if (isStandaloneExecutable(host)) {
+    return { command: host.execPath, args: [] };
+  }
+  let currentEntry = host.argv[1];
+  if (currentEntry) {
+    try {
+      // npm's `pi` executable is usually a symlink to the host's cli.js.
+      currentEntry = realpathSync(currentEntry);
+    } catch {
+      // Preserve source/virtual entries that cannot be canonicalized.
+    }
+  }
   if (
     currentEntry &&
     /(?:^|[/\\])cli\.(?:js|mjs|cjs|ts)$/.test(currentEntry)
   ) {
-    return { command: process.execPath, args: [currentEntry] };
+    return { command: host.execPath, args: [currentEntry] };
   }
   const packageEntry = fileURLToPath(
     import.meta.resolve("@earendil-works/pi-coding-agent"),
   );
   return {
-    command: process.execPath,
+    command: host.execPath,
     args: [join(dirname(packageEntry), "cli.js")],
   };
 }

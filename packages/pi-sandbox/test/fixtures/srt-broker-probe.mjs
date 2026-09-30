@@ -8,6 +8,10 @@ process.on("message", (message) => {
     JSON.stringify({
       allowWrite,
       allowRead,
+      execPath: process.execPath,
+      pid: process.pid,
+      ppid: process.ppid,
+      argv: process.argv,
       network: message.runtimeConfig.network,
       tmpdirEnv: process.env.PI_SANDBOX_TMPDIR ?? "",
       sandboxRuntimeTmpdirEnv: process.env.CLAUDE_CODE_TMPDIR ?? "",

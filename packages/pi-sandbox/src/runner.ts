@@ -11,6 +11,7 @@ import type { Writable } from "node:stream";
 import { getShellConfig } from "@earendil-works/pi-coding-agent";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import type { NetworkEndpoint } from "./approval.ts";
+import { resolveBrokerExecPath } from "./runtime.ts";
 import {
   createDefaultPolicy,
   toSandboxRuntimeConfig,
@@ -173,7 +174,10 @@ function spawnBroker(
     cwd: options.cwd,
     detached: true,
     env,
+    execPath: resolveBrokerExecPath(env),
     execArgv: broker.execArgv ?? [],
+    // Bun's default IPC serialization is incompatible with a Node child.
+    serialization: "json",
     stdio: ["pipe", "pipe", "pipe", "ipc"],
   };
   return fork(broker.modulePath, [], forkOptions);
@@ -206,12 +210,14 @@ export async function runSandboxedCommand(
       [SANDBOX_RUNTIME_TMPDIR_ENV]: tempDir,
     };
   }
-  const broker = spawnBroker(options, brokerEnv);
+  let broker: ChildProcess | undefined;
   let timeoutHandle: NodeJS.Timeout | undefined;
   let timedOut = false;
   let onAbort: (() => void) | undefined;
 
   try {
+    broker = spawnBroker(options, brokerEnv);
+    const child = broker;
     broker.stdout?.on("data", (data: Buffer) => {
       options.onData(data);
       options.onStdout?.(data);
@@ -222,7 +228,7 @@ export async function runSandboxedCommand(
     });
     broker.on("message", (message: unknown) => {
       if (!isNetworkRequest(message)) return;
-      void answerNetworkRequest(broker, message, options);
+      void answerNetworkRequest(child, message, options);
     });
 
     const init: BrokerInitMessage = {
@@ -242,18 +248,18 @@ export async function runSandboxedCommand(
       broker.stdin?.end();
     }
 
-    onAbort = () => killProcessTree(broker);
+    onAbort = () => killProcessTree(child);
     options.signal?.addEventListener("abort", onAbort, { once: true });
     if (options.timeout !== undefined && options.timeout > 0) {
       timeoutHandle = setTimeout(() => {
         timedOut = true;
-        killProcessTree(broker);
+        killProcessTree(child);
       }, options.timeout * 1_000);
     }
 
     const exitCode = await new Promise<number | null>((resolve, reject) => {
-      broker.once("error", reject);
-      broker.once("exit", resolve);
+      child.once("error", reject);
+      child.once("exit", resolve);
     });
     if (options.signal?.aborted) throw new Error("aborted");
     if (timedOut) throw new Error(`timeout:${options.timeout}`);
@@ -261,7 +267,7 @@ export async function runSandboxedCommand(
   } finally {
     if (timeoutHandle) clearTimeout(timeoutHandle);
     if (onAbort) options.signal?.removeEventListener("abort", onAbort);
-    if (broker.exitCode === null && broker.signalCode === null) {
+    if (broker && broker.exitCode === null && broker.signalCode === null) {
       killProcessTree(broker);
     }
     if (tempDir) {

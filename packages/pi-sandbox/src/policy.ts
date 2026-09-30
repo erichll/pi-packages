@@ -10,13 +10,13 @@ import {
 } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
+import { runtimeFilesystemPaths } from "./runtime.ts";
 import {
   PROJECT_PI_SANDBOX_CONFIG_PATH,
   type NetworkConfig,
 } from "./config.ts";
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const NODE_INSTALL_ROOT = dirname(dirname(process.execPath));
 const SANDBOX_RUNTIME_ROOT = dirname(
   dirname(
     fileURLToPath(import.meta.resolve("@anthropic-ai/sandbox-runtime")),
@@ -231,6 +231,7 @@ export function createDefaultPolicy(
 ): SandboxPolicy {
   const workspace = resolve(cwd);
   const home = resolve(homedir());
+  const runtimePaths = runtimeFilesystemPaths();
   const denyRead = home === parse(home).root ? [] : [home];
   const packageRelative = relative(workspace, PACKAGE_ROOT);
   const packageIsInWorkspace =
@@ -241,7 +242,7 @@ export function createDefaultPolicy(
       denyRead,
       allowRead: [
         workspace,
-        NODE_INSTALL_ROOT,
+        ...runtimePaths.allowRead,
         SANDBOX_RUNTIME_ROOT,
         join(home, ".gitconfig"),
         join(home, ".config", "git", "config"),
@@ -265,7 +266,7 @@ export function createDefaultPolicy(
           "config.json",
         ),
         ...(packageIsInWorkspace ? [] : [PACKAGE_ROOT]),
-        dirname(process.execPath),
+        ...runtimePaths.denyWrite,
         ...createWorkspaceSecretDenyWritePaths(workspace),
       ],
     },

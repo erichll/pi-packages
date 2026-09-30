@@ -69,6 +69,12 @@ configure an AppArmor profile for bubblewrap or disable
 
 macOS uses built-in Seatbelt support but still requires `ripgrep`.
 
+For Bun-compiled standalone Pi, install **Node.js >=22.19.0** and include its
+`bin` directory as an absolute entry on `PATH`. The sandbox broker runs in that
+separate Node process; built-in subagents launch the Pi executable directly.
+If no usable `node` is found, the command fails before execution. Node-based Pi
+and ordinary `bun cli.js` launches use their existing JavaScript runtime.
+
 ## Subagent provider
 
 The provider is selected from the configuration (`~/.pi/agent/extensions/pi-sandbox/config.json` globally or `.pi/extensions/pi-sandbox/config.json` project-locally):
