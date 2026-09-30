@@ -2,7 +2,7 @@
 
 `@erichll/pi-sandbox` supports protected external orchestration on the
 `pi-subagents >=0.66.0` line: the peer dependency is a floor with no upper pin,
-and the development dependency is pinned to `^0.71.0` (validated on 0.71.0). The real gates are the
+and the development dependency is pinned to `^0.72.1` (validated on 0.72.1). The real gates are the
 `./capability-ceiling` export and the capability-ceiling API version, which the
 loader checks at load time; the version range only rejects old lines and guards
 against blind accept-on-drift. Any mismatch disables the whole mode rather than
@@ -37,13 +37,13 @@ default `builtin` provider for complete worker-process-tree isolation.
 
 ## Versioned seams
 
-| Seam | Status on the `>=0.66.0` line (validated on 0.71.0) | Verification |
+| Seam | Status on the `>=0.66.0` line (validated on 0.72.1) | Verification |
 | --- | --- | --- |
 | package version | must be `>=0.66.0`; below it the loader fails closed | runtime loader + deterministic gate |
 | `./capability-ceiling` export | public; expected path and API v1 | runtime loader + tests |
 | module layout | `.ts` source (0.66.0-0.69.0) or compiled `.js`/`.d.ts` (0.70.0+) under `src/`, same relative paths | runtime loader + tests |
 | host peer `@earendil-works/pi-tui` | imported by the internal modules but not shipped by pi-subagents; aliased from the running Pi package | runtime loader + tests |
-| `src/agents/agents.<ext>` | internal discovery and canonical resolution | runtime loader + tests |
+| `src/agents/agents.<ext>` | internal discovery and canonical resolution; 0.72.0 adds an optional `options.globalNpmRoot` argument and leaves the 3-argument form unchanged | runtime loader + tests |
 | `src/extension/config.<ext>` | internal config loader | runtime loader + tests |
 | child acknowledgement | event `subagent:acknowledge-extension` | unit/model gate |
 | `bg_wait` completion details | must carry runtime acknowledgement | result guard/model gate |
@@ -71,9 +71,9 @@ mode requires `async: true` children (detached runners), so forwarded-permission
 routing is unaffected; `scripts/pi-subagents-parent-forwarding-adapter.ts`
 remains only as a no-op shim for the 0.69.0-and-earlier line.
 
-Host requirement: these packages require Pi 0.87.1 or newer (the
-`peerDependencies` floor, validated 2026-09-23). Historically the floor was
-0.86.0, and before that 0.85.1: Pi 0.85.0
+Host requirement: these packages require Pi 0.99.1 or newer (the
+`peerDependencies` floor, validated 2026-09-30). Historically the floor was
+0.87.1, before that 0.86.0, and before that 0.85.1: Pi 0.85.0
 does not ship `@earendil-works/pi-server`, which 0.68.0 stopped bundling, so
 background children fail to launch there with an explicit error. The `builtin`
 provider is unaffected.
@@ -97,6 +97,17 @@ compatibility failure: Cannot find module '@earendil-works/pi-tui'`. An
 unresolvable host peer leaves resolution to `jiti` and keeps that explicit
 failure, so protected mode requires `@earendil-works/pi-tui` to be reachable
 from either the running Pi install or the extension tree.
+
+Since 0.72.0 `typebox` is the same kind of host-provided dependency: it moved
+from `pi-subagents`' `dependencies` to an optional `peerDependencies` entry, so
+the extension no longer ships a copy. The loader's module graph does reach it -
+`src/extension/schemas`, `src/watchdog/*`, and
+`src/intercom/native-supervisor-channel` import it - so `typebox` still has to
+be resolvable from the extension tree. The importing module set is unchanged
+from 0.71.0, in a global `~/.pi/agent/npm` install the hoisted copy comes from
+Pi's own `@earendil-works/pi-ai`, and `@erichll/pi-sandbox`'s `typebox >=1.0.0`
+peer is satisfied by that same hoisted copy, so no loader alias is needed for
+it.
 
 ## Upgrade procedure
 

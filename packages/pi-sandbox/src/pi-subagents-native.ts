@@ -16,10 +16,16 @@ import { createJiti } from "jiti";
  * 2026-09-23 against the published 0.71.0 package: the ceiling implementation
  * and the config loader are byte-identical to 0.70.0, `discoverAgents` and
  * `resolveAgentName` keep their signatures, and the `./capability-ceiling`
- * export still resolves to `.js`). Protected mode needs Pi 0.86.0 or newer
+ * export still resolves to `.js`), and revalidated 2026-09-27 against the
+ * published 0.72.1 package: the ceiling implementation and the config loader
+ * are still byte-identical to 0.70.0, `discoverAgents` and `resolveAgentName`
+ * keep their signatures, `src/agents/agents` only gains an optional
+ * `options.globalNpmRoot` argument, `typebox` moved from a hard dependency to
+ * an optional host peer, and the `./capability-ceiling` export still resolves
+ * to `.js`). Protected mode needs Pi 0.86.0 or newer
  * (the pi-subagents 0.68.0+ floor): 0.85.0 does not ship
  * `@earendil-works/pi-server`, so background children fail to launch there.
- * This package's own peer floor is Pi 0.87.1 (validated 2026-09-23).
+ * This package's own peer floor is Pi 0.99.1 (validated 2026-09-30).
  */
 export const PI_SUBAGENTS_COMPAT_RANGE = ">=0.66.0";
 export const NATIVE_CHILD_TOOLS = ["bash", "read", "grep", "find", "ls"] as const;

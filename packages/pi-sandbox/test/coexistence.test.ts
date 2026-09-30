@@ -29,6 +29,7 @@ function activeTools(extensions: Extension[]): ToolInfo[] {
           description: registered.definition.description,
           parameters: registered.definition.parameters,
           promptGuidelines: registered.definition.promptGuidelines,
+          exposure: registered.definition.exposure ?? "direct",
           sourceInfo: registered.sourceInfo,
         });
       }

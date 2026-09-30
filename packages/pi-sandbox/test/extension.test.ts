@@ -8,6 +8,7 @@ import test from "node:test";
 import type {
   ExtensionAPI,
   ExtensionContext,
+  ExtensionToolContext,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { registerPiSandbox } from "../src/index.ts";
@@ -59,7 +60,7 @@ linuxTest("registers and executes the sandboxed main Bash tool", async () => {
       getSessionId: () => "extension-test-session",
       getSessionFile: () => undefined,
     },
-  } as unknown as ExtensionContext;
+  } as unknown as ExtensionToolContext;
   try {
     const result = await bashTool.execute(
       "call-1",
@@ -128,7 +129,7 @@ linuxTest("main Bash and builtin subagents receive the same trusted network poli
     cwd,
     hasUI: false,
     sessionManager: { getSessionId: () => "parent", getSessionFile: () => undefined },
-  } as unknown as ExtensionContext;
+  } as unknown as ExtensionToolContext;
   try {
     await registerPiSandbox(pi, {
       subagentProvider: "builtin",
@@ -226,7 +227,7 @@ linuxTest("subagent tool fails fast on invalid model before spawning", async () 
       ],
     },
     model: { provider: "anthropic" },
-  } as unknown as ExtensionContext;
+  } as unknown as ExtensionToolContext;
   try {
     // Unknown provider/model -> throws before any spawn/session is created.
     await assert.rejects(
@@ -349,7 +350,7 @@ tmuxTest("preflight host backend reaches an isolated tmux socket", async () => {
       getSessionId: () => "host-ipc-smoke-session",
       getSessionFile: () => undefined,
     },
-  } as unknown as ExtensionContext;
+  } as unknown as ExtensionToolContext;
   const execute = async (command: string): Promise<string> => {
     const result = await bashTool!.execute(
       `call-${approvals}`,
@@ -670,7 +671,7 @@ linuxTest("subagent tool drives background RPC, follow-up, and shutdown", async 
       getSessionId: () => "extension-rpc-session",
       getSessionFile: () => undefined,
     },
-  } as unknown as ExtensionContext;
+  } as unknown as ExtensionToolContext;
   try {
     const started = await subagentTool.execute(
       "start-1",

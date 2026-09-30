@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.22.0 - 2026-09-30
+
+- Raise the `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` peer
+  floor to `^0.99.1` and the development baseline to `^0.99.1`. Validated
+  against Pi 0.99.1 with `tsc --noEmit` and the full test suite: the extension
+  adopts the 0.99 extension surface without code changes.
+- Raise the `@gotgenes/pi-permission-system` peer floor to `>=36.0.0` and the
+  development baseline to `^36.0.0`. Versions 35.0.3 and 36.0.0 reclassify
+  `sed` and `awk` readers and withdraw `find`, `fd`, and `sort` read claims for
+  computed and quoted arguments; the broker's evidence normalization and audit
+  classification were validated against 36.0.0.
+- Sync `examples/pi-permission-system.config.example.json` with the current tool
+  set: allow `web_enable`, `subagents_enable`, `contact_supervisor`, and
+  `bg_wait`, following the earlier skill/MCP regrouping, the `subagent` and
+  `source_check` allowances, the `goal_block` to `goal_blocked` correction, and
+  the `fetch_content` promotion from `ask` to `allow`.
+- Bump the development `typescript` baseline to `^7.0.2` and migrate the test
+  external-ts loader from `ts.transpileModule` (removed in TypeScript 7's new JS
+  API) to Node's built-in `stripTypeScriptTypes`.
+
 ## 0.21.0 - 2026-09-25
 
 - Raise the `@gotgenes/pi-permission-system` peer floor to `>=34.0.0` and update

@@ -116,6 +116,7 @@
     "plan_mode_question": "allow",
     "plan_mode_complete": "allow",
     "update_plan": "allow",
+    "web_enable": "allow",
     "web_search": "allow",
     "get_search_content": "allow",
     "source_check": "allow",
@@ -124,6 +125,9 @@
     "goal_blocked": "allow",
     "goal_wait": "allow",
     "obs_recall": "allow",
-    "subagent": "allow"
+    "subagent": "allow",
+    "subagents_enable": "allow",
+    "contact_supervisor": "allow",
+    "bg_wait": "allow"
   }
 }

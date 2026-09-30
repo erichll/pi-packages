@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.22.0 - 2026-09-30
+
+- Raise the `@earendil-works/pi-coding-agent` peer floor to `^0.99.1` and the
+  development baseline to `^0.99.1`. Validated against Pi 0.99.1 with
+  `tsc --noEmit` and the test suite (92 pass, 1 macOS-only skip); the shipped
+  `src/` uses no API that changed between 0.87 and 0.99.
+- Adapt two test fixtures to the 0.99 extension surface: `ToolInfo` now requires
+  `exposure`, and tool handlers receive `ExtensionToolContext` (`tools`,
+  `executeTool`). The shipped extension uses neither field, so runtime behavior
+  is unchanged.
+- Raise the `pi-subagents` development dependency to `^0.72.1` and revalidate
+  the native-background loader against the published 0.72.1 package:
+  `discoverAgents` and `resolveAgentName` keep their signatures,
+  `src/agents/agents` only gains an optional `options.globalNpmRoot` argument,
+  `typebox` moved from a hard dependency to an optional host peer, and the
+  `./capability-ceiling` export still resolves to `.js`.
+- Depend on `@erichll/pi-auto-review` `^0.22.0`.
+- Document the three-way `subagents.provider` choice (`builtin` / `off` /
+  `pi-subagents`) with copy-ready example configs, including the duplicate
+  `subagent` tool that makes `builtin` unavailable whenever the pi-subagents
+  extension is loaded, and the scheduled-runs-disabled pi-subagents config that
+  protected mode requires.
+- Bump the development `typescript` baseline to `^7.0.2`.
+
 ## 0.21.1 - 2026-09-26
 
 - Alias `@earendil-works/pi-tui` for the `jiti` instance that loads the
