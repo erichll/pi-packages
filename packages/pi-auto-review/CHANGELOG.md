@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add opt-in `model: "current"` to review approval requests with the active Pi
+  session model and provider, reflecting model changes on subsequent reviews.
+
 ## 0.22.1 - 2026-10-01
 
 - Fix permission-policy auditing being disabled on Bun with

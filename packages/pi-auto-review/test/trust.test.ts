@@ -193,6 +193,15 @@ test("loadTrustedConfig merges optional user file over package defaults", () => 
   }
 });
 
+test("current-model mode is trusted configuration and projects cannot select it", () => {
+  const packageConfig = loadConfig();
+  const current = applyUserConfig(packageConfig, { model: "current" });
+  assert.equal(current.model, "current");
+  assert.equal(applyProjectConfig(current, { retries: 0 }).model, "current");
+  assert.throws(() => applyProjectConfig(packageConfig, { model: "current" }));
+  assert.throws(() => applyProjectConfig(current, { model: "provider/model" }));
+});
+
 test("userConfigPath resolves under the agent extensions directory", () => {
   assert.equal(
     userConfigPath("/home/demo"),

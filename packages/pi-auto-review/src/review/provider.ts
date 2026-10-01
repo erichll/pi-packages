@@ -469,11 +469,11 @@ export function reviewerSessionId(
   return `pi-auto-review-${fingerprint}`;
 }
 
-export async function resolveReviewerMeta(
+function resolveConfiguredModel(
   ctx: ExtensionContext,
-  config: Config,
-): Promise<ReviewerMeta> {
-  const { provider, modelId } = parseModelRef(config.model);
+  modelRef: string,
+): ReviewerMeta["model"] {
+  const { provider, modelId } = parseModelRef(modelRef);
   const available = ctx.modelRegistry.getAvailable();
   const registeredModel = provider
     ? ctx.modelRegistry.find(provider, modelId)
@@ -492,10 +492,23 @@ export async function resolveReviewerMeta(
   if (!model) {
     throw new Error(
       provider
-        ? `provider ${provider} is unavailable for custom model ${config.model}`
-        : `model ${config.model} is unavailable`,
+        ? `provider ${provider} is unavailable for custom model ${modelRef}`
+        : `model ${modelRef} is unavailable`,
     );
   }
+  return model;
+}
+
+export async function resolveReviewerMeta(
+  ctx: ExtensionContext,
+  config: Config,
+): Promise<ReviewerMeta> {
+  // Pi exposes model as a live getter, including on the retained session
+  // context. Read it once per review and keep retries on that same model.
+  const model = config.model === "current"
+    ? ctx.model
+    : resolveConfiguredModel(ctx, config.model);
+  if (!model) throw new Error("current Pi session model is unavailable");
 
   const registered = (
     ctx.modelRegistry as ExtensionContext["modelRegistry"] & {
@@ -513,7 +526,7 @@ export async function resolveReviewerMeta(
   return {
     model,
     streamSimple:
-      registered?.api === model.api ? registered.streamSimple : undefined,
+      registered && registered.api === model.api ? registered.streamSimple : undefined,
   };
 }
 
@@ -572,6 +585,8 @@ export async function modelCall(
       metadata.retryAfterMs = parseRetryAfterMs(response.headers);
     },
   };
+  // Call the provider directly with no tools, outside Pi's agent/tool loop,
+  // so using the session model cannot re-enter permission review.
   // 0.86 moved the provider-facing request to a normalized transcript: the
   // system prompt and tool declarations now travel as the transcript's leading
   // system message. Providers registered by extensions receive that shape, so

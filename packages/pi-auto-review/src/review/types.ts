@@ -17,6 +17,7 @@ export type ReasoningLevel =
 export type BoundedSurface = "external_directory" | "path";
 
 export type Config = {
+  /** Model id, provider/model, or "current" for the live Pi session model. */
   model: string;
   reasoning: ReasoningLevel;
   timeoutMs: number;
