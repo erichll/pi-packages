@@ -100,10 +100,11 @@ Supported modes:
 This provider supports the `pi-subagents >=0.66.0` line (validated through
 0.72.1) and fails closed if its public ceiling API, module layout, or internal
 discovery layout drifts. The peer dependency is a floor with no upper pin; the
-loader's explicit export and layout checks are the real gate. The loader also
-aliases `@earendil-works/pi-tui`, a host peer that the `pi-subagents` internals
-import but do not ship, to the copy inside the running Pi package, so installs
-where it is not hoisted next to the extension still load.
+loader's explicit export and layout checks are the real gate. On Node, the
+loader aliases the `@earendil-works/pi-tui` host peer to the running Pi package.
+On Bun, including compiled Pi, it passes Pi's `pi-tui` and `typebox` module
+objects into its internal loader, so those peers can be embedded in Pi instead
+of installed beside `pi-subagents`.
 Configure both the protection mode and a non-empty canonical whitelist:
 
 ```json

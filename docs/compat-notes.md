@@ -42,7 +42,7 @@ default `builtin` provider for complete worker-process-tree isolation.
 | package version | must be `>=0.66.0`; below it the loader fails closed | runtime loader + deterministic gate |
 | `./capability-ceiling` export | public; expected path and API v1 | runtime loader + tests |
 | module layout | `.ts` source (0.66.0-0.69.0) or compiled `.js`/`.d.ts` (0.70.0+) under `src/`, same relative paths | runtime loader + tests |
-| host peer `@earendil-works/pi-tui` | imported by the internal modules but not shipped by pi-subagents; aliased from the running Pi package | runtime loader + tests |
+| host peer `@earendil-works/pi-tui` | supplied by Pi; filesystem alias on Node, host module object on Bun | runtime loader + isolated Node/Bun/compiled-Bun tests |
 | `src/agents/agents.<ext>` | internal discovery and canonical resolution; 0.72.0 adds an optional `options.globalNpmRoot` argument and leaves the 3-argument form unchanged | runtime loader + tests |
 | `src/extension/config.<ext>` | internal config loader | runtime loader + tests |
 | child acknowledgement | event `subagent:acknowledge-extension` | unit/model gate |
@@ -88,26 +88,44 @@ children they targeted no longer use that process-launch contract.
 loader loads (`src/extension/config.<ext>` among them) but, as a host peer, does
 not ship it. Pi's own extension loader aliases that specifier to the copy inside
 the running Pi package, and the protected-mode loader creates its own `jiti`
-instance, so it computes the same alias from the host package root discovered
+instance. On Node, it computes the same alias from the host package root discovered
 through `process.argv[1]` (or `PI_PACKAGE_DIR`, which Pi honors for Nix/Guix
 store paths), then falls back to plain Node resolution from the extension tree.
 Without it, installs where the peer is not hoisted next to the extension - for
 example `~/.pi/agent/npm/node_modules` - fail to load with `pi-subagents
 compatibility failure: Cannot find module '@earendil-works/pi-tui'`. An
 unresolvable host peer leaves resolution to `jiti` and keeps that explicit
-failure, so protected mode requires `@earendil-works/pi-tui` to be reachable
-from either the running Pi install or the extension tree.
+failure. On Node, the alias therefore requires `@earendil-works/pi-tui` to be
+reachable from either the running Pi install or the extension tree.
+
+On Bun, filesystem resolution cannot reliably find Pi's embedded peers. The
+adapter statically imports `pi-tui` and `typebox` through Pi's outer extension
+loader, then supplies those module objects to its own jiti instance through
+`virtualModules`, with `tryNative: false`. Static imports matter for plain Bun:
+deferring the imports until after extension loading can leave them running
+through Bun's native resolver outside Pi's host alias handling. Pi's own
+compiled loader supplies its embedded modules to these imports. Our adapter
+remains an on-disk extension and can use the normal jiti entry; it does not need
+to import Pi's private `virtual-modules.js` or compiled loader internals.
+
+Validated on Pi 0.99.1 / Bun 1.3.14 with a copied pi-subagents 0.72.1 package in
+an isolated directory containing neither `pi-tui` nor `typebox`. Node Pi,
+plain Bun Pi, and compiled Bun Pi all load the protected adapter. The test reads
+the inner loader's capability ceiling through the host-loaded public API and
+verifies disposal, the five-tool limit, unknown-agent rejection, and enabled
+schedule rejection. This covers module loading and the ceiling contract;
+model-backed native child acceptance remains part of the release gate below.
 
 Since 0.72.0 `typebox` is the same kind of host-provided dependency: it moved
 from `pi-subagents`' `dependencies` to an optional `peerDependencies` entry, so
 the extension no longer ships a copy. The loader's module graph does reach it -
 `src/extension/schemas`, `src/watchdog/*`, and
-`src/intercom/native-supervisor-channel` import it - so `typebox` still has to
-be resolvable from the extension tree. The importing module set is unchanged
+`src/intercom/native-supervisor-channel` import it. Bun uses the host module
+object described above. Node retains ordinary package resolution for these
+imports. The importing module set is unchanged
 from 0.71.0, in a global `~/.pi/agent/npm` install the hoisted copy comes from
 Pi's own `@earendil-works/pi-ai`, and `@erichll/pi-sandbox`'s `typebox >=1.0.0`
-peer is satisfied by that same hoisted copy, so no loader alias is needed for
-it.
+peer is satisfied by that same hoisted copy.
 
 ## Upgrade procedure
 

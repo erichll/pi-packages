@@ -3,6 +3,8 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createJiti } from "jiti";
+import * as hostPiTui from "@earendil-works/pi-tui";
+import * as hostTypebox from "typebox";
 
 /**
  * Compatible pi-subagents line: 0.66.0 and above (no upper pin). Any new minor
@@ -254,10 +256,23 @@ export async function loadPiSubagentsNativeRuntime(
   }
   const extension = resolvePiSubagentsModuleExtension(packageJson.exports);
 
+  // Pi's outer extension loader supplies these host modules, including embedded
+  // copies in compiled Bun builds. Static imports above keep host resolution in
+  // that outer loader even under plain `bun cli.js`. Filesystem aliases cannot
+  // locate modules that only exist inside Pi.
+  const resolutionOptions = process.versions.bun
+    ? {
+        tryNative: false,
+        virtualModules: {
+          [HOST_PI_TUI_PACKAGE]: hostPiTui,
+          typebox: hostTypebox,
+        },
+      }
+    : { alias: await resolvePiSubagentsHostAliases() };
   const jiti = createJiti(import.meta.url, {
     interopDefault: false,
     fsCache: false,
-    alias: await resolvePiSubagentsHostAliases(),
+    ...resolutionOptions,
   });
   const internal = (relative: string): string =>
     pathToFileURL(join(root, piSubagentsInternalModulePath(relative, extension))).href;

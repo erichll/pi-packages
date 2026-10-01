@@ -12,6 +12,13 @@
   write denials when Pi is installed at a path such as `/tmp/pi-bun`.
 - Clean up command temp directories when broker startup throws, and add a
   regression test that compiles and runs real Pi when Bun is available.
+- Fix protected `pi-subagents` loading on Bun when `pi-tui` is embedded in Pi
+  and cannot be resolved from the extension's install directory. Supply Pi's
+  `pi-tui` and `typebox` module objects to the inner jiti loader and disable
+  native loading for that Bun path; retain Node's filesystem aliases.
+- Verify Node, plain Bun, and compiled Bun against an isolated pi-subagents
+  install without either host peer on disk, including shared capability-ceiling
+  registration and rejection of enabled schedules.
 
 ## 0.22.0 - 2026-09-30
 
