@@ -11,23 +11,11 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { ClassifiedPermission } from "./classifier.ts";
+import { loadSqlite, type SqliteDatabase, type SqliteModule } from "./sqlite.ts";
 
 export const POLICY_AUDIT_SCHEMA_VERSION = 2;
 export const POLICY_AUDIT_DATABASE_NAME = "policy-audit.sqlite";
 export const POLICY_AUDIT_KEY_NAME = "policy-audit.key";
-
-type RunResult = { changes: number | bigint };
-type Statement = {
-  run(...params: unknown[]): RunResult;
-  get(...params: unknown[]): Record<string, unknown> | undefined;
-  all(...params: unknown[]): Record<string, unknown>[];
-};
-type Database = {
-  exec(sql: string): void;
-  prepare(sql: string): Statement;
-  close(): void;
-};
-type SqliteModule = { DatabaseSync: new (path: string, options?: Record<string, unknown>) => Database };
 
 export type SanitizedPermissionDecision = ClassifiedPermission & {
   requestId: string;
@@ -124,7 +112,7 @@ export class PolicyAuditStore {
     mkdirSync(options.directory, { recursive: true, mode: 0o700 });
     chmodSync(options.directory, 0o700);
     const key = loadOrCreateKey(options.directory);
-    const sqlite = await (options.sqliteLoader ?? (() => import("node:sqlite") as Promise<SqliteModule>))();
+    const sqlite = await (options.sqliteLoader ?? loadSqlite)();
     const databasePath = join(options.directory, POLICY_AUDIT_DATABASE_NAME);
     const db = new sqlite.DatabaseSync(databasePath);
     chmodSync(databasePath, 0o600);
@@ -139,7 +127,7 @@ export class PolicyAuditStore {
   }
 
   private constructor(
-    private readonly db: Database,
+    private readonly db: SqliteDatabase,
     private readonly key: Buffer,
     private readonly databasePath: string,
     private readonly retentionDays: number,

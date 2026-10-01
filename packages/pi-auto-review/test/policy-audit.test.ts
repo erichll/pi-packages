@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import { loadSqlite } from "../src/policy-audit/sqlite.ts";
 import {
   buildPolicyAuditReport,
   classifyBash,
@@ -16,6 +16,8 @@ import {
   PolicyAuditStore,
   renderPolicyAuditMarkdown,
 } from "../src/policy-audit/index.ts";
+
+const { DatabaseSync } = await loadSqlite();
 
 function temp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -252,7 +254,26 @@ test("two WAL stores share deduplication without duplicate statistics", async ()
   }
 });
 
-test("controller disables and warns once when node:sqlite is unavailable", async () => {
+test("closing SQLite finalizes statements and checkpoints the last WAL connection", () => {
+  const root = temp("pi-audit-close-");
+  try {
+    const path = join(root, "audit.sqlite");
+    const db = new DatabaseSync(path);
+    db.exec("PRAGMA journal_mode=WAL; CREATE TABLE test (value TEXT)");
+    const insert = db.prepare("INSERT INTO test VALUES(?)");
+    const select = db.prepare("SELECT value FROM test");
+    insert.run("persisted-marker");
+    assert.equal(select.get()?.value, "persisted-marker");
+    db.close();
+    assert.equal(existsSync(`${path}-wal`), false);
+    assert.ok(readFileSync(path).includes("persisted-marker"));
+    assert.throws(() => insert.run("after-close"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("controller disables and warns once when the SQLite backend is unavailable", async () => {
   const directory = temp("pi-policy-missing-sqlite-");
   const warnings: string[] = [];
   try {
@@ -261,7 +282,7 @@ test("controller disables and warns once when node:sqlite is unavailable", async
       cwd: () => "/work/project",
       directory,
       warn: (warning) => warnings.push(warning),
-      storeOptions: { sqliteLoader: async () => { throw new Error("node:sqlite unavailable"); } },
+      storeOptions: { sqliteLoader: async () => { throw new Error("SQLite backend unavailable"); } },
     });
     controller.record({ requestId: "one", surface: "bash", value: "git status", result: "allow", resolution: "policy_allow" });
     controller.record({ requestId: "two", surface: "bash", value: "git diff", result: "allow", resolution: "policy_allow" });

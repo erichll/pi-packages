@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Restore permission-policy audit collection and reports on Bun, including
+  Bun-compiled Pi, by selecting `bun:sqlite` instead of the unavailable
+  `node:sqlite`. Node hosts continue to use their built-in SQLite backend.
+- Adapt Bun statement lifecycle so database close finalizes cached statements
+  and allows the last WAL connection to checkpoint and release its resources.
+- Verify both backends against the audit persistence, migration, redaction,
+  retention, and failure tests; add cross-process Node/Bun WAL deduplication
+  and a real Bun-compiled Pi audit/report regression test. Both runtimes share
+  the existing database schema and HMAC key.
+
 ## 0.22.0 - 2026-09-30
 
 - Raise the `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` peer

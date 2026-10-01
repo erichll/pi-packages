@@ -34,9 +34,10 @@ that dependency is a hard prerequisite (see [Install and enable](#install-and-en
 > extension. This release line requires Pi 0.99.1 or later and supports
 > permission-system 36.0.0 and later:
 
-Node.js 22.13.0 or newer is required. Permission auditing uses Node's built-in
-`node:sqlite`; it does not require a SQLite CLI, system SQLite library, or npm
-SQLite package.
+Node-based Pi requires Node.js 22.13.0 or newer. Permission auditing uses the
+host runtime's built-in SQLite: `node:sqlite` on Node and `bun:sqlite` on Bun,
+including Bun-compiled Pi (verified with Bun 1.3.14). It does not require a
+SQLite CLI, system SQLite library, or npm SQLite package.
 
 ```bash
 pi install npm:@gotgenes/pi-permission-system
@@ -374,7 +375,9 @@ project-specific labels; inspect suggestions before copying them.
 
 Data lives at
 `~/.pi/agent/extensions/pi-auto-review/policy-audit.sqlite`, beside an
-owner-only HMAC key. The directory is mode `0700`; the key, database, WAL, and
+owner-only HMAC key. Node and Bun use the same database schema and key, so
+switching runtimes preserves statistics and request deduplication.
+The directory is mode `0700`; the key, database, WAL, and
 SHM are mode `0600`. Initialization, lock, write, or corruption failures disable
 auditing and warn once without changing any permission result. A corrupt
 database is not deleted or rebuilt automatically. Disable new collection with:
