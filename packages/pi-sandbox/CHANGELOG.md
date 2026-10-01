@@ -1,24 +1,26 @@
 # Changelog
 
-## Unreleased
+## 0.22.1 - 2026-10-01
 
-- Fix Bun-compiled Pi launching itself with the Sandbox Runtime broker path as
-  a prompt (#7). Standalone hosts now resolve a separate Node executable from
-  absolute `PATH` entries and use JSON IPC; missing Node fails closed.
-- Launch built-in subagents directly through the standalone Pi executable, and
-  resolve the host's CLI symlink for Node-based Pi.
-- Protect standalone executables individually and derive runtime permissions
-  from the actual Node installation, avoiding root read grants and directory-wide
-  write denials when Pi is installed at a path such as `/tmp/pi-bun`.
-- Clean up command temp directories when broker startup throws, and add a
-  regression test that compiles and runs real Pi when Bun is available.
-- Fix protected `pi-subagents` loading on Bun when `pi-tui` is embedded in Pi
-  and cannot be resolved from the extension's install directory. Supply Pi's
-  `pi-tui` and `typebox` module objects to the inner jiti loader and disable
-  native loading for that Bun path; retain Node's filesystem aliases.
-- Verify Node, plain Bun, and compiled Bun against an isolated pi-subagents
-  install without either host peer on disk, including shared capability-ceiling
-  registration and rejection of enabled schedules.
+- Fix sandboxed Bash on Bun-compiled Pi: launching the Sandbox Runtime broker
+  could instead start another unsandboxed Pi session with the broker path as
+  its prompt, leaving the requested command unexecuted
+  ([#7](https://github.com/erichll/pi-packages/issues/7)). The broker now runs
+  through a separate Node executable and communicates over JSON IPC.
+- **Bun-compiled Pi requires Node.js >=22.19.0 on PATH**, with its directory
+  listed as an absolute path. If Node cannot be found, commands fail explicitly
+  before execution. Aliases back to the Pi executable are rejected.
+- Fix built-in subagent startup for standalone Pi and resolve the host CLI
+  symlink for Node-based Pi. Derive filesystem permissions from the actual
+  runtime so a binary such as `/tmp/pi-bun` does not grant root reads or deny
+  writes to the entire host temp directory.
+- Fix protected `pi-subagents` loading on Bun when `pi-tui` and `typebox` are
+  provided by Pi. Reuse the host modules in the internal loader so compiled
+  Pi does not need separate copies beside the extension.
+- Clean up command temp directories when broker startup fails. Add isolated
+  Node, plain Bun, and compiled Bun regression tests for broker startup,
+  capability-ceiling registration, and rejection of enabled schedules.
+- Require `@erichll/pi-auto-review` `^0.22.1` to include the Bun SQLite audit fix.
 
 ## 0.22.0 - 2026-09-30
 

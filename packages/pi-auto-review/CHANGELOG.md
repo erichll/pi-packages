@@ -1,16 +1,19 @@
 # Changelog
 
-## Unreleased
+## 0.22.1 - 2026-10-01
 
-- Restore permission-policy audit collection and reports on Bun, including
-  Bun-compiled Pi, by selecting `bun:sqlite` instead of the unavailable
-  `node:sqlite`. Node hosts continue to use their built-in SQLite backend.
-- Adapt Bun statement lifecycle so database close finalizes cached statements
-  and allows the last WAL connection to checkpoint and release its resources.
-- Verify both backends against the audit persistence, migration, redaction,
-  retention, and failure tests; add cross-process Node/Bun WAL deduplication
-  and a real Bun-compiled Pi audit/report regression test. Both runtimes share
-  the existing database schema and HMAC key.
+- Fix permission-policy auditing being disabled on Bun with
+  `No such built-in module: node:sqlite`. Bun, including Bun-compiled Pi, now
+  uses its built-in `bun:sqlite`; Node continues to use `node:sqlite`.
+- Preserve audit statistics and request deduplication when switching between
+  Node and Bun by sharing the existing database schema and HMAC key.
+- Finalize Bun's cached SQLite statements when closing the database so the
+  last WAL connection can checkpoint and release its resources.
+- Add regression coverage for database migration, redaction, retention,
+  failure handling, concurrent Node/Bun writers, and persistent audit reports
+  in a real Bun-compiled Pi process.
+- Update the permission-system example for current MCP tool names, including
+  `codemode`, `tool_search`, `mcp__atlassian__*`, and `mcp__pencil__*`.
 
 ## 0.22.0 - 2026-09-30
 
