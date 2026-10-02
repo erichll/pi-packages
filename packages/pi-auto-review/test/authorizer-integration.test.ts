@@ -26,7 +26,7 @@ import {
   type Config,
 } from "../src/index.ts";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { getCurrentSystemPrompt } from "@earendil-works/pi-ai/compat";
+import { getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai/compat";
 import { getBoundaryBroker } from "../src/broker/index.ts";
 import { boundaryRequestHash } from "../src/broker/grants.ts";
 import { approveSandboxTrap } from "../../pi-sandbox/src/approval.ts";
@@ -138,6 +138,8 @@ function harness(
   >();
   const reviews: Array<{ event: string; data: Record<string, unknown> }> = [];
   const modelContexts: unknown[] = [];
+  const calledModels: unknown[] = [];
+  const streamProviders: string[] = [];
   const sentUserMessages: string[] = [];
   const uiDecisions: unknown[] = [];
   const modelCallOptions: Array<Record<string, unknown>> = [];
@@ -206,6 +208,7 @@ function harness(
       [key: string]: unknown;
     },
   ) => {
+    calledModels.push(_model);
     modelContexts.push(modelContext);
     modelCallOptions.push(callOptions);
     return {
@@ -232,6 +235,12 @@ function harness(
     };
   };
   let currentModel: Record<string, unknown> = model;
+  let sessionModel: Record<string, unknown> | undefined = {
+    ...model,
+    provider: "session-provider",
+    id: "session-model",
+    name: "session-model",
+  };
   let currentStreamSimple: typeof streamSimple = streamSimple;
   let currentAuth: {
     apiKey?: string;
@@ -258,6 +267,7 @@ function harness(
     sessionManager.appendMessage(entry.message as Parameters<typeof sessionManager.appendMessage>[0]);
   }
   const context = {
+    get model() { return sessionModel; },
     cwd: process.cwd(),
     signal: options.signal,
     mode: options.interactiveTui ? "tui" : "rpc",
@@ -309,10 +319,10 @@ function harness(
         if (options.authBehavior) return options.authBehavior();
         return { ok: true, ...currentAuth };
       },
-      getRegisteredProviderConfig: () => ({
-        api: "test-api",
-        streamSimple: currentStreamSimple,
-      }),
+      getRegisteredProviderConfig: (provider: string) => {
+        streamProviders.push(provider);
+        return { api: "test-api", streamSimple: currentStreamSimple };
+      },
     },
     sessionManager,
   };
@@ -440,6 +450,8 @@ function harness(
     commands,
     reviews,
     modelContexts,
+    calledModels,
+    streamProviders,
     sentUserMessages,
     uiDecisions,
     modelCallOptions,
@@ -479,6 +491,9 @@ function harness(
     },
     setAuth(auth: typeof currentAuth) {
       currentAuth = auth;
+    },
+    setSessionModel(model: typeof sessionModel) {
+      sessionModel = model;
     },
     dispose() {
       handlers.get("session_shutdown")?.();
@@ -679,6 +694,109 @@ test("in-process nodes register independently and child shutdown preserves paren
 });
 
 test("real permission-system authorizer chain integration", async (t) => {
+  await t.test("explicit reviewer ignores changes to the active session model", async () => {
+    const instance = harness(allow, { config: config({ model: "test-provider/codex-auto-review" }) });
+    try {
+      assert.equal((await instance.authorize("bash_escalated")).decision.approved, true);
+      instance.setSessionModel({ provider: "another-provider", id: "another-model", api: "test-api" });
+      assert.equal((await instance.authorize("bash_escalated")).decision.approved, true);
+      assert.deepEqual(instance.calledModels, instance.seenModels);
+      assert.ok(instance.seenModels.every((model) => model.id === "codex-auto-review"));
+      assert.deepEqual(instance.streamProviders, ["test-provider", "test-provider"]);
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  await t.test("current reviewer follows live model changes without re-entering Pi", async () => {
+    const instance = harness(allow, { config: config({ model: "current" }) });
+    try {
+      const entriesBefore = instance.context.sessionManager.buildContextEntries();
+      const firstModel = instance.context.model;
+      assert.equal((await instance.authorize("bash_escalated")).decision.approved, true);
+      const nextModel = { provider: "another-provider", id: "group/another-model", api: "test-api" };
+      instance.setSessionModel(nextModel);
+      assert.equal((await instance.authorize("bash_escalated")).decision.approved, true);
+      assert.deepEqual(instance.calledModels, [firstModel, nextModel]);
+      assert.deepEqual(instance.seenModels, [firstModel, nextModel]);
+      assert.deepEqual(instance.streamProviders, ["session-provider", "another-provider"]);
+      const completions = instance.telemetry.filter((event) => event.type === "review_complete");
+      assert.deepEqual(completions.map((event) => event.model), [
+        "session-provider/session-model", "another-provider/group/another-model",
+      ]);
+      assert.notEqual(instance.modelCallOptions[0].sessionId, instance.modelCallOptions[1].sessionId);
+      // The auxiliary requests contain no tools, never append an agent reply
+      // to the session, and make exactly one review per permission request.
+      for (const context of instance.modelContexts) {
+        assert.deepEqual(getCurrentTools((context as {
+          messages: Parameters<typeof getCurrentTools>[0];
+        }).messages), []);
+      }
+      assert.equal(instance.modelContexts.length, 2);
+      assert.equal(instance.reviews.filter((review) => review.event === "pi_auto_review_decision").length, 2);
+      assert.deepEqual(instance.context.sessionManager.buildContextEntries(), entriesBefore);
+      assert.deepEqual(instance.sentUserMessages, []);
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  await t.test("missing current model preserves deny and defer failure modes", async () => {
+    for (const failureMode of ["deny", "defer"] as const) {
+      const instance = harness(allow, { config: config({ model: "current", failureMode }) });
+      try {
+        instance.setSessionModel(undefined);
+        const result = await instance.authorize("bash_escalated");
+        assert.equal(result.decision.approved, false);
+        assert.equal(result.terminalCalls, failureMode === "defer" ? 1 : 0);
+        assert.equal(instance.modelContexts.length, 0);
+        assert.equal(instance.reviewerResolveCalls, 0);
+        const completion = instance.telemetry.find((event) => event.type === "review_complete");
+        assert.deepEqual(completion?.errorCounts, { model_resolution: 1 });
+        assert.equal(completion?.outcome, failureMode);
+      } finally {
+        instance.dispose();
+      }
+    }
+  });
+
+  await t.test("current model authentication failure uses existing failure handling", async () => {
+    const instance = harness(allow, {
+      config: config({ model: "current" }),
+      authBehavior: async () => ({ ok: false, error: "unavailable credential" }),
+    });
+    try {
+      const result = await instance.authorize("bash_escalated");
+      assert.equal(result.decision.approved, false);
+      assert.equal(result.terminalCalls, 0);
+      assert.equal(instance.modelContexts.length, 0);
+      const completion = instance.telemetry.find((event) => event.type === "review_complete");
+      assert.deepEqual(completion?.errorCounts, { authentication: 1 });
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  await t.test("a current-model review keeps its selected model across format retries", async () => {
+    let calls = 0;
+    const instance = harness(async () => {
+      if (++calls === 1) {
+        instance.setSessionModel({ provider: "another-provider", id: "another-model", api: "test-api" });
+        return "invalid JSON";
+      }
+      return allow;
+    }, { config: config({ model: "current", retries: 1 }) });
+    try {
+      const initialModel = instance.context.model;
+      assert.equal((await instance.authorize("bash_escalated")).decision.approved, true);
+      assert.deepEqual(instance.calledModels, [initialModel, initialModel]);
+      assert.equal((await instance.authorize("bash_escalated")).decision.approved, true);
+      assert.equal((instance.calledModels[2] as Record<string, unknown>).provider, "another-provider");
+    } finally {
+      instance.dispose();
+    }
+  });
+
   await t.test("ask is decided as allow, deny, or terminal defer", async () => {
     for (const [output, approved, terminalCalls] of [
       [allow, true, 0],
@@ -2304,54 +2422,58 @@ test("real permission-system authorizer chain integration", async (t) => {
     }
   });
 
-  await t.test("sandbox consumes the exact one-shot grant", async () => {
-    const instance = harness(allow);
-    try {
-      const broker = getBoundaryBroker();
-      assert.ok(broker);
-      const result = await approveSandboxTrap(
-        {
-          kind: "filesystem",
-          code: "FILESYSTEM_DENIED",
-          state: "query",
-          query_id: "77",
-          operation: "write",
-          path: "/tmp/reviewed",
-          requested_path: "/tmp/reviewed",
-          syscall: "openat",
-          errno: "EACCES",
-          flags: ["O_WRONLY"],
-          reason: "allow_miss",
-          suggested_grant: { allowWrite: "/tmp/reviewed" },
-          process: {
-            pid: process.pid,
-            exe: "/usr/bin/touch",
-            cwd: process.cwd(),
+  for (const reviewerModel of ["codex-auto-review", "current"]) {
+    await t.test(`sandbox consumes the exact one-shot grant with ${reviewerModel}`, async () => {
+      const instance = harness(allow, { config: config({ model: reviewerModel }) });
+      try {
+        const broker = getBoundaryBroker();
+        assert.ok(broker);
+        const result = await approveSandboxTrap(
+          {
+            kind: "filesystem",
+            code: "FILESYSTEM_DENIED",
+            state: "query",
+            query_id: "77",
+            operation: "write",
+            path: "/tmp/reviewed",
+            requested_path: "/tmp/reviewed",
+            syscall: "openat",
+            errno: "EACCES",
+            flags: ["O_WRONLY"],
+            reason: "allow_miss",
+            suggested_grant: { allowWrite: "/tmp/reviewed" },
+            process: {
+              pid: process.pid,
+              exe: "/usr/bin/touch",
+              cwd: process.cwd(),
+            },
+            mechanism: "seccomp",
           },
-          mechanism: "seccomp",
-        },
-        {
-          broker,
-          command: "touch /tmp/reviewed",
-          cwd: process.cwd(),
-          sessionId: "integration-session",
-          scopeKey: "turn-1",
-        },
-      );
-      assert.equal(result.action, "allow");
-      assert.equal(result.source, "reviewer");
-      const sandboxComplete = instance.telemetry.find(
-        (event) =>
-          event.type === "review_complete" &&
-          event.requestId === "sandbox-runtime:77",
-      );
-      assert.equal(sandboxComplete?.surface, "filesystem-write");
-      assert.equal(sandboxComplete?.attempts, 1);
-      assert.equal(sandboxComplete?.outcome, "allow");
-    } finally {
-      instance.dispose();
-    }
-  });
+          {
+            broker,
+            command: "touch /tmp/reviewed",
+            cwd: process.cwd(),
+            sessionId: "integration-session",
+            scopeKey: "turn-1",
+          },
+        );
+        assert.equal(result.action, "allow");
+        assert.equal(result.source, "reviewer");
+        const sandboxComplete = instance.telemetry.find(
+          (event) =>
+            event.type === "review_complete" &&
+            event.requestId === "sandbox-runtime:77",
+        );
+        assert.equal(sandboxComplete?.surface, "filesystem-write");
+        assert.equal(sandboxComplete?.attempts, 1);
+        assert.equal(sandboxComplete?.outcome, "allow");
+        assert.equal(sandboxComplete?.model, reviewerModel === "current"
+          ? "session-provider/session-model" : "test-provider/codex-auto-review");
+      } finally {
+        instance.dispose();
+      }
+    });
+  }
 
   await t.test("security package writes are hard-denied before review", async () => {
     const instance = harness(allow);

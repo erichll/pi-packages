@@ -70,7 +70,7 @@ export function validateConfig(value: unknown, source: string): Config {
     config.model.split("/").some((segment) => !segment.trim())
   ) {
     throw new Error(
-      `${EXTENSION_NAME}: model must be a model id or provider/model`,
+      `${EXTENSION_NAME}: model must be current, a model id, or provider/model`,
     );
   }
   if (

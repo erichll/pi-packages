@@ -113,6 +113,29 @@ Use the user-global file for normal customization. It may set any legal key:
 }
 ```
 
+To use the model currently selected in the Pi session, set the trusted
+user-global config to:
+
+```json
+{
+  "model": "current"
+}
+```
+
+Each review reads the active session model, including its provider, so changing
+models during a session affects subsequent approval reviews. Retries within
+one review use the same selected model. Reviewer reasoning, token limits, and
+timeouts still come from this extension's configuration.
+
+The reviewer makes a separate provider request without tools and uses Pi's
+authentication resolution. If no session model is selected, authentication
+fails, or the provider cannot serve this auxiliary request, the existing
+`failureMode` applies (`"deny"` by default, or `"defer"` to the human terminal).
+The default remains `"codex-auto-review"`; explicit model IDs and
+`"provider/reviewer-model"` values continue to select a dedicated reviewer.
+The bare value `"current"` is reserved for this mode; use `"provider/current"`
+to select a model whose ID is literally `current`.
+
 For a complete `@gotgenes/pi-permission-system` config that wires
 `pi-auto-review` into the authorizer chain — a copyable baseline covering
 read/write/edit, a read-only bash allowlist, an MCP discovery policy, and a
