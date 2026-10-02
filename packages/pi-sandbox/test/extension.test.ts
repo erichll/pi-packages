@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import type {
+  BashOperations,
   ExtensionAPI,
   ExtensionContext,
   ExtensionToolContext,
@@ -83,6 +84,8 @@ linuxTest("main Bash and builtin subagents receive the same trusted network poli
   let bashTool: ToolDefinition | undefined;
   let subagentTool: ToolDefinition | undefined;
   let subagentPolicy: Parameters<ProcessBackedSubagentManager["start"]>[0]["policy"];
+  let starts = 0;
+  let userBash: ((_event: unknown, ctx: ExtensionContext) => { operations: BashOperations }) | undefined;
   const session = {
     id: "network-session",
     info: { id: "network-session", state: "idle", text: "ok" },
@@ -93,23 +96,28 @@ linuxTest("main Bash and builtin subagents receive the same trusted network poli
   } as unknown as Awaited<ReturnType<ProcessBackedSubagentManager["start"]>>;
   const manager = {
     async start(options: Parameters<ProcessBackedSubagentManager["start"]>[0]) {
+      starts++;
       subagentPolicy = options.policy;
       return session;
     },
     async remove() {},
     async shutdown() {},
+    get() { return session; },
   } as unknown as ProcessBackedSubagentManager;
   const pi = {
     registerTool(tool: ToolDefinition) {
       if (tool.name === "bash") bashTool = tool;
       if (tool.name === "subagent") subagentTool = tool;
     },
-    on() {},
+    on(event: string, handler: typeof userBash) {
+      if (event === "user_bash") userBash = handler;
+    },
     getActiveTools() { return ["bash", "subagent"]; },
   } as unknown as ExtensionAPI;
   const network = {
     allowedDomains: ["github.com", "*.github.com:443"],
     deniedDomains: ["uploads.github.com"],
+    strictAllowlist: true,
   };
   const cwd = mkdtempSync(join(tmpdir(), "pi-sandbox-network-surfaces-"));
   const trustedHome = join(cwd, "home");
@@ -124,6 +132,7 @@ linuxTest("main Bash and builtin subagents receive the same trusted network poli
   mkdirSync(dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify({ network }), "utf8");
   const previousHome = process.env.HOME;
+  const previousCwd = process.cwd();
   process.env.HOME = trustedHome;
   const ctx = {
     cwd,
@@ -131,6 +140,13 @@ linuxTest("main Bash and builtin subagents receive the same trusted network poli
     sessionManager: { getSessionId: () => "parent", getSessionFile: () => undefined },
   } as unknown as ExtensionToolContext;
   try {
+    process.chdir(cwd);
+    let constructed = false;
+    await assert.rejects(registerPiSandbox({} as ExtensionAPI, {
+      hostIPC: { mode: "ask", preflightCommandPrefixes: [], retryOnUnixSocketError: false },
+      createSubagentManager() { constructed = true; return manager; },
+    }), /strictAllowlist=true.*hostIPC\.mode="ask"/);
+    assert.equal(constructed, false, "conflicts fail before constructing workers or registering tools");
     await registerPiSandbox(pi, {
       subagentProvider: "builtin",
       subagentManager: manager,
@@ -154,6 +170,13 @@ linuxTest("main Bash and builtin subagents receive the same trusted network poli
       allowAllUnixSockets: false,
       allowUnixSockets: [],
     });
+    assert.ok(userBash);
+    let userOutput = "";
+    await userBash({}, ctx).operations.exec("probe", cwd, {
+      onData(data) { userOutput += data.toString(); },
+      signal: new AbortController().signal,
+    });
+    assert.deepEqual(JSON.parse(userOutput).network, JSON.parse(bashText).network);
 
     await subagentTool.execute(
       "network-subagent",
@@ -164,7 +187,16 @@ linuxTest("main Bash and builtin subagents receive the same trusted network poli
     );
     assert.deepEqual(subagentPolicy?.network.allowedDomains, network.allowedDomains);
     assert.deepEqual(subagentPolicy?.network.deniedDomains, network.deniedDomains);
+    assert.equal(subagentPolicy?.network.strictAllowlist, true);
+    await subagentTool.execute(
+      "network-handoff",
+      { action: "handoff", sessionId: session.id, task: "next" },
+      undefined, undefined, ctx,
+    );
+    assert.equal(starts, 2);
+    assert.equal(subagentPolicy?.network.strictAllowlist, true);
   } finally {
+    process.chdir(previousCwd);
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
     rmSync(cwd, { recursive: true, force: true });

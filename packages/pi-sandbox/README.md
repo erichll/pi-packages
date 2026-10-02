@@ -157,6 +157,7 @@ Domain authorization can be configured globally at
 ```json
 {
   "network": {
+    "strictAllowlist": false,
     "allowedDomains": [
       "github.com",
       "*.github.com",
@@ -179,13 +180,49 @@ The precedence is deterministic:
 
 1. A matching `deniedDomains` entry rejects the connection.
 2. Otherwise, a matching `allowedDomains` entry permits it without review.
-3. Otherwise, the canonical public hostname and port enter the existing
+3. Otherwise, if `strictAllowlist` is `true`, the connection is denied without
+   invoking the Runtime ask callback, model review, or human approval.
+4. Otherwise, the canonical public hostname and port enter the existing
    one-shot auto-review or human approval flow.
 
-Both arrays default to empty. That preserves the prior behavior: no persistent
-network authorization, with every eligible public connection reviewed once.
-The same trusted arrays govern main-agent Bash, built-in subagents, and the
+Both arrays default to empty and `strictAllowlist` defaults to `false`, preserving
+the existing per-connection approval behavior. The setting accepts only a boolean.
+With strict mode and an empty allowlist, all proxied destinations are denied.
+`deniedDomains: ["*"]` also blocks allowed entries because deny rules take priority.
+The same network policy governs main-agent Bash, user Bash, built-in subagents, and the
 sandboxed Bash tool loaded by protected native `pi-subagents` children.
+
+For a worker restricted to explicitly approved inference endpoints:
+
+```json
+{
+  "subagents": { "provider": "builtin" },
+  "network": {
+    "strictAllowlist": true,
+    "allowedDomains": ["inference.example.com:443"],
+    "deniedDomains": []
+  },
+  "hostIPC": { "mode": "off" }
+}
+```
+
+Replace the example hostname with your approved endpoint. Global and project
+`strictAllowlist` values merge with logical OR: a project cannot disable strict
+mode required globally. Domain lists still form unions, so a project **can add
+allowed destinations**. Both files are trusted policy inputs; the global allowlist
+is not an administrative upper bound on project permissions.
+
+Strict mode cannot be combined with `hostIPC.mode: "ask"`, since host execution
+would escape the network sandbox. The effective configuration is rejected before
+tools or workers are created; set Host-IPC mode to `off`. This is checked after
+global/project merging, and again after an embedding's Host-IPC override.
+
+Configuration is loaded when the extension is registered. Existing persistent
+workers keep their policy through follow-up, and handoff workers receive the same
+configured policy. Reload the extension and create new workers to apply file
+changes; there is no configuration hot reload. Broker startup failure never retries
+the worker outside the sandbox, and unavailable approval services cannot relax a
+strict network denial.
 
 Domain allowlists are not a complete data-loss-prevention boundary. A
 multi-tenant or user-uploadable destination such as `github.com` can itself be
@@ -229,7 +266,7 @@ approval warns that the first attempt may already have had partial side
 effects. Successful, timed-out, or aborted commands are never retried.
 
 Host forwarding is intentionally unavailable inside built-in subagents in
-this version.
+this version. It is also incompatible with `network.strictAllowlist: true`.
 
 ## Additional trusted read paths
 
@@ -269,8 +306,12 @@ In addition to user-level configuration at `~/.pi/agent/extensions/pi-sandbox/co
 ```
 
 When present, project configuration is merged with global configuration:
+
 - Array policies (`additionalAllowRead`, `allowedDomains`, `deniedDomains`, `preflightCommandPrefixes`) form a deduplicated union.
 - Scalar settings (`provider`, `mode`, `retryOnUnixSocketError`) allow project-level overrides.
+- `network.strictAllowlist` uses logical OR: `true` in either file enables it.
+  Both configuration files are trusted; project allowlist additions remain effective.
+- The merged configuration must not enable both strict allowlist and Host-IPC `ask`.
 
 **Read-only Security Guarantee**:
 Project-level configuration is explicitly protected in the sandbox policy (`denyWrite`),

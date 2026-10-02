@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Add opt-in `network.strictAllowlist` (default `false`) to deny unmatched
+  destinations without model or human approval. Forward the setting to Sandbox
+  Runtime for Bash and built-in workers, including persistent follow-up and
+  nested handoff.
+- Merge global/project strict mode with logical OR while retaining domain-list
+  unions. Both files remain trusted policy sources: projects can add endpoints
+  but cannot disable globally required strict enforcement.
+- Reject strict mode combined with Host-IPC `ask` after configuration merging
+  and embedding overrides. Keep non-strict approval and host forwarding behavior.
+- Cover real Linux broker network enforcement, persistent worker lifecycle and
+  startup failures with synthetic endpoints; isolate configuration tests from
+  the developer's working directory.
+
 ## 0.22.1 - 2026-10-01
 
 - Fix sandboxed Bash on Bun-compiled Pi: launching the Sandbox Runtime broker

@@ -17,6 +17,7 @@ import {
 } from "./approval.ts";
 import {
   loadPiSandboxConfig,
+  validatePiSandboxConfig,
   type HostIPCConfig,
   type NetworkConfig,
   type SubagentProvider,
@@ -220,6 +221,8 @@ async function performRegistration(
   let currentTurn = 0;
   const cwd = process.cwd();
   const config = loadPiSandboxConfig({ cwd });
+  const hostIPC = options.hostIPC ?? config.hostIPC;
+  validatePiSandboxConfig({ network: config.network, hostIPC });
   const subagentProvider =
     options.subagentProvider ?? config.subagents.provider;
   const isNativeSubagentChild = process.env.PI_SUBAGENT_CHILD === "1";
@@ -237,7 +240,6 @@ async function performRegistration(
     : undefined;
   const additionalAllowRead = config.filesystem.additionalAllowRead;
   const network = config.network;
-  const hostIPC = options.hostIPC ?? config.hostIPC;
   const subagents =
     subagentProvider === "builtin"
       ? (options.subagentManager ??
@@ -625,10 +627,13 @@ async function performRegistration(
       return;
     }
     if (ctx.hasUI) {
+      const networkMode = network.strictAllowlist
+        ? "strict network allowlist (unmatched destinations denied without review)"
+        : "per-connection network review";
       ctx.ui.notify(
         process.platform === "darwin"
-          ? `${EXTENSION_NAME} enabled: macOS Sandbox Runtime with static filesystem/domain policy and per-connection network review`
-          : `${EXTENSION_NAME} enabled: Linux Sandbox Runtime with static filesystem/domain policy and per-connection network review`,
+          ? `${EXTENSION_NAME} enabled: macOS Sandbox Runtime with static filesystem/domain policy and ${networkMode}`
+          : `${EXTENSION_NAME} enabled: Linux Sandbox Runtime with static filesystem/domain policy and ${networkMode}`,
         "info",
       );
     }

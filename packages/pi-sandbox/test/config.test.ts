@@ -14,6 +14,7 @@ import {
   loadPiSandboxConfig,
   mergePiSandboxConfigs,
   parsePiSandboxConfig,
+  parsePiSandboxConfigRaw,
   PROJECT_PI_SANDBOX_CONFIG_PATH,
 } from "../src/config.ts";
 
@@ -26,6 +27,7 @@ const defaultHostIPC = {
 const defaultNetwork = {
   allowedDomains: [] as string[],
   deniedDomains: [] as string[],
+  strictAllowlist: false,
 };
 
 function makeTempRoot(prefix: string): string {
@@ -58,7 +60,7 @@ test("defaults to the builtin provider when configuration is absent", () => {
       network: defaultNetwork,
       hostIPC: defaultHostIPC,
     });
-    assert.deepEqual(loadPiSandboxConfig({ home: root }), {
+    assert.deepEqual(loadPiSandboxConfig({ home: root, cwd: root }), {
       subagents: { provider: "builtin" },
       filesystem: { additionalAllowRead: [] },
       network: defaultNetwork,
@@ -95,6 +97,7 @@ test("loads the extension-local config and supports project-level config merge",
       network: {
         allowedDomains: ["github.com"],
         deniedDomains: ["uploads.github.com"],
+        strictAllowlist: false,
       },
       hostIPC: defaultHostIPC,
     });
@@ -128,6 +131,7 @@ test("loads the extension-local config and supports project-level config merge",
       network: {
         allowedDomains: ["github.com", "api.example.com"],
         deniedDomains: ["uploads.github.com"],
+        strictAllowlist: false,
       },
       hostIPC: {
         mode: "ask",
@@ -271,8 +275,83 @@ test("accepts, trims, and deduplicates network domain policies", () => {
     {
       allowedDomains: ["github.com", "*.github.com:443"],
       deniedDomains: ["uploads.github.com", "*:22"],
+      strictAllowlist: false,
     },
   );
+});
+
+test("strict allowlist is an opt-in boolean and raw parsing preserves omission", () => {
+  assert.deepEqual(parsePiSandboxConfigRaw({ network: {} }), { network: {} });
+  assert.equal(parsePiSandboxConfig({}).network.strictAllowlist, false);
+  for (const strictAllowlist of [false, true]) {
+    assert.equal(
+      parsePiSandboxConfig({ network: { strictAllowlist } }).network.strictAllowlist,
+      strictAllowlist,
+    );
+  }
+  for (const strictAllowlist of [null, 0, 1, "true", "false", [], {}]) {
+    assert.throws(
+      () => parsePiSandboxConfig({ network: { strictAllowlist } }),
+      /network\.strictAllowlist must be a boolean/,
+    );
+  }
+});
+
+test("strict allowlist merges with OR while trusted domain lists remain unions", () => {
+  for (const globalStrict of [undefined, false, true]) {
+    for (const projectStrict of [undefined, false, true]) {
+      const merged = mergePiSandboxConfigs(
+        parsePiSandboxConfig({ network: {
+          allowedDomains: ["global.example.com"], deniedDomains: ["*:22"],
+          strictAllowlist: globalStrict,
+        } }),
+        parsePiSandboxConfigRaw({ network: {
+          allowedDomains: ["project.example.com", "global.example.com"],
+          deniedDomains: ["blocked.example.com"], strictAllowlist: projectStrict,
+        } }),
+      );
+      assert.equal(merged.network.strictAllowlist, !!(globalStrict || projectStrict));
+      assert.deepEqual(merged.network.allowedDomains, ["global.example.com", "project.example.com"]);
+      assert.deepEqual(merged.network.deniedDomains, ["*:22", "blocked.example.com"]);
+    }
+  }
+});
+
+test("strict allowlist rejects host IPC only after all file layers are merged", () => {
+  const root = makeTempRoot("pi-sandbox-strict-merge-");
+  const workspace = join(root, "workspace");
+  const globalPath = getPiSandboxConfigPath(root);
+  const projectPath = getProjectPiSandboxConfigPath(workspace);
+  mkdirSync(dirname(globalPath), { recursive: true });
+  mkdirSync(dirname(projectPath), { recursive: true });
+  const conflict = /strictAllowlist=true.*hostIPC\.mode="ask"/;
+  try {
+    const global = { network: { strictAllowlist: true }, hostIPC: { mode: "ask" } };
+    writeFileSync(globalPath, JSON.stringify(global));
+    assert.throws(() => parsePiSandboxConfig(global), conflict);
+    assert.throws(() => loadPiSandboxConfig({ path: globalPath }), conflict);
+    assert.throws(() => loadPiSandboxConfig({ home: root, cwd: workspace }), conflict);
+
+    // A project may turn off host execution to satisfy the global strict policy.
+    writeFileSync(projectPath, JSON.stringify({ hostIPC: { mode: "off" } }));
+    const resolved = loadPiSandboxConfig({ home: root, cwd: workspace });
+    assert.equal(resolved.network.strictAllowlist, true);
+    assert.equal(resolved.hostIPC.mode, "off");
+
+    writeFileSync(globalPath, JSON.stringify({ network: { strictAllowlist: true } }));
+    writeFileSync(projectPath, JSON.stringify({
+      network: { strictAllowlist: false }, hostIPC: { mode: "ask" },
+    }));
+    assert.throws(() => loadPiSandboxConfig({ home: root, cwd: workspace }), conflict);
+
+    writeFileSync(globalPath, JSON.stringify({ hostIPC: { mode: "ask" } }));
+    writeFileSync(projectPath, JSON.stringify({ network: { strictAllowlist: true } }));
+    assert.throws(() => loadPiSandboxConfig({ home: root, cwd: workspace }), conflict);
+    writeFileSync(projectPath, JSON.stringify({ network: { strictAllowlist: false } }));
+    assert.equal(loadPiSandboxConfig({ home: root, cwd: workspace }).hostIPC.mode, "ask");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("rejects malformed or invalid network policies with a precise path", () => {
@@ -421,4 +500,3 @@ test("mergePiSandboxConfigs correctly merges array unions and scalar overrides",
   assert.deepEqual(merged.hostIPC.preflightCommandPrefixes, ["ls", "tmux"]);
   assert.equal(merged.hostIPC.retryOnUnixSocketError, true);
 });
-

@@ -59,9 +59,11 @@ test("the default policy limits writes and protects sandbox configuration", () =
   );
   assert.deepEqual(policy.network.allowedDomains, []);
   assert.deepEqual(policy.network.deniedDomains, []);
+  assert.equal(policy.network.strictAllowlist, false);
   const runtime = toSandboxRuntimeConfig(policy);
   assert.equal(runtime.filesystem.allowGitConfig, true);
   assert.deepEqual(runtime.network.allowedDomains, []);
+  assert.equal(runtime.network.strictAllowlist, false);
 });
 
 test("the default policy denies writes to common workspace secrets", () => {
@@ -151,7 +153,7 @@ test("network policy is copied into the policy and runtime config", () => {
   const allowedDomains = ["github.com"];
   const deniedDomains = ["uploads.github.com", "*:22"];
   const policy = createDefaultPolicy("/workspace/project", {
-    network: { allowedDomains, deniedDomains },
+    network: { allowedDomains, deniedDomains, strictAllowlist: true },
   });
 
   allowedDomains.push("later.example.com");
@@ -163,6 +165,9 @@ test("network policy is copied into the policy and runtime config", () => {
   assert.deepEqual(policy.network.allowUnixSockets, []);
 
   const runtime = toSandboxRuntimeConfig(policy);
+  assert.equal(runtime.network.strictAllowlist, true);
+  policy.network.strictAllowlist = false;
+  assert.equal(runtime.network.strictAllowlist, true);
   policy.network.allowedDomains.push("policy-change.example.com");
   policy.network.deniedDomains.length = 0;
   assert.deepEqual(runtime.network.allowedDomains, ["github.com"]);
@@ -170,4 +175,10 @@ test("network policy is copied into the policy and runtime config", () => {
   assert.equal(runtime.network.allowLocalBinding, false);
   assert.equal(runtime.network.allowAllUnixSockets, false);
   assert.deepEqual(runtime.network.allowUnixSockets, []);
+});
+
+test("legacy programmatic policies without strictAllowlist preserve approval behavior", () => {
+  const policy = createDefaultPolicy("/workspace/project");
+  delete policy.network.strictAllowlist;
+  assert.equal(toSandboxRuntimeConfig(policy).network.strictAllowlist, false);
 });

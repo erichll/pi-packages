@@ -23,6 +23,8 @@ export type HostIPCConfig = {
 export type NetworkConfig = {
   readonly allowedDomains: readonly string[];
   readonly deniedDomains: readonly string[];
+  /** Deny unmatched destinations without review. Defaults to false. */
+  readonly strictAllowlist?: boolean;
 };
 
 export type PiSandboxConfig = {
@@ -34,7 +36,7 @@ export type PiSandboxConfig = {
   filesystem: {
     additionalAllowRead: readonly string[];
   };
-  network: NetworkConfig;
+  network: NetworkConfig & { readonly strictAllowlist: boolean };
   hostIPC: HostIPCConfig;
 };
 
@@ -57,6 +59,7 @@ export const DEFAULT_PI_SANDBOX_CONFIG: Readonly<PiSandboxConfig> = Object.freez
     network: Object.freeze({
       allowedDomains: Object.freeze([]),
       deniedDomains: Object.freeze([]),
+      strictAllowlist: false,
     }),
     hostIPC: Object.freeze({
       mode: "off",
@@ -263,9 +266,15 @@ export function parsePiSandboxConfigRaw(value: unknown): PartialPiSandboxConfig 
     }
     rejectUnknownKeys(
       value.network,
-      ["allowedDomains", "deniedDomains"],
+      ["allowedDomains", "deniedDomains", "strictAllowlist"],
       "network",
     );
+    const strictAllowlist = value.network.strictAllowlist;
+    if (strictAllowlist !== undefined && typeof strictAllowlist !== "boolean") {
+      throw new Error(
+        "invalid pi-sandbox configuration: network.strictAllowlist must be a boolean",
+      );
+    }
     const normalizeDomainList = (
       key: "allowedDomains" | "deniedDomains",
     ): string[] | undefined => {
@@ -310,6 +319,7 @@ export function parsePiSandboxConfigRaw(value: unknown): PartialPiSandboxConfig 
     parsedNetwork = {
       ...(allowed !== undefined ? { allowedDomains: allowed } : {}),
       ...(denied !== undefined ? { deniedDomains: denied } : {}),
+      ...(strictAllowlist !== undefined ? { strictAllowlist } : {}),
     };
   }
 
@@ -376,7 +386,24 @@ export function parsePiSandboxConfigRaw(value: unknown): PartialPiSandboxConfig 
 }
 
 export function parsePiSandboxConfig(value: unknown): PiSandboxConfig {
-  const raw = parsePiSandboxConfigRaw(value);
+  const config = resolvePiSandboxConfig(parsePiSandboxConfigRaw(value));
+  validatePiSandboxConfig(config);
+  return config;
+}
+
+/** Validate the effective policy, after merging configuration layers. */
+export function validatePiSandboxConfig(
+  config: { network: NetworkConfig; hostIPC: HostIPCConfig },
+): void {
+  if (config.network.strictAllowlist && config.hostIPC.mode === "ask") {
+    throw new Error(
+      'invalid pi-sandbox configuration: network.strictAllowlist=true cannot be combined with hostIPC.mode="ask"; set hostIPC.mode="off" to keep execution sandboxed',
+    );
+  }
+}
+
+/** Apply defaults without validating conflicts in an intermediate layer. */
+function resolvePiSandboxConfig(raw: PartialPiSandboxConfig): PiSandboxConfig {
   const provider =
     raw.subagents?.provider ?? DEFAULT_PI_SANDBOX_CONFIG.subagents.provider;
   const isPiSubagents = provider === "pi-subagents";
@@ -400,6 +427,7 @@ export function parsePiSandboxConfig(value: unknown): PiSandboxConfig {
       ],
     },
     network: {
+      strictAllowlist: raw.network?.strictAllowlist ?? false,
       allowedDomains: [
         ...(raw.network?.allowedDomains ??
           DEFAULT_PI_SANDBOX_CONFIG.network.allowedDomains),
@@ -435,6 +463,7 @@ function defaultPiSandboxConfig(): PiSandboxConfig {
     network: {
       allowedDomains: [...DEFAULT_PI_SANDBOX_CONFIG.network.allowedDomains],
       deniedDomains: [...DEFAULT_PI_SANDBOX_CONFIG.network.deniedDomains],
+      strictAllowlist: DEFAULT_PI_SANDBOX_CONFIG.network.strictAllowlist,
     },
     hostIPC: {
       mode: DEFAULT_PI_SANDBOX_CONFIG.hostIPC.mode,
@@ -507,7 +536,7 @@ export function mergePiSandboxConfigs(
     allowedNativeAgents = [...new Set([...trustedAgents, ...projectAgents])];
   }
 
-  return {
+  const merged: PiSandboxConfig = {
     subagents: {
       provider,
       ...(isPiSubagents
@@ -526,6 +555,10 @@ export function mergePiSandboxConfigs(
       ],
     },
     network: {
+      // Both configuration files are trusted policy inputs. Projects may add
+      // destinations, but cannot turn off strict enforcement required globally.
+      strictAllowlist:
+        trusted.network.strictAllowlist || (project.network?.strictAllowlist ?? false),
       allowedDomains: [
         ...new Set([
           ...trusted.network.allowedDomains,
@@ -552,6 +585,8 @@ export function mergePiSandboxConfigs(
         trusted.hostIPC.retryOnUnixSocketError,
     },
   };
+  validatePiSandboxConfig(merged);
+  return merged;
 }
 
 export function loadPiSandboxConfig(
@@ -572,9 +607,8 @@ export function loadPiSandboxConfig(
   const globalPath = getPiSandboxConfigPath(options.home);
   let globalConfig: PiSandboxConfig | undefined;
   try {
-    globalConfig = parsePiSandboxConfigFile(
-      globalPath,
-      readPiSandboxConfigFile(globalPath),
+    globalConfig = resolvePiSandboxConfig(
+      parsePiSandboxConfigFileRaw(globalPath, readPiSandboxConfigFile(globalPath)),
     );
   } catch (error) {
     if (!isNotFoundError(error)) {
@@ -599,5 +633,6 @@ export function loadPiSandboxConfig(
   if (projectRaw) {
     return mergePiSandboxConfigs(base, projectRaw);
   }
+  validatePiSandboxConfig(base);
   return base;
 }

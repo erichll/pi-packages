@@ -1,0 +1,13 @@
+{
+  "subagents": {
+    "provider": "builtin"
+  },
+  "network": {
+    "strictAllowlist": true,
+    "allowedDomains": ["inference.example.com:443"],
+    "deniedDomains": []
+  },
+  "hostIPC": {
+    "mode": "off"
+  }
+}

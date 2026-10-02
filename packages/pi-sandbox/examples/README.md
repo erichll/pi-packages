@@ -25,10 +25,15 @@ pi-subagents, `builtin` is not an option.
 | `pi-sandbox.config.provider-builtin.json` | `~/.pi/agent/extensions/pi-sandbox/config.json` |
 | `pi-sandbox.config.provider-off.json` | `~/.pi/agent/extensions/pi-sandbox/config.json` |
 | `pi-sandbox.config.provider-pi-subagents.json` | `~/.pi/agent/extensions/pi-sandbox/config.json` |
+| `pi-sandbox.config.strict-allowlist.json` | `~/.pi/agent/extensions/pi-sandbox/config.json` (replace the example endpoint) |
 | `pi-subagents.config.scheduled-runs-disabled.json` | `~/.pi/agent/extensions/subagent/config.json` (does not exist yet; create the directory) |
 
 The three `pi-sandbox.config.provider-*.json` files differ only in `subagents.provider`
 (plus the `protection` / `allowedNativeAgents` fields that `pi-subagents` requires). Pick one.
+
+The strict-allowlist example uses `builtin` and Host-IPC `off`. It denies destinations
+outside the configured allowlist without review. Replace `inference.example.com:443`
+with an approved endpoint. `strictAllowlist: true` cannot coexist with Host-IPC `ask`.
 
 ## Option A: `provider: "off"`
 
@@ -110,7 +115,8 @@ above, including `builtin` — you lose orchestration, not the prompt library.
 
 ## Project config overrides the global one
 
-`./.pi/extensions/pi-sandbox/config.json` takes precedence over
-`~/.pi/agent/extensions/pi-sandbox/config.json`. If the target directory has that file, update
-it too or the global change has no effect. Project scope only allows scalar overrides
-(`provider`, `hostIPC.mode`, `hostIPC.retryOnUnixSocketError`).
+`./.pi/extensions/pi-sandbox/config.json` overrides global scalar settings
+(`provider`, `hostIPC.mode`, `hostIPC.retryOnUnixSocketError`). Array policies form
+deduplicated unions. `network.strictAllowlist` uses logical OR: a project cannot turn
+off a global `true`, but can add allowed endpoints. Both files are trusted policy
+sources. When enabling strict mode, ensure the merged Host-IPC mode is `off`.

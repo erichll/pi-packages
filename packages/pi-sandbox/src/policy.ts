@@ -115,6 +115,7 @@ export type SandboxPolicy = {
   network: {
     allowedDomains: string[];
     deniedDomains: string[];
+    strictAllowlist?: boolean;
     allowLocalBinding: boolean;
     allowAllUnixSockets: boolean;
     allowUnixSockets: string[];
@@ -273,6 +274,7 @@ export function createDefaultPolicy(
     network: {
       allowedDomains: [...(options.network?.allowedDomains ?? [])],
       deniedDomains: [...(options.network?.deniedDomains ?? [])],
+      strictAllowlist: options.network?.strictAllowlist ?? false,
       allowLocalBinding: false,
       allowAllUnixSockets: false,
       allowUnixSockets: [],
@@ -296,6 +298,7 @@ export function toSandboxRuntimeConfig(
     network: {
       allowedDomains: [...policy.network.allowedDomains],
       deniedDomains: [...policy.network.deniedDomains],
+      strictAllowlist: policy.network.strictAllowlist ?? false,
       allowLocalBinding: policy.network.allowLocalBinding,
       allowAllUnixSockets: policy.network.allowAllUnixSockets,
       allowUnixSockets: [...policy.network.allowUnixSockets],

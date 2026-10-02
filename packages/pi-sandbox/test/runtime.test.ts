@@ -100,6 +100,7 @@ test("a real Bun compiled host forks one Node broker and exchanges IPC", {
     writeFileSync(entry, `
       import { existsSync, mkdirSync } from 'node:fs';
       import { runSandboxedCommand } from ${JSON.stringify(join(source, "runner.ts"))};
+      import { createDefaultPolicy } from ${JSON.stringify(join(source, "policy.ts"))};
       import { resolvePiInvocation } from ${JSON.stringify(join(source, "subagent.ts"))};
       export default function(pi) {
       pi.on('session_start', async (_event, ctx) => {
@@ -107,6 +108,9 @@ test("a real Bun compiled host forks one Node broker and exchanges IPC", {
       const result = await runSandboxedCommand({
         cwd: process.cwd(), command: 'probe',
         broker: { modulePath: process.env.BROKER },
+        policy: createDefaultPolicy(process.cwd(), {
+          network: { allowedDomains: [], deniedDomains: [], strictAllowlist: true },
+        }),
         onData(data) { output += data.toString(); },
         async review() { return 'deny'; },
       });
@@ -144,6 +148,7 @@ test("a real Bun compiled host forks one Node broker and exchanges IPC", {
     assert.equal(value.result.exitCode, 0);
     assert.equal(value.broker.execPath, realpathSync(process.execPath));
     assert.equal(value.broker.ppid, value.pid);
+    assert.equal(value.broker.network.strictAllowlist, true);
     assert.notEqual(value.broker.pid, value.pid);
     assert.deepEqual(value.broker.argv.slice(1), [fixture]);
     assert.deepEqual(value.invocation, { command: binary, args: [] });
