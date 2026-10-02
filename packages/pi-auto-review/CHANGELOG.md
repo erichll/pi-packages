@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.23.0 - 2026-10-02
 
 - Add opt-in `model: "current"` to review approval requests with the active Pi
   session model and provider, reflecting model changes on subsequent reviews.

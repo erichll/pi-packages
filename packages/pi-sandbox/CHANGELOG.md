@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.23.0 - 2026-10-02
 
 - Add opt-in `network.strictAllowlist` (default `false`) to deny unmatched
   destinations without model or human approval. Forward the setting to Sandbox
@@ -11,6 +11,8 @@
   but cannot disable globally required strict enforcement.
 - Reject strict mode combined with Host-IPC `ask` after configuration merging
   and embedding overrides. Keep non-strict approval and host forwarding behavior.
+- Require `@erichll/pi-auto-review` `^0.23.0` for current-session review models
+  and full-command execution-context validation.
 - Cover real Linux broker network enforcement, persistent worker lifecycle and
   startup failures with synthetic endpoints; isolate configuration tests from
   the developer's working directory.
