@@ -41,7 +41,7 @@ export {
   buildUserReviewStatus,
 } from "./user-feedback.ts";
 
-export { parseDecision } from "./policy.ts";
+export { executionText, parseDecision } from "./policy.ts";
 export * from "./broker/index.ts";
 export {
   sandboxTrapToBoundaryRequest,
@@ -353,6 +353,9 @@ export function createPiAutoReviewExtension(
         deterministicHardDeny({
           surface: "bash_escalated",
           command: request.command,
+          executedUnit: request.executedUnit,
+          fullCommand: request.fullCommand,
+          matchedPattern: request.matchedPattern,
           path: request.path,
           target: request.destination,
           toolName: request.toolName,

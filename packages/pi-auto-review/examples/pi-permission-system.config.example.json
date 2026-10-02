@@ -100,7 +100,6 @@
     "mcp__atlassian__*": "allow",
     "mcp__pencil__*": "allow",
     "ask_user": "allow",
-    "todo": "allow",
     "plan_mode_question": "allow",
     "plan_mode_complete": "allow",
     "update_plan": "allow",
@@ -115,6 +114,7 @@
     "obs_recall": "allow",
     "subagent": "allow",
     "subagents_enable": "allow",
+    "subagent_supervisor": "allow",
     "contact_supervisor": "allow",
     "bg_wait": "allow"
   }

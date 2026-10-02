@@ -19,6 +19,17 @@ export type BoundaryRequest = {
   operation: string;
   cwd: string;
   command?: string;
+  /** Command the rule-matched unit actually runs after unwrapping a wrapper. */
+  executedUnit?: string;
+  /** The complete program that will execute, when it differs from `command`. */
+  fullCommand?: string;
+  /** Rule (or synthetic sentinel) that produced this ask. */
+  matchedPattern?: string;
+  /**
+   * Set only on the bounded reviewer view when a command fact was truncated;
+   * never set on the stored request used for hashing or hard denies.
+   */
+  fullCommandTruncated?: boolean;
   path?: string;
   resolvedPath?: string;
   destination?: string;

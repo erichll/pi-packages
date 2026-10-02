@@ -4,6 +4,8 @@ import {
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   buildClassifierTranscript,
+  commandExpansionLimitExceeded,
+  executionText,
   parseDecision,
   type ModelDecision,
 } from "../policy.ts";
@@ -29,6 +31,7 @@ import {
   applyReviewerInputBudget,
   preflightPart,
   reviewPreflight,
+  reviewerRequestView,
   sharedReviewContext,
   textFromAssistant,
 } from "./input.ts";
@@ -87,6 +90,37 @@ export async function complete(
     sharedContext,
     config.maxReviewerInputTokens,
   );
+  // Hard denies already ran on the raw text plus bounded payloads. An
+  // incomplete expansion must reach the human terminal, even with a trusted
+  // reviewer-retry override. The older display-truncation fallback can still
+  // be lifted by that override.
+  const deferralReason = commandExpansionLimitExceeded(request)
+    ? "Nested command expansion exceeds the local scan budget; a human must decide."
+    : reviewerRequestView(request).fullCommandTruncated && !reviewerContext?.userOverride
+      ? "The complete command exceeds the reviewer input bound and was truncated; a human must decide."
+      : undefined;
+  if (deferralReason) {
+    const deferredSummary: ReviewExecutionSummary = {
+      attempts: [],
+      errorCounts: {},
+      durationMs: Date.now() - started,
+      transcript,
+      preflight,
+    };
+    return {
+      decision: {
+        outcome: "defer",
+        risk_level: "high",
+        user_authorization: "unknown",
+        rationale: deferralReason,
+      },
+      attempts: 0,
+      retryErrors: [],
+      durationMs: deferredSummary.durationMs,
+      transcript,
+      summary: deferredSummary,
+    };
+  }
   const deadlineAt = started + config.timeoutMs;
   const controller = new AbortController();
   const onSessionAbort = () => controller.abort();
@@ -338,10 +372,9 @@ export function denialLabel(
     denial.request.resolvedPath ??
     denial.request.path ??
     denial.request.destination ??
-    denial.request.command ??
+    executionText(denial.request) ??
     denial.request.toolName ??
     denial.request.operation;
   const compact = String(target).replace(/\s+/g, " ").slice(0, 90);
   return `${index + 1}. ${denial.request.surface}: ${compact} — ${denial.review.rationale.slice(0, 70)}`;
 }
-

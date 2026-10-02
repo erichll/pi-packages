@@ -51,7 +51,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "^0.0.77",
-    "@erichll/pi-auto-review": "^0.22.1",
+    "@erichll/pi-auto-review": "^0.23.0",
     "jiti": "2.7.0"
   },
   "peerDependencies": {

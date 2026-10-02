@@ -95,6 +95,24 @@ Deterministic hard denies cover recursive forced wipes of `/`, `~`, and
 `$HOME`. A named path under `/home/...` is reviewed by the model as high-risk,
 not treated as a home-directory wipe.
 
+Review and authorization use the command that will actually execute, not only
+the unit the matched rule names. When a wrapper (`sudo`, `env`, `xargs`,
+`bash -c`, `eval`, or an interpreter payload) hides the real program, the
+permission-system ask payload supplies the executed unit, the complete command,
+and the matched rule, and those facts are what get hashed, reviewed, and
+hard-denied. Hard denies check the complete command, outer unit, and executed
+unit independently. Structural rules mask inert shell literals without turning
+named paths into root/home targets, and follow nested shell payloads. Other
+interpreter payloads and heredoc bodies are conservatively scanned as raw text;
+credential rules also keep scanning raw text. When a command fact exceeds the
+reviewer bound (10 KiB), the ask defers to a human instead of being reviewed from
+a truncated program.
+
+Nested interpreter expansion is limited to 32 payloads and 32 KiB of cumulative
+payload text per command fact, across all recursion levels. Exceeding either
+budget keeps the raw-command hard-deny checks and otherwise defers to a human
+without calling the model. A reviewer-retry override does not bypass this limit.
+
 ## Configuration
 
 Configuration is resolved in this order:

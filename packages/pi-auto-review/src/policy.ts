@@ -1,4 +1,8 @@
 import { isPathSurface } from "./path-surfaces.ts";
+import {
+  shellExpansionLimitExceeded,
+  structuralScanText,
+} from "./review/shell-text.ts";
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
@@ -21,12 +25,21 @@ export type PermissionDetailsLike = {
   toolInputPreview?: unknown;
   accessIntent?: unknown;
   forwarding?: unknown;
+  /** Structured permission-system ask; the only source of the execution facts. */
+  payload?: unknown;
+  /** Pre-projected execution facts (broker hard-deny entry). */
+  executedUnit?: unknown;
+  fullCommand?: unknown;
+  matchedPattern?: unknown;
 };
 
 export type NormalizedPermissionEvidence = {
   surface: string;
   value?: string;
   command?: string;
+  executedUnit?: string;
+  fullCommand?: string;
+  matchedPattern?: string;
   path?: string;
   resolvedPath?: string;
   destination?: string;
@@ -155,6 +168,9 @@ export type RelevantBoundaryRequest = {
   operation?: string;
   cwd?: string;
   command?: string;
+  executedUnit?: string;
+  fullCommand?: string;
+  matchedPattern?: string;
   path?: string;
   resolvedPath?: string;
   destination?: string;
@@ -310,6 +326,20 @@ function parsedPreviewCommand(value: unknown): string | undefined {
   }
 }
 
+function payloadFullCommand(
+  payload: Record<string, unknown> | undefined,
+): string | undefined {
+  const evidence = payload?.evidence;
+  if (!Array.isArray(evidence)) return undefined;
+  for (const entry of evidence) {
+    const candidate = record(entry);
+    if (candidate?.label !== "full command") continue;
+    const text = nonEmptyString(candidate.text);
+    if (text) return text;
+  }
+  return undefined;
+}
+
 /** Normalize direct and forwarded permission-system evidence without trusting it. */
 export function normalizePermissionEvidence(
   details: PermissionDetailsLike,
@@ -355,10 +385,33 @@ export function normalizePermissionEvidence(
     nonEmptyString(details.agentName) ??
     nonEmptyString(forwarding?.requesterAgentName);
   const sessionId = nonEmptyString(forwarding?.requesterSessionId);
+  const payload = record(details.payload);
+  const payloadRequest = record(payload?.request);
+  const matchedPattern =
+    nonEmptyString(payloadRequest?.matchedPattern) ??
+    nonEmptyString(details.matchedPattern);
+  const executedUnitCandidate =
+    nonEmptyString(payloadRequest?.executedUnit) ??
+    nonEmptyString(details.executedUnit);
+  const fullCommandCandidate =
+    payloadFullCommand(payload) ?? nonEmptyString(details.fullCommand);
+  // Suppress facts that add nothing over the gated unit: duplicating the same
+  // text would only widen the reviewer view and add hash noise.
+  const executedUnit =
+    executedUnitCandidate && executedUnitCandidate !== value
+      ? executedUnitCandidate
+      : undefined;
+  const fullCommand =
+    fullCommandCandidate && fullCommandCandidate !== command
+      ? fullCommandCandidate
+      : undefined;
   return {
     surface,
     value,
     command,
+    ...(executedUnit ? { executedUnit } : {}),
+    ...(fullCommand ? { fullCommand } : {}),
+    ...(matchedPattern ? { matchedPattern } : {}),
     path,
     resolvedPath: accessIntent?.boundaryValue,
     destination,
@@ -366,6 +419,22 @@ export function normalizePermissionEvidence(
     requester:
       agentName || sessionId ? { agentName, sessionId } : undefined,
   };
+}
+
+/**
+ * The text that will actually execute, most complete fact first.
+ *
+ * Used for transcript matching, denial labels, and surface inference. Keep
+ * the outer command ahead of its extracted payload: wrapper options and
+ * environment assignments are part of execution too. Hard denies scan all
+ * three facts independently, and grant hashes bind all three.
+ */
+export function executionText(source: {
+  command?: string;
+  executedUnit?: string;
+  fullCommand?: string;
+}): string | undefined {
+  return source.fullCommand ?? source.command ?? source.executedUnit;
 }
 
 export function effectiveCommand(details: PermissionDetailsLike): string | undefined {
@@ -377,6 +446,20 @@ export type HardDeny = {
   reason: string;
 };
 
+function executionCommands(details: PermissionDetailsLike): string[] {
+  const evidence = normalizePermissionEvidence(details);
+  return [...new Set([
+    evidence.fullCommand,
+    evidence.command,
+    evidence.executedUnit,
+  ].flatMap((command) => command?.trim() ? [command.trim()] : []))];
+}
+
+/** Hard denies run first; incomplete expansion then requires a human decision. */
+export function commandExpansionLimitExceeded(details: PermissionDetailsLike): boolean {
+  return executionCommands(details).some(shellExpansionLimitExceeded);
+}
+
 /**
  * Keep this list narrow: these checks are terminal and cannot be overridden by
  * the model or the user prompt. Ambiguous or merely high-risk actions belong in
@@ -385,10 +468,26 @@ export type HardDeny = {
 export function deterministicHardDeny(
   details: PermissionDetailsLike,
 ): HardDeny | undefined {
-  const command = effectiveCommand(details)?.trim();
-  if (!command) return undefined;
+  // These facts are complementary. Unwrapping can omit an env assignment,
+  // while the full program can contain syntax our shell scanner cannot peel.
+  // Scan independently so unrelated projections cannot form a synthetic pipe
+  // or staged credential upload when concatenated.
+  for (const command of executionCommands(details)) {
+    const denial = hardDenyCommand(command);
+    if (denial) return denial;
+  }
+  return undefined;
+}
 
-  for (const segment of command.split(/&&|\|\||;|\n/)) {
+function hardDenyCommand(command: string): HardDeny | undefined {
+  // Structural rules run on the literal-masked skeleton so a literal mention
+  // inside a commit message or an `echo` argument is not a wipe, while nested
+  // interpreter payloads are still scanned. Credential/data rules below stay
+  // on the raw text: a quoted `"$HOME/.aws/credentials"` is still the operand
+  // of a real upload.
+  const structural = structuralScanText(command);
+
+  for (const segment of structural.split(/&&|\|\||;|\n/)) {
     const isRm = /(?:^|\s)(?:\/[^\s/]+)*\/?rm(?:\s|$)/i.test(segment);
     const recursive =
       /(?:^|\s)--recursive(?:\s|$)/i.test(segment) ||
@@ -411,12 +510,12 @@ export function deterministicHardDeny(
 
   if (
     /\bcurl\b[^;\n]*(?:--insecure\b|-[A-Za-z]*k[A-Za-z]*(?:\s|$))/i.test(
-      command,
+      structural,
     ) ||
-    /\bwget\b[^;\n]*--no-check-certificate\b/i.test(command) ||
-    /\bgit\s+config\b[^;\n]*http\.sslverify\s+false\b/i.test(command) ||
-    /\bnpm\s+config\s+set\s+strict-ssl\s+false\b/i.test(command) ||
-    /\bNODE_TLS_REJECT_UNAUTHORIZED\s*=\s*0\b/i.test(command)
+    /\bwget\b[^;\n]*--no-check-certificate\b/i.test(structural) ||
+    /\bgit\s+config\b[^;\n]*http\.sslverify\s+false\b/i.test(structural) ||
+    /\bnpm\s+config\s+set\s+strict-ssl\s+false\b/i.test(structural) ||
+    /\bNODE_TLS_REJECT_UNAUTHORIZED\s*=\s*0\b/i.test(structural)
   ) {
     return {
       rule: "transport-security-weakening",
@@ -840,7 +939,7 @@ function relevanceReason(
   | "provider-branch-protection"
   | undefined {
   if (request.toolCallId && call.id === request.toolCallId) return "same-tool";
-  const currentCommand = request.command || "";
+  const currentCommand = executionText(request) || "";
   const priorCommand = commandArgument(call);
   const pushedBranch = explicitPushBranch(currentCommand);
   const providerQuery = providerBranchQuery(priorCommand);
@@ -997,8 +1096,9 @@ function surfaceProfile(
 ): EvidenceSurfaceProfile {
   if (request.agentName || request.requesterSessionId) return "forwarded";
   if (request.surface === "network" || request.destination) return "network";
-  if (/\bgit\b[\s\S]*\bpush\b/i.test(request.command ?? "")) return "git-push";
-  if (/\b(?:rm|rmdir|unlink|trash|delete)\b/i.test(request.command ?? "")) {
+  const command = executionText(request) ?? "";
+  if (/\bgit\b[\s\S]*\bpush\b/i.test(command)) return "git-push";
+  if (/\b(?:rm|rmdir|unlink|trash|delete)\b/i.test(command)) {
     return "delete";
   }
   return "generic";
@@ -1043,7 +1143,7 @@ function exactStructuredMatch(
   }
   const args = call.arguments as Record<string, unknown>;
   const pairs: Array<[unknown, unknown]> = [
-    [args.command, request.command],
+    [args.command, executionText(request)],
     [args.path, request.path],
     [args.resolvedPath, request.resolvedPath],
     [args.destination, request.destination],
@@ -1100,7 +1200,7 @@ function toolArgumentCoveredByRequest(
     return sameReviewerField(actual, request.destination ?? request.path);
   }
   if (key === "value") {
-    return [request.command, request.path, request.destination].some(
+    return [executionText(request), request.path, request.destination].some(
       (expected) => sameReviewerField(actual, expected),
     );
   }
@@ -1112,7 +1212,7 @@ function toolArgumentCoveredByRequest(
     });
   }
   const expected = ({
-    command: request.command,
+    command: executionText(request),
     path: request.path,
     resolvedPath: request.resolvedPath,
     destination: request.destination,

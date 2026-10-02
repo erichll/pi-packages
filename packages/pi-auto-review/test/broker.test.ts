@@ -524,6 +524,54 @@ test("the exact-match hash ignores retry-minted identifiers (requestId, toolCall
   );
 });
 
+test("the exact-match hash binds the whole executed program", () => {
+  const wrapped: BoundaryRequest = {
+    ...request,
+    surface: "command",
+    command: "python3",
+    fullCommand: "python3 - <<'PY'\nprint(1)\nPY",
+    executedUnit: "rm -rf /tmp/a",
+    matchedPattern: "<opaque-bash-wrapper>",
+  };
+  const other: BoundaryRequest = {
+    ...wrapped,
+    fullCommand: "python3 - <<'PY'\nprint(2)\nPY",
+  };
+  assert.notEqual(boundaryRequestHash(wrapped), boundaryRequestHash(other));
+  assert.equal(
+    boundaryRequestHash(wrapped),
+    boundaryRequestHash({ ...wrapped, id: "retry", toolCallId: "call-retry" }),
+  );
+});
+
+test("a grant minted for one heredoc body cannot be consumed for another", async () => {
+  const grants = new OneShotGrantStore(60_000, () => 1_000);
+  const broker = new BoundaryApprovalBroker({
+    reviewer: async () => allowReview,
+    grants,
+  });
+  const first: BoundaryRequest = {
+    ...request,
+    surface: "command",
+    command: "python3",
+    fullCommand: "python3 - <<'PY'\nprint(1)\nPY",
+  };
+  const decision = await broker.review(first, {
+    sessionId: "session-1",
+    scopeKey: "turn-1",
+    issueGrant: true,
+  });
+  assert.equal(decision.kind, "allow");
+  const token = decision.kind === "allow" ? decision.grant?.token : undefined;
+  assert.ok(token);
+  const second: BoundaryRequest = {
+    ...first,
+    fullCommand: "python3 - <<'PY'\nprint(2)\nPY",
+  };
+  assert.equal(broker.consumeGrant(second, "session-1", token!), false);
+  assert.equal(broker.consumeGrant(first, "session-1", token!), true);
+});
+
 test("approve override survives a retried tool call id and a shifted turn scope", async () => {
   let now = 1_000;
   let calls = 0;

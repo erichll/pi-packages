@@ -4,6 +4,39 @@
 
 - Add opt-in `model: "current"` to review approval requests with the active Pi
   session model and provider, reflecting model changes on subsequent reviews.
+- Decide, authorize, and hard-deny on the command that will actually execute,
+  not only the rule-matched unit. The permission-system ask payload is now
+  normalized into `executedUnit` (what a sudo/env/xargs/inline-shell wrapper
+  runs), `fullCommand` (the whole program), and `matchedPattern` (the rule or a
+  sentinel such as `<opaque-bash-wrapper>`), and those facts flow into the
+  reviewer context and the public `BoundaryRequest`.
+- Split deterministic hard denies by family. Structural rules (recursive forced
+  wipes of `/`, `~`, or `$HOME`, and TLS/certificate weakening) scan a
+  skeleton with quoted literals masked, plus nested shell payloads (`bash -c`,
+  `eval`), including shells with options before `-c`. Literal path components
+  retain placeholders so named cleanup targets cannot become root/home wipes.
+  Other interpreter payloads (`python -c`, `node -e`, `perl -e`, `ruby -e`) and
+  heredoc bodies stay raw because shell quoting cannot establish whether their
+  strings execute. Inert mentions in shell commit messages and `echo` arguments
+  remain excluded. Hard denies scan the full program, outer unit, and executed
+  unit independently, preserving wrapper environment settings. Credential and
+  redirect rules keep scanning raw text, including quoted credential operands.
+- Bound nested interpreter expansion to 32 payloads and 32 KiB of cumulative
+  payload text per command fact, shared across recursion levels. Lazy
+  extraction stops repeated `eval` chains from producing megabytes of
+  overlapping suffixes. On exhaustion, raw-command hard denies retain priority;
+  otherwise the request defers to a human without calling the model, including
+  on a trusted reviewer retry.
+- Bind grants and the exact-retry match to the execution text, so two different
+  heredoc bodies gated by the same wrapper unit no longer share one request
+  hash. Denial labels and surface inference (`git-push`, `delete`) use the same
+  text.
+- Bound the reviewer view: `command`, `executedUnit`, and `fullCommand` are each
+  cut to 10 KiB, and any cut sets `fullCommandTruncated`. An incomplete program
+  now deterministically defers to a human before the model is called; a trusted
+  exact-retry override still reaches the reviewer, and local hard denies keep
+  priority. Hashing, hard denies, retry matching, and denial labels always use
+  the untruncated text.
 
 ## 0.22.1 - 2026-10-01
 

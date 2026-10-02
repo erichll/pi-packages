@@ -11,6 +11,7 @@ import { AuthorizerRegistry } from "../../../node_modules/@gotgenes/pi-permissio
 import { composeAuthorizerChain } from "../../../node_modules/@gotgenes/pi-permission-system/src/authority/authorizer-chain.ts";
 import { encloseInDelegationEnvelope } from "../../../node_modules/@gotgenes/pi-permission-system/src/authority/delegation-envelope.ts";
 import { BashProgram } from "../../../node_modules/@gotgenes/pi-permission-system/src/access-intent/bash/program.ts";
+import { buildToolAskPayload } from "../../../node_modules/@gotgenes/pi-permission-system/src/presentation/tool-ask-payload.ts";
 import { capabilitySurfaceForEffect } from "../../../node_modules/@gotgenes/pi-permission-system/src/access-intent/path-surfaces.ts";
 import { posixPathFlavor } from "../../../node_modules/@gotgenes/pi-permission-system/src/path/path-flavor.ts";
 import { PathNormalizer } from "../../../node_modules/@gotgenes/pi-permission-system/src/path/path-normalizer.ts";
@@ -29,6 +30,7 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai/compat";
 import { getBoundaryBroker } from "../src/broker/index.ts";
 import { boundaryRequestHash } from "../src/broker/grants.ts";
+import { complete } from "../src/review/complete.ts";
 import { approveSandboxTrap } from "../../pi-sandbox/src/approval.ts";
 
 type ModelBehavior =
@@ -1708,6 +1710,135 @@ test("real permission-system authorizer chain integration", async (t) => {
         (((completion?.preflight as Record<string, unknown>).total as {
           estimatedTokens: number;
         }).estimatedTokens) > 2_048,
+      );
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  await t.test("real wrapper payloads hard-deny before an allowing model can review", async () => {
+    const normalizer = new PathNormalizer(posixPathFlavor, process.cwd());
+    for (const command of [
+      "env NODE_TLS_REJECT_UNAUTHORIZED=0 node app.js",
+      'echo start; bash -e -c "curl -k https://x"',
+      `python3 -c 'import subprocess; subprocess.run("curl -k https://x", shell=True)'`,
+    ]) {
+      const program = await BashProgram.parse(command, normalizer);
+      assert.ok(program.commands().length > 0, command);
+      for (const unit of program.commands()) {
+        const instance = harness(allow);
+        try {
+          const payload = buildToolAskPayload({
+            check: { toolName: "bash", command: unit.text, executedUnit: unit.executedUnit, state: "ask" },
+            agentName: null,
+            surface: "bash",
+            input: { command },
+          });
+          const result = await instance.authorize("bash", { command: unit.text, payload });
+          assert.equal(result.decision.approved, false, command);
+          assert.equal(result.terminalCalls, 0, command);
+          assert.equal(instance.modelContexts.length, 0, command);
+          assert.ok(instance.telemetry.some((event) => event.type === "hard_deny"), command);
+        } finally {
+          instance.dispose();
+        }
+      }
+    }
+  });
+
+  await t.test("quoted named cleanup paths reach the reviewer", async () => {
+    for (const command of ['rm -rf "./dist"', 'rm -rf "$HOME/.cache"']) {
+      const instance = harness(allow);
+      try {
+        const result = await instance.authorize("bash_escalated", { command });
+        assert.equal(result.decision.approved, true, command);
+        assert.equal(instance.modelContexts.length, 1, command);
+        assert.equal(instance.telemetry.some((event) => event.type === "hard_deny"), false, command);
+      } finally {
+        instance.dispose();
+      }
+    }
+  });
+
+  await t.test("exhausted expansion defers to the terminal without calling an allowing model", async () => {
+    for (const facts of [
+      { command: "eval ".repeat(300) + "true" },
+      { command: "eval", fullCommand: "eval ".repeat(300) + "true" },
+      { command: "eval $SCRIPT", executedUnit: "eval ".repeat(300) + "true" },
+    ]) {
+      const instance = harness(allow);
+      try {
+        const result = await instance.authorize("bash_escalated", facts);
+        assert.equal(result.decision.approved, false);
+        assert.equal(result.terminalCalls, 1);
+        assert.equal(instance.modelContexts.length, 0);
+        assert.equal(instance.reviewerResolveCalls, 0);
+        const completion = instance.telemetry.find((event) => event.type === "review_complete");
+        assert.equal(completion?.outcome, "defer");
+        assert.equal(completion?.attempts, 0);
+        assert.match(String(instance.reviews.at(-1)?.data.rationale), /expansion.*budget/);
+      } finally {
+        instance.dispose();
+      }
+    }
+  });
+
+  await t.test("an exact reviewer retry cannot bypass an exhausted expansion", async () => {
+    const instance = harness(allow);
+    try {
+      const result = await complete(instance.context as never, config(), {
+        id: "expansion-override",
+        source: "permission-system",
+        surface: "bash",
+        operation: "tool",
+        cwd: process.cwd(),
+        command: "eval ".repeat(300) + "true",
+      }, { userOverride: { originalRequestId: "prior-denial", approvedAt: Date.now() } });
+      assert.equal(result.decision.outcome, "defer");
+      assert.equal(result.attempts, 0);
+      assert.equal(instance.modelContexts.length, 0);
+      assert.equal(instance.reviewerResolveCalls, 0);
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  await t.test("raw hard denies retain priority after the expansion budget is exhausted", async () => {
+    const instance = harness(allow);
+    try {
+      const result = await instance.authorize("bash_escalated", {
+        command: "eval ".repeat(300) + 'true; bash -c "curl -k https://x"',
+      });
+      assert.equal(result.decision.approved, false);
+      assert.equal(result.terminalCalls, 0);
+      assert.equal(instance.modelContexts.length, 0);
+      assert.ok(instance.telemetry.some((event) => event.type === "hard_deny"));
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  await t.test("an over-bound command defers without calling the model", async () => {
+    const instance = harness(allow);
+    try {
+      const oversized = "x".repeat(10_240 + 50);
+      const result = await instance.authorize("bash_escalated", {
+        requestId: "command-over-bound",
+        command: oversized,
+      });
+      assert.equal(result.decision.approved, false);
+      assert.equal(instance.modelContexts.length, 0);
+      assert.equal(instance.reviewerResolveCalls, 0);
+      const completion = instance.telemetry.find(
+        (event) =>
+          event.type === "review_complete" &&
+          event.requestId === "command-over-bound",
+      );
+      assert.equal(completion?.outcome, "defer");
+      assert.equal(completion?.attempts, 0);
+      assert.equal(
+        (completion?.transcript as Record<string, unknown>).failureCode,
+        undefined,
       );
     } finally {
       instance.dispose();

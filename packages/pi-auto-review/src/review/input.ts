@@ -27,6 +27,10 @@ import {
   REVIEWER_FRAMING_RESERVE_TOKENS,
 } from "./consts.ts";
 import { REVIEWER_SYSTEM_PROMPT } from "./prompts.ts";
+import {
+  MAX_REVIEWER_COMMAND_BYTES,
+  truncateUtf8,
+} from "./shell-text.ts";
 import { applyProjectConfig } from "./config.ts";
 import { assertTrustedInstallation } from "./guards.ts";
 
@@ -110,6 +114,11 @@ export function boundaryRequest(
     operation: details.source || surface,
     cwd: ctx.cwd,
     command: evidence.command,
+    ...(evidence.executedUnit ? { executedUnit: evidence.executedUnit } : {}),
+    ...(evidence.fullCommand ? { fullCommand: evidence.fullCommand } : {}),
+    ...(evidence.matchedPattern
+      ? { matchedPattern: evidence.matchedPattern }
+      : {}),
     path: evidence.path,
     resolvedPath: evidence.resolvedPath,
     destination: evidence.destination,
@@ -184,8 +193,41 @@ export function sharedReviewContext(
         }
       : {}),
     profile: transcript.surfaceProfile,
-    request,
+    request: reviewerRequestView(request),
   });
+}
+
+/**
+ * The bounded projection of a request that the reviewer model sees.
+ *
+ * `command`, `executedUnit`, and `fullCommand` are each cut to
+ * {@link MAX_REVIEWER_COMMAND_BYTES}; any cut sets `fullCommandTruncated` so the
+ * caller can fail closed instead of reviewing an incomplete program. Hashing,
+ * hard denies, retry matching, and denial labels keep using the untruncated
+ * request.
+ */
+export function reviewerRequestView(request: BoundaryRequest): BoundaryRequest {
+  let truncated = false;
+  const cut = (value: string | undefined): string | undefined => {
+    if (value === undefined) return undefined;
+    if (Buffer.byteLength(value, "utf8") <= MAX_REVIEWER_COMMAND_BYTES) {
+      return value;
+    }
+    truncated = true;
+    return truncateUtf8(value, MAX_REVIEWER_COMMAND_BYTES);
+  };
+  const view: BoundaryRequest = { ...request };
+  const command = cut(request.command);
+  const executedUnit = cut(request.executedUnit);
+  const fullCommand = cut(request.fullCommand);
+  if (command === undefined) delete view.command;
+  else view.command = command;
+  if (executedUnit === undefined) delete view.executedUnit;
+  else view.executedUnit = executedUnit;
+  if (fullCommand === undefined) delete view.fullCommand;
+  else view.fullCommand = fullCommand;
+  if (truncated) view.fullCommandTruncated = true;
+  return view;
 }
 
 /**
@@ -255,7 +297,9 @@ export function reviewPreflight(
   maxReviewerInputTokens: number,
 ): ReviewPreflight {
   const fixedPrompt = preflightPart(REVIEWER_SYSTEM_PROMPT);
-  const canonicalRequest = preflightPart(canonicalReviewerJson(request));
+  const canonicalRequest = preflightPart(
+    canonicalReviewerJson(reviewerRequestView(request)),
+  );
   const override = preflightPart(
     reviewerContext?.userOverride
       ? canonicalReviewerJson(reviewerContext.userOverride)
