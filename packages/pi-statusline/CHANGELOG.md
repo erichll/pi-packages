@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-10-04
 
 - Use the same muted color for No content and Avg; default modelDisplay to name while preserving explicit last preferences.
 - Remove Minimal and the preset selector; support only Powerline, without migration for retired preset values.
