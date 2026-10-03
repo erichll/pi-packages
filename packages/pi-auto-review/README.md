@@ -32,8 +32,8 @@ that dependency is a hard prerequisite (see [Install and enable](#install-and-en
 > `@gotgenes/pi-permission-system`. Pi does not auto-install peer packages, so
 > install the permission system separately (once per machine) before this
 > extension. This release line requires Pi 1.0.0 or later and supports
-> permission-system 36.0.0 and later (development baseline validated against
-> permission-system 38.0.2):
+> permission-system 39.0.0 and later (development baseline validated against
+> permission-system 39.0.0):
 
 Node-based Pi requires Node.js 22.13.0 or newer. Permission auditing uses the
 host runtime's built-in SQLite: `node:sqlite` on Node and `bun:sqlite` on Bun,

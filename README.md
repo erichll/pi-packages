@@ -1,19 +1,24 @@
 # pi-packages
 
-An npm workspaces monorepo for Pi security extensions:
+An npm workspaces monorepo for Pi extensions:
 
 | Package | Purpose |
 | --- | --- |
 | [`pi-auto-review`](packages/pi-auto-review) | Model-backed boundary approval broker and permission-system authorizer |
 | [`pi-sandbox`](packages/pi-sandbox) | Anthropic Sandbox Runtime-backed Bash sandbox, with an optional process-backed subagent provider |
+| [`pi-statusline`](packages/pi-statusline) | Configurable footer with Git, session usage, themes, and interactive configuration preview |
 
 The layout follows the package-per-directory structure used by
 [`gotgenes/pi-packages`](https://github.com/gotgenes/pi-packages). The
-extensions are published to npm as `@erichll/pi-auto-review` and
-`@erichll/pi-sandbox`; the matching unscoped names are owned by unrelated
-projects. The repository can also be installed as one Git-backed Pi package.
+extensions are published to npm as `@erichll/pi-auto-review`,
+`@erichll/pi-sandbox` and `@erichll/pi-statusline`; the matching unscoped names
+are owned by unrelated projects. The repository can also be installed as one Git-backed Pi package.
 
 ## Platform status
+
+The platform status and security setup below apply to `pi-auto-review` and
+`pi-sandbox`. The standalone statusline requires only Node.js and Pi 1.0;
+see its [README](packages/pi-statusline/README.md) for local loading and configuration.
 
 - Linux: bubblewrap filesystem/network isolation and end-to-end sandbox paths
   are tested.
@@ -27,7 +32,7 @@ projects. The repository can also be installed as one Git-backed Pi package.
 - Node.js 22.19 or newer
 - npm 11
 - Pi 1.0.0 or newer
-- `@gotgenes/pi-permission-system` 36.0.0 or later
+- `@gotgenes/pi-permission-system` 39.0.0 or later
 - Linux: `bubblewrap`, `socat`, and `ripgrep`
 
 ## Development
@@ -45,12 +50,19 @@ explicitly opt in with
 
 ## Installation
 
-Install both public npm packages at user scope. Load `pi-auto-review` first so
-its broker service is available when `pi-sandbox` starts:
+Install the security packages at user scope. Load `pi-auto-review` first so its
+broker service is available when `pi-sandbox` starts:
 
 ```bash
 pi install npm:@erichll/pi-auto-review
 pi install npm:@erichll/pi-sandbox
+```
+
+The statusline is independent of the two security packages and does not require
+the permission system:
+
+```bash
+pi install npm:@erichll/pi-statusline
 ```
 
 Alternatively, install a reviewed, immutable repository tag or commit as one

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Auto-review and OS sandbox security extensions for Pi",
+  "description": "Auto-review, OS sandbox and statusline extensions for Pi",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -25,7 +25,8 @@
   "pi": {
     "extensions": [
       "./packages/pi-auto-review/src/index.ts",
-      "./packages/pi-sandbox/src/index.ts"
+      "./packages/pi-sandbox/src/index.ts",
+      "./packages/pi-statusline/src/index.ts"
     ]
   },
   "scripts": {

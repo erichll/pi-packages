@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "enabled": true,
+  "preset": "cometix",
+  "icons": "unicode",
+  "separator": "pipe",
+  "pathMode": "basename",
+  "modelDisplay": "name",
+  "contextDisplay": "bar",
+  "segments": [
+    { "id": "model", "enabled": true, "color": "accent" },
+    { "id": "thinking", "enabled": true },
+    { "id": "context", "enabled": true },
+    { "id": "directory", "enabled": true },
+    { "id": "git", "enabled": true },
+    { "id": "cost", "enabled": false },
+    { "id": "statuses", "enabled": true }
+  ]
+}
