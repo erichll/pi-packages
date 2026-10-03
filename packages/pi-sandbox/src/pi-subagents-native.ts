@@ -24,10 +24,18 @@ import * as hostTypebox from "typebox";
  * keep their signatures, `src/agents/agents` only gains an optional
  * `options.globalNpmRoot` argument, `typebox` moved from a hard dependency to
  * an optional host peer, and the `./capability-ceiling` export still resolves
- * to `.js`). Protected mode needs Pi 0.86.0 or newer
+ * to `.js`), and revalidated 2026-10-03 against the published 0.75.0 package:
+ * the capability-ceiling implementation is still byte-identical to 0.70.0 with
+ * `SUBAGENT_CAPABILITY_CEILING_VERSION` 1, the `exports` map and the
+ * dependency/peer sets are unchanged from 0.72.1, `discoverAgents` and
+ * `resolveAgentName` keep their signatures, `src/extension/config` only adds
+ * fail-closed field validation (including `scheduledRuns.enabled`), and
+ * `src/agents/agents` changes stay in settings persistence and
+ * builtin-override handling away from the seams the loader reads. Protected
+ * mode needs Pi 0.86.0 or newer
  * (the pi-subagents 0.68.0+ floor): 0.85.0 does not ship
  * `@earendil-works/pi-server`, so background children fail to launch there.
- * This package's own peer floor is Pi 0.99.1 (validated 2026-09-30).
+ * This package's own peer floor is Pi 1.0.0 (validated 2026-10-02).
  */
 export const PI_SUBAGENTS_COMPAT_RANGE = ">=0.66.0";
 export const NATIVE_CHILD_TOOLS = ["bash", "read", "grep", "find", "ls"] as const;

@@ -26,7 +26,7 @@ projects. The repository can also be installed as one Git-backed Pi package.
 
 - Node.js 22.19 or newer
 - npm 11
-- Pi 0.99.1 or newer
+- Pi 1.0.0 or newer
 - `@gotgenes/pi-permission-system` 36.0.0 or later
 - Linux: `bubblewrap`, `socat`, and `ripgrep`
 
@@ -95,7 +95,7 @@ network connections through Sandbox Runtime's reviewed proxy. Its default
 persistent background RPC sessions, follow-up, and nested handoff. Set the
 trusted global provider to `pi-subagents` to let that extension own
 orchestration under the required native-background protection mode
-(`pi-subagents >=0.66.0`, validated through 0.72.1).
+(`pi-subagents >=0.66.0`, validated through 0.75.0).
 That mode validates a canonical agent whitelist and restricts children to
 `bash`, `read`, `grep`, `find`, and `ls`; writes go through sandboxed Bash. It
 is not whole-worker process isolation. Keep the default `builtin` provider for
@@ -106,7 +106,7 @@ tool. See the package READMEs for provider, platform, and trust-boundary details
 
 Run deterministic checks with `npm run check` and `npm test`. The external
 provider peer dependency is the range `pi-subagents >=0.66.0` with no upper pin,
-and the development dependency is pinned to `^0.72.1`. The compatibility gate
+and the development dependency is pinned to `^0.75.0`. The compatibility gate
 verifies package layout, discovery, ceiling registration, launch guards, and
 child acknowledgement. Its model portion uses
 only already-exported credentials and prints `SKIP` rather than claiming

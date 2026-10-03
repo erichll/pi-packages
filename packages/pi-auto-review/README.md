@@ -31,8 +31,9 @@ that dependency is a hard prerequisite (see [Install and enable](#install-and-en
 > **Prerequisite:** pi-auto-review is an authorizer inside
 > `@gotgenes/pi-permission-system`. Pi does not auto-install peer packages, so
 > install the permission system separately (once per machine) before this
-> extension. This release line requires Pi 0.99.1 or later and supports
-> permission-system 36.0.0 and later:
+> extension. This release line requires Pi 1.0.0 or later and supports
+> permission-system 36.0.0 and later (development baseline validated against
+> permission-system 38.0.2):
 
 Node-based Pi requires Node.js 22.13.0 or newer. Permission auditing uses the
 host runtime's built-in SQLite: `node:sqlite` on Node and `bun:sqlite` on Bun,
@@ -156,19 +157,20 @@ to select a model whose ID is literally `current`.
 
 For a complete `@gotgenes/pi-permission-system` config that wires
 `pi-auto-review` into the authorizer chain — a copyable baseline covering
-read/write/edit, a read-only bash allowlist, an MCP discovery policy, and a
+read/write/edit, a read-only bash allowlist, MCP tool access, and a
 `path` deny block for secret and credential files — see
 [`examples/pi-permission-system.config.example.json`](examples/pi-permission-system.config.example.json).
 
-MCP rules are evaluated last-match-wins across the candidates derived for one
-call: the tool name, its bare server, and `mcp_call`. Keep `"*"` first in the
-`mcp` block and narrower server or tool entries after it, as the example does,
-so a specific rule cannot be shadowed by the catch-all. A bare server entry
-such as `"atlassian": "allow"` also matches the `mcp connect <server>`
-candidate list, so it auto-allows starting that server — prefer the `server_*`
-and `server:*` forms for tool calls. Any entry meant to narrow a broad allow
-(such as a destructive-tool pattern) must be written after it, or
-last-match-wins shadows it.
+Permission-system 38.0.0 gates Pi's built-in MCP tools on the `mcp` surface, so
+the example writes its `mcp__<server>__*` rules inside a `mcp` block instead of
+as top-level tool names. MCP rules are evaluated last-match-wins across the
+candidates derived for one call: the tool name, its bare server, and `mcp_call`.
+A call the `mcp` block does not match falls through to the universal
+`"*": "ask"`, and any broad catch-all must be written before a narrower
+override or last-match-wins shadows it. A bare server entry such as
+`"atlassian": "allow"` also matches the `mcp connect <server>` candidate list,
+so it auto-allows starting that server — prefer the `server_*` and `server:*`
+forms for tool calls.
 
 Package defaults:
 

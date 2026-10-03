@@ -97,8 +97,10 @@
     },
     "codemode": "allow",
     "tool_search": "allow",
-    "mcp__atlassian__*": "allow",
-    "mcp__pencil__*": "allow",
+    "mcp": {
+      "mcp__atlassian__*": "allow",
+      "mcp__pencil__*": "allow"
+    },
     "ask_user": "allow",
     "plan_mode_question": "allow",
     "plan_mode_complete": "allow",

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.24.0 - 2026-10-03
+
+- Raise the `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent`
+  peer floors to `^1.0.0` and the development baselines to `^1.0.0`, plus
+  `@types/node` to `^26.6.4`. Raise the
+  `@gotgenes/pi-permission-system` development baseline to `^38.0.2`; the peer
+  floor stays `>=36.0.0`. Validated against Pi 1.0.0 with
+  pi-permission-system 38.0.2 via `tsc --noEmit` and the full test suite: no
+  source changes were required, and the authorizer seam this package consumes
+  is unchanged.
+- Move the example's Pi MCP tool rules under `mcp` (`mcp__atlassian__*`,
+  `mcp__pencil__*`) and update the README's MCP guidance to match, because
+  pi-permission-system 38.0.0 gates Pi's built-in MCP tools on the `mcp`
+  surface instead of their top-level names.
+
 ## 0.23.0 - 2026-10-02
 
 - Add opt-in `model: "current"` to review approval requests with the active Pi

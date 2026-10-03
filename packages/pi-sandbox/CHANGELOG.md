@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.24.0 - 2026-10-03
+
+- Raise the `@earendil-works/pi-coding-agent` peer floor to `^1.0.0` and the
+  development baselines for `pi-ai`, `pi-coding-agent`, and `pi-server` to
+  `^1.0.0`, plus `@types/node` to `^26.6.4`. Validated against Pi 1.0.0 via
+  `tsc --noEmit` and the full test suite: no behavior changes were required.
+- Raise the `pi-subagents` development pin to `^0.75.0` and revalidate the
+  protected loader against it. 0.75.0 is the first release that starts
+  background children on Pi 1.0.0 again (through 0.74.0 they failed with "does
+  not provide @earendil-works/pi-agent-core/node", which pi-agent-core 1.0.0
+  dropped). The deterministic preflight passes on 0.75.0 — package exports,
+  discovery, and the capability-ceiling seams are unchanged from 0.72.1, and
+  the loader comment records the audit. The credential-backed model phases also
+  pass on 0.75.0 — native baseline (`native-host-readable`) and the protected
+  native-background whitelist (`sandboxed-bash-blocked-host-read`) — so the
+  release gate is closed for this pin.
+- Raise the `@anthropic-ai/sandbox-runtime` dependency to `^0.0.78` and the
+  `@erichll/pi-auto-review` dependency to `^0.24.0`.
+- Update the compatibility notes for pi-subagents 0.73.0, which replaced
+  `workflowScript`/`workflowScriptPath` with a single `workflow` field: the
+  loader already rejects every call that sets it (inline, path, or named), so
+  protected mode still permits direct agent launches only.
+
 ## 0.23.0 - 2026-10-02
 
 - Add opt-in `network.strictAllowlist` (default `false`) to deny unmatched

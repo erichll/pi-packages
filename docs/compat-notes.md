@@ -2,7 +2,7 @@
 
 `@erichll/pi-sandbox` supports protected external orchestration on the
 `pi-subagents >=0.66.0` line: the peer dependency is a floor with no upper pin,
-and the development dependency is pinned to `^0.72.1` (validated on 0.72.1). The real gates are the
+and the development dependency is pinned to `^0.75.0` (validated on 0.75.0). The real gates are the
 `./capability-ceiling` export and the capability-ceiling API version, which the
 loader checks at load time; the version range only rejects old lines and guards
 against blind accept-on-drift. Any mismatch disables the whole mode rather than
@@ -24,9 +24,12 @@ ambient extensions enabled, and does not allow nested subagents. The public
 validated names and the tools `bash`, `read`, `grep`, `find`, and `ls`.
 
 Every launch must explicitly set `async: true`, and only direct single-agent
-launches are allowed. Public inline/path `workflowScript` children disable
-ambient extensions upstream and are therefore rejected, as are named workflows,
-external runners, schedules, resume, and agent/workflow management mutations.
+launches are allowed. Public workflow launches disable ambient extensions upstream
+and are therefore rejected: since pi-subagents 0.73.0 the inline
+`workflow: true` script, a `workflow` path, and a named workflow all arrive in
+the single `workflow` parameter, and the loader rejects any call that sets it.
+External runners, schedules, resume, and agent/workflow management mutations are
+rejected too.
 Child runtimes emit the upstream-safe stable `subagent:acknowledge-extension` ID
 `@erichll:pi-sandbox`; terminal child records returned by status/debug fail
 closed without that proof.
@@ -37,7 +40,7 @@ default `builtin` provider for complete worker-process-tree isolation.
 
 ## Versioned seams
 
-| Seam | Status on the `>=0.66.0` line (validated on 0.72.1) | Verification |
+| Seam | Status on the `>=0.66.0` line (validated on 0.75.0) | Verification |
 | --- | --- | --- |
 | package version | must be `>=0.66.0`; below it the loader fails closed | runtime loader + deterministic gate |
 | `./capability-ceiling` export | public; expected path and API v1 | runtime loader + tests |
@@ -71,8 +74,8 @@ mode requires `async: true` children (detached runners), so forwarded-permission
 routing is unaffected; `scripts/pi-subagents-parent-forwarding-adapter.ts`
 remains only as a no-op shim for the 0.69.0-and-earlier line.
 
-Host requirement: these packages require Pi 0.99.1 or newer (the
-`peerDependencies` floor, validated 2026-09-30). Historically the floor was
+Host requirement: these packages require Pi 1.0.0 or newer (the
+`peerDependencies` floor, validated 2026-10-02). Historically the floor was
 0.87.1, before that 0.86.0, and before that 0.85.1: Pi 0.85.0
 does not ship `@earendil-works/pi-server`, which 0.68.0 stopped bundling, so
 background children fail to launch there with an explicit error. The `builtin`
@@ -108,13 +111,19 @@ compiled loader supplies its embedded modules to these imports. Our adapter
 remains an on-disk extension and can use the normal jiti entry; it does not need
 to import Pi's private `virtual-modules.js` or compiled loader internals.
 
-Validated on Pi 0.99.1 / Bun 1.3.14 with a copied pi-subagents 0.72.1 package in
+Validated on Pi 1.0.0 / Bun 1.3.14 with a copied pi-subagents 0.75.0 package in
 an isolated directory containing neither `pi-tui` nor `typebox`. Node Pi,
 plain Bun Pi, and compiled Bun Pi all load the protected adapter. The test reads
 the inner loader's capability ceiling through the host-loaded public API and
 verifies disposal, the five-tool limit, unknown-agent rejection, and enabled
-schedule rejection. This covers module loading and the ceiling contract;
-model-backed native child acceptance remains part of the release gate below.
+schedule rejection. This covers module loading and the ceiling contract.
+
+Model-backed acceptance was run on 2026-10-03 against the same pin: the gate's
+native baseline and the protected native-background whitelist both pass, with
+parent model `cliproxyapi/codex-auto-review` and child model
+`cliproxyapi/gpt-5.6-luna`, reporting `baseline: native-host-readable` and
+`protected: sandboxed-bash-blocked-host-read`. Model-backed native child
+acceptance remains part of the release gate below.
 
 Since 0.72.0 `typebox` is the same kind of host-provided dependency: it moved
 from `pi-subagents`' `dependencies` to an optional `peerDependencies` entry, so
