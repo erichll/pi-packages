@@ -92,11 +92,13 @@ test("compaction, tree navigation, model/thinking changes and live extension sta
     f.statuses.set("review", "review ready");
     assert.match(f.footer!.render(120).map(stripTerminalSequences).join("\n"), /review ready/);
     f.statuses.clear();
-    assert.equal(f.footer!.render(120).length, 1);
+    assert.equal(f.footer!.render(120).length, 2);
+    assert.equal(stripTerminalSequences(f.footer!.render(120)[1]!), "Compactions 1");
+    assert.doesNotMatch(stripTerminalSequences(f.footer!.render(120)[1]!), /Idle|^ ·/);
     const before = f.footer!.render(120)[0];
     const altered = testTheme("light") as Theme;
     f.theme(altered);
-    session.apply({ ...presetConfig("powerline") });
+    session.apply(presetConfig());
     assert.notEqual(f.footer!.render(120)[0], before);
   } finally { session.dispose(); }
 });
@@ -140,4 +142,29 @@ test("new session instances cannot inherit old usage or late Git responses", asy
     assert.equal(next.snapshot().usage.cost, 0);
     assert.equal(next.snapshot().git.kind, "none");
   } finally { next.dispose(); }
+});
+
+test("run signal cancellation is observed without before-settle and listeners leave on disposal", () => {
+  const f = fixture(), controller = new AbortController();
+  Object.defineProperty(f.ctx, "signal", { value: controller.signal });
+  const session = new FooterSession(f.ctx, presetConfig(), async () => emptyGit("none"));
+  session.install(); session.startRun(); session.startTurn(); controller.abort(); session.settle();
+  assert.equal(session.runtime.snapshot().status, "Cancelled"); session.dispose();
+  const fresh = fixture(), late = new AbortController(); Object.defineProperty(fresh.ctx, "signal", { value: late.signal });
+  const next = new FooterSession(fresh.ctx, presetConfig(), async () => emptyGit("none")); next.install(); next.startRun(); next.dispose(); late.abort();
+  assert.equal(next.runtime.snapshot().status, "Running"); // disposed signal callback was detached
+});
+
+test("unchanged refresh does not retraverse compaction history", () => {
+  const f = fixture();
+  const session = new FooterSession(f.ctx, presetConfig(), async () => emptyGit("none"));
+  try {
+    session.install(); const reads = f.reads;
+    assert.equal(session.snapshot().compaction?.count, 0);
+    session.refresh(); assert.equal(f.reads, reads);
+    f.append({ type: "compaction", id: "compact", parentId: "1", timestamp: "", summary: "summary", firstKeptEntryId: "1", tokensBefore: 1000 });
+    session.refresh(); assert.equal(f.reads, reads + 1);
+    assert.equal(session.snapshot().compaction?.count, 1);
+    session.refresh(); assert.equal(f.reads, reads + 1);
+  } finally { session.dispose(); }
 });

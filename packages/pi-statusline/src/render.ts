@@ -1,9 +1,12 @@
 import { basename, isAbsolute, relative, sep } from "node:path";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { parseColor, stripTerminalSequences, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { parseColor, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { cleanText } from "./text.ts";
+export { cleanText } from "./text.ts";
 import type { ColorValue, SegmentConfig, SegmentId, StatuslineConfig, StatuslineSnapshot } from "./types.ts";
 import { emptyGit } from "./git.ts";
 import { emptyUsage } from "./usage.ts";
+import { renderRuntime } from "./runtime-render.ts";
 
 export type RenderTheme = Pick<Theme, "style" | "colors" | "appearance">;
 // Keep rainbow hues independent of semantic theme colors, which can repeat.
@@ -14,9 +17,6 @@ const ICONS: Record<StatuslineConfig["icons"], Partial<Record<SegmentId, string>
   ascii: { model: "", directory: "", git: "git:", context: "ctx:", cost: "$", input: "in:", output: "out:", tokens: "tok:", cacheRead: "R:", cacheWrite: "W:" },
 };
 const DROP_ORDER: SegmentId[] = ["cost", "cacheWrite", "cacheRead", "tokens", "output", "input", "thinking", "git", "directory"];
-export function cleanText(text: string): string {
-  return stripTerminalSequences(text.replace(/[\r\n\t]/g, " ")).replace(/[\p{Cc}\u202a-\u202e\u2066-\u2069]/gu, "").trim();
-}
 export function formatTokens(value: number): string {
   if (value < 1000) return String(Math.round(value));
   const divisor = value >= 1e6 ? 1e6 : 1000;
@@ -78,7 +78,7 @@ function segmentText(id: SegmentId, data: StatuslineSnapshot, config: Statusline
     case "statuses": return [...data.statuses.values()].map(cleanText).filter(Boolean).join(" · ") || undefined;
   }
 }
-function defaultColor(id: SegmentId, data: StatuslineSnapshot, config: StatuslineConfig): ColorValue {
+function defaultColor(id: SegmentId, data: StatuslineSnapshot): ColorValue {
   if (id === "context") {
     if ((data.context.percent ?? 0) > 90) return "error";
     if ((data.context.percent ?? 0) > 70) return "warning";
@@ -92,7 +92,6 @@ function defaultColor(id: SegmentId, data: StatuslineSnapshot, config: Statuslin
     const colors: Record<string, ColorValue> = { off: "thinkingOff", minimal: "thinkingMinimal", low: "thinkingLow", medium: "thinkingMedium", high: "thinkingHigh", xhigh: "thinkingXhigh", max: "thinkingMax" };
     return colors[data.thinking] ?? "muted";
   }
-  if (config.preset === "minimal") return "muted";
   if (id === "model") return "accent";
   if (id === "directory") return "success";
   if (id === "context") return "#c678dd";
@@ -155,19 +154,23 @@ export function renderFooter(width: number, data: StatuslineSnapshot, config: St
   if (width === 0) return [];
   const parts: Part[] = [];
   let secondary: Part | undefined;
+  // CLIProxyAPI's published `tps` status is display text only.
+  const tps = cleanText(data.statuses.get("tps") ?? "");
+  const elapsedStatus = config.segments.some((s) => s.id === "statuses" && s.enabled) && /^Elapsed \d+[dhms](?: \d+[hms])*$/.test(tps) ? tps : undefined;
+  const statuses = elapsedStatus ? new Map([...data.statuses].filter(([key]) => key !== "tps")) : data.statuses;
   const thinking = config.segments.find((segment) => segment.id === "thinking");
   for (const segment of config.segments) {
     if (!segment.enabled) continue;
-    const raw = segmentText(segment.id, data, config);
+    const raw = segmentText(segment.id, segment.id === "statuses" ? { ...data, statuses } : data, config);
     if (raw === undefined) continue;
     let text = cleanText(raw);
     if (config.icons === "ascii") text = text.replaceAll(" · ", " / ").replaceAll("…", "...");
     const background = segment.background ?? (config.preset === "powerline" ? (theme.appearance === "light" ? (parts.length % 2 ? "#e4e9f2" : "#d6dde9") : (parts.length % 2 ? "#283447" : "#202938")) : undefined);
-    const part: Part = { config: segment, text, icon: cleanText(segment.icon ?? ICONS[config.icons][segment.id] ?? ""), foreground: segment.color ?? defaultColor(segment.id, data, config), background };
+    const part: Part = { config: segment, text, icon: cleanText(segment.icon ?? ICONS[config.icons][segment.id] ?? ""), foreground: segment.color ?? defaultColor(segment.id, data), background };
     if (segment.id === "model" && data.reasoning && thinking?.enabled) {
       part.thinking = {
         text: cleanText(data.thinking || "off"),
-        foreground: thinking.color ?? (["high", "xhigh", "max"].includes(data.thinking) ? "rainbow" : defaultColor("thinking", data, config)),
+        foreground: thinking.color ?? (["high", "xhigh", "max"].includes(data.thinking) ? "rainbow" : defaultColor("thinking", data)),
       };
     }
     if (segment.id === "statuses") secondary = part;
@@ -195,7 +198,8 @@ export function renderFooter(width: number, data: StatuslineSnapshot, config: St
   }
   const lines: string[] = [];
   if (parts.length) lines.push(truncateToWidth(line, width, ellipsis));
-  if (secondary) lines.push(truncateToWidth(renderPart(secondary, theme), width, ellipsis));
+  const secondLine = renderRuntime(width, data, config, theme, secondary ? renderPart(secondary, theme) : undefined, elapsedStatus);
+  if (secondLine) lines.push(secondLine);
   return lines;
 }
 
@@ -206,5 +210,7 @@ export function sampleSnapshot(): StatuslineSnapshot {
     usage: { ...emptyUsage(), input: 32000, output: 5400, cacheRead: 12000, cost: 0.12 },
     git: { ...emptyGit("repository"), branch: "main", unstaged: 2, ahead: 2 },
     statuses: new Map([["example", "Example extension status"]]),
+    runtime: { runId: "example", status: "Running", elapsedMs: 28000, turns: 3, toolCalls: 2, tools: [], awaitingInput: false, noContentMs: 0, usage: { ...emptyUsage(), output: 1260 }, avg: 45, cache: 0.86 },
+    compaction: { active: false, elapsedMs: 0, count: 1, showFailure: false },
   };
 }

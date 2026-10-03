@@ -1,7 +1,7 @@
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { ColorValue, Preset, StatuslineConfig } from "./types.ts";
+import type { ColorValue, StatuslineConfig } from "./types.ts";
 import { SEGMENT_IDS } from "./types.ts";
 
 // A deliberately small, documented set of Pi semantic foreground colors.
@@ -9,12 +9,13 @@ export const COLORS = ["text", "accent", "muted", "dim", "success", "warning", "
 export function validColor(value: unknown): value is ColorValue {
   return typeof value === "string" && (/^#[\da-f]{6}$/i.test(value) || (COLORS as readonly string[]).includes(value));
 }
-export function presetConfig(preset: Preset = "cometix"): StatuslineConfig {
-  const enabled = new Set<string>(preset === "minimal" ? ["directory", "git", "context", "statuses"] : ["model", "thinking", "directory", "git", "context", "statuses"]);
+export function presetConfig(): StatuslineConfig {
+  const enabled = new Set<string>(["model", "thinking", "directory", "git", "context", "tokens", "statuses"]);
   return {
-    version: 1, enabled: true, preset, icons: "unicode",
-    separator: preset === "powerline" ? "powerline" : "pipe", pathMode: "basename", modelDisplay: "name", contextDisplay: "bar",
+    version: 1, enabled: true, preset: "powerline", icons: "nerd",
+    separator: "powerline", pathMode: "basename", modelDisplay: "name", contextDisplay: "bar",
     segments: SEGMENT_IDS.map((id) => ({ id, enabled: enabled.has(id) })),
+    runtime: { enabled: true, status: true, tools: true, noContent: true, noContentSeconds: 10, avg: true, cache: true, counts: true, retainSummary: true },
   };
 }
 function record(value: unknown): value is Record<string, unknown> {
@@ -31,13 +32,26 @@ function boolean(value: unknown, name: string): boolean {
 export function parseConfig(raw: unknown): StatuslineConfig {
   if (!record(raw)) throw new Error("Configuration must be an object");
   if (raw.version !== undefined && raw.version !== 1) throw new Error("Unsupported configuration version");
-  const config = presetConfig(raw.preset === undefined ? "cometix" : choice(raw.preset, ["cometix", "minimal", "powerline"] as const, "preset"));
+  if (raw.preset !== undefined) choice(raw.preset, ["powerline"] as const, "preset");
+  const config = presetConfig();
   if (raw.enabled !== undefined) config.enabled = boolean(raw.enabled, "enabled");
   if (raw.icons !== undefined) config.icons = choice(raw.icons, ["unicode", "nerd", "ascii"], "icons");
   if (raw.separator !== undefined) config.separator = choice(raw.separator, ["pipe", "dot", "space", "powerline"], "separator");
   if (raw.pathMode !== undefined) config.pathMode = choice(raw.pathMode, ["basename", "abbreviated", "full"], "pathMode");
   if (raw.modelDisplay !== undefined) config.modelDisplay = choice(raw.modelDisplay, ["name", "last"], "modelDisplay");
   if (raw.contextDisplay !== undefined) config.contextDisplay = choice(raw.contextDisplay, ["text", "bar"], "contextDisplay");
+  for (const group of ["runtime"] as const) {
+    if (raw[group] === undefined) continue;
+    if (!record(raw[group])) throw new Error(`Invalid ${group}`);
+    for (const key of Object.keys(config[group])) {
+      const value = raw[group][key];
+      if (value === undefined) continue;
+      if (key === "noContentSeconds") {
+        if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 3600) throw new Error("Invalid runtime.noContentSeconds (1–3600)");
+        config.runtime.noContentSeconds = value;
+      } else (config[group] as unknown as Record<string, unknown>)[key] = boolean(value, `${group}.${key}`);
+    }
+  }
   if (raw.segments !== undefined) {
     if (!Array.isArray(raw.segments)) throw new Error("segments must be an array");
     const seen = new Set<string>();

@@ -24,31 +24,45 @@ export default function statusline(pi: ExtensionAPI): void {
     session.install();
   });
   pi.on("session_shutdown", () => { generation++; session?.dispose(); session = undefined; });
+  pi.on("agent_start", (_event, ctx) => { session?.setContext(ctx); session?.startRun(); session?.schedule(true); });
+  pi.on("turn_start", (_event, ctx) => { session?.setContext(ctx); session?.startTurn(); session?.schedule(true); });
+  pi.on("agent_before_settle", (event) => { session?.runtime.beforeSettle(event.outcome); });
+  pi.on("agent_settled", (_event, ctx) => { session?.setContext(ctx); session?.settle(); session?.schedule(true); });
+  pi.on("ui_prompt_start", () => { session?.runtime.uiStart(); session?.schedule(true); });
+  pi.on("ui_prompt_end", () => { session?.runtime.uiEnd(); session?.schedule(true); });
+  pi.on("tool_execution_start", (event, ctx) => { session?.setContext(ctx); session?.runtime.toolStart(event.toolCallId, event.toolName); session?.schedule(true); });
+  pi.on("session_before_compact", (_event, ctx) => {
+    session?.setContext(ctx); session?.compaction.start(); session?.runtime.compaction(true); session?.schedule(true);
+  });
   pi.on("message_start", (event, ctx) => {
     session?.setContext(ctx);
-    if (event.message.role === "assistant") session?.setLive(undefined);
+    if (event.message.role === "assistant") { session?.setLive(undefined); session?.runtime.messageStart(event.message); }
     session?.schedule(true);
   });
   pi.on("message_update", (event, ctx) => {
     session?.setContext(ctx);
-    if (event.message.role === "assistant") session?.setLive(event.message);
+    if (event.message.role === "assistant") { session?.setLive(event.message); session?.runtime.stream(event.assistantMessageEvent); session?.runtime.message(event.message); }
     session?.schedule();
   });
   pi.on("message_end", (event, ctx) => {
     session?.setContext(ctx);
-    if (event.message.role === "assistant") session?.setLive(event.message);
+    if (event.message.role === "assistant") { session?.setLive(event.message); session?.runtime.message(event.message, true); }
     session?.schedule(true);
   });
   const refresh = (_event: unknown, ctx: ExtensionContext) => { session?.setContext(ctx); session?.schedule(true); };
   const resetLive = (event: unknown, ctx: ExtensionContext) => { session?.setLive(undefined); refresh(event, ctx); };
   pi.on("agent_end", resetLive);
-  pi.on("turn_end", refresh);
+  pi.on("turn_end", (event, ctx) => { if (event.message.role === "assistant") session?.runtime.message(event.message, true); session?.runtime.turnEnd(); refresh(event, ctx); });
   pi.on("model_select", refresh);
   pi.on("thinking_level_select", refresh);
-  pi.on("session_compact", resetLive);
-  pi.on("session_compact_failed", refresh);
+  pi.on("session_compact", (event, ctx) => {
+    session?.compaction.finish("success", event.compactionEntry.id); session?.runtime.compaction(false); resetLive(event, ctx);
+  });
+  pi.on("session_compact_failed", (event, ctx) => {
+    session?.compaction.finish(event.aborted ? "cancelled" : "failed", undefined, event.errorMessage); session?.runtime.compaction(false); refresh(event, ctx);
+  });
   pi.on("session_tree", resetLive);
-  pi.on("tool_execution_end", (_event, ctx) => { session?.setContext(ctx); session?.requestGit(); session?.schedule(true); });
+  pi.on("tool_execution_end", (event, ctx) => { session?.setContext(ctx); session?.runtime.toolEnd(event.toolCallId); session?.requestGit(); session?.schedule(true); });
   pi.on("user_bash", (_event, ctx) => { session?.setContext(ctx); session?.requestGit(); });
 
   pi.registerCommand("statusline", {
@@ -67,7 +81,9 @@ export default function statusline(pi: ExtensionAPI): void {
         if (token !== generation) return;
         config = loaded.config;
         if (loaded.warning) ctx.ui.notify(loaded.warning, "warning");
-        current.apply(config);
+        current.dispose();
+        session = new FooterSession(ctx, config);
+        session.refresh(true); session.install();
         return;
       }
       if (command) { ctx.ui.notify("Usage: /statusline [on|off|reload]", "info"); return; }

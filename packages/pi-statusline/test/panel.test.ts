@@ -25,7 +25,8 @@ test("draft preview uses the footer renderer; cancellation never saves or mutate
   const preview = renderFooter(100, data, config, theme);
   assert.deepEqual(panel.render(100).slice(2, 2 + preview.length), preview);
   assert.match(stripTerminalSequences(panel.render(100)[1]!), /example data/);
-  panel.handleInput(enter); // next preset
+  assert.doesNotMatch(panel.render(100).map(stripTerminalSequences).join("\n"), /Preset:/);
+  select(panel, "Icons:"); panel.handleInput(enter);
   assert.deepEqual(config, original);
   panel.handleInput(escape);
   assert.equal(saves, 0); assert.equal(closed, 1);
@@ -36,7 +37,7 @@ test("keyboard editing, validation, ordering and save produce a usable configura
   const panel = new StatuslinePanel({ config: presetConfig(), theme: testTheme, snapshot: () => ({ data: sampleSnapshot(), example: false }), requestRender() {}, height: () => 30, save: async (config) => { saved = config; }, done: () => { closed++; } });
   select(panel, "Model display:"); panel.handleInput(enter);
   select(panel, "Context display:"); panel.handleInput(enter);
-  select(panel, "Preset:"); panel.handleInput(enter); panel.handleInput(enter); panel.handleInput(enter);
+
   assert.ok(panel.render(140).some((line) => stripTerminalSequences(line).includes("Model display: last")));
   assert.ok(panel.render(140).some((line) => stripTerminalSequences(line).includes("Context display: text")));
   assert.ok(!panel.render(140).some((line) => stripTerminalSequences(line).includes("[x] thinking")));
@@ -65,6 +66,19 @@ test("keyboard editing, validation, ordering and save produce a usable configura
   assert.equal(saved?.segments.find((segment) => segment.id === "model")?.color, "#123456");
 });
 
+test("restore defaults previews the single Powerline layout and only saves on confirmation", async () => {
+  const config = presetConfig(), saves: StatuslineConfig[] = [];
+  config.icons = "ascii"; config.separator = "pipe"; config.modelDisplay = "last";
+  config.runtime.tools = false; config.segments[0]!.color = "warning";
+  const original = structuredClone(config);
+  const panel = new StatuslinePanel({ config, theme: testTheme, snapshot: () => ({ data: sampleSnapshot(), example: false }), requestRender() {}, height: () => 50, save: async (next) => { saves.push(next); }, done() {} });
+  select(panel, "Restore defaults in preview"); panel.handleInput(enter);
+  assert.equal(saves.length, 0); assert.deepEqual(config, original);
+  assert.doesNotMatch(panel.render(140).map(stripTerminalSequences).join("\n"), /Preset:/);
+  select(panel, "Save and apply"); panel.handleInput(enter); await delay(0);
+  assert.deepEqual(saves, [presetConfig()]); assert.deepEqual(config, original);
+});
+
 test("save failures remain visible, and the panel fits narrow and short terminals", async () => {
   let closed = false, height = 15;
   const panel = new StatuslinePanel({ config: presetConfig(), theme: testTheme, snapshot: () => ({ data: sampleSnapshot(), example: false }), requestRender() {}, height: () => height, save: async () => { throw new Error("read-only destination"); }, done: () => { closed = true; } });
@@ -74,4 +88,21 @@ test("save failures remain visible, and the panel fits narrow and short terminal
   assert.ok(panel.render(120).some((line) => stripTerminalSequences(line).includes("read-only destination")));
   height = 25;
   panel.handleInput(up); panel.dispose();
+});
+
+test("runtime drafts support numeric validation and save without mutating active configuration", async () => {
+  const config = presetConfig(), original = structuredClone(config); const saves: StatuslineConfig[] = [];
+  const panel = new StatuslinePanel({ config, theme: testTheme, snapshot: () => ({ data: sampleSnapshot(), example: false }), requestRender() {}, height: () => 30, save: async (next) => { saves.push(next); }, done() {} });
+  select(panel, "Runtime options"); panel.handleInput(enter);
+  select(panel, "Tool activity:"); panel.handleInput(" ");
+  select(panel, "No content threshold"); panel.handleInput(enter);
+  panel.handleInput("\x01"); panel.handleInput("\x0b"); panel.handleInput("0"); panel.handleInput(enter);
+  assert.match(panel.render(140).map(stripTerminalSequences).join("\n"), /Invalid runtime.noContentSeconds/);
+  panel.handleInput("\x01"); panel.handleInput("\x0b"); panel.handleInput("20"); panel.handleInput(enter); panel.handleInput(escape);
+  assert.doesNotMatch(panel.render(140).map(stripTerminalSequences).join("\n"), /Current \/ last run details/);
+  assert.equal(saves.length, 0);
+  select(panel, "Save and apply"); panel.handleInput(enter); await delay(0);
+  assert.deepEqual(config, original); assert.equal(saves[0]?.runtime.tools, false);
+  assert.equal(saves[0]?.runtime.noContentSeconds, 20);
+  assert.ok(saves[0] && !("providerMetrics" in saves[0]) && !("integrations" in saves[0]));
 });

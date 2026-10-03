@@ -2,22 +2,24 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { parseColor, stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { presetConfig } from "../src/config.ts";
+import type { StatuslineConfig } from "../src/types.ts";
 import { cleanText, renderFooter, sampleSnapshot } from "../src/render.ts";
 import { testTheme } from "./helpers.ts";
 
 test("all themes and icon modes fit every width including wide Unicode and escape sequences", () => {
   const data = sampleSnapshot();
   data.model = "中文模型 👩‍💻 with a very long name";
+  data.modelId = `provider/${data.model}`;
   data.cwd = "/project/非常长的中文目录😀";
   data.statuses = new Map([["one", "\x1b[31m中文状态 😀\x1b[0m\nnext\x1b]0;unsafe title\x07"], ["two", "another status"]]);
-  for (const preset of ["cometix", "minimal", "powerline"] as const) {
+  for (const separator of ["powerline", "pipe", "dot", "space"] as const) {
     for (const appearance of ["dark", "light"] as const) {
       for (const icons of ["unicode", "nerd", "ascii"] as const) {
         for (const contextDisplay of ["text", "bar"] as const) {
-          const config = { ...presetConfig(preset), icons, contextDisplay };
+          const config = { ...presetConfig(), separator, icons, contextDisplay };
           for (const width of [0, 1, 2, 5, 20, 40, 80, 120]) {
             for (const line of renderFooter(width, data, config, testTheme(appearance))) {
-              assert.ok(visibleWidth(line) <= width, `${preset}/${icons}/${contextDisplay}/${width}: ${visibleWidth(line)}`);
+              assert.ok(visibleWidth(line) <= width, `${separator}/${icons}/${contextDisplay}/${width}: ${visibleWidth(line)}`);
               assert.ok(!line.includes("\n") && !line.includes("\x1b]"));
             }
           }
@@ -39,17 +41,18 @@ test("narrow layouts keep model and context ahead of cost and directory", () => 
 test("preset layout puts context immediately after the model", () => {
   const config = presetConfig();
   const line = stripTerminalSequences(renderFooter(200, sampleSnapshot(), config, testTheme())[0]!);
-  assert.match(line, /^ Example model\(high\) \| ◉ \[█░░░░░░░░░\]11\.9% \| ▸ pi-packages/);
+  assert.match(line, /^  Example model\(high\)  󰆼 \[█░░░░░░░░░\]11\.9%  󰉋 pi-packages/);
+  assert.match(line, /󰊄 49\.4k/);
 });
 
 test("whole-cell context bars distinguish unknown, zero, low, full and overflow usage", () => {
   const data = sampleSnapshot();
-  const config = presetConfig();
+  const config: StatuslineConfig = { ...presetConfig(), icons: "unicode", separator: "pipe" };
   config.contextDisplay = "bar";
   config.segments = [{ id: "context", enabled: true, icon: "" }];
   const rendered = (percent: number | null) => {
     data.context = { tokens: percent === null ? null : percent * 2000, contextWindow: 200000, percent };
-    return stripTerminalSequences(renderFooter(100, data, config, testTheme())[0]!);
+    return stripTerminalSequences(renderFooter(100, data, config, testTheme())[0]!).trim();
   };
   assert.equal(rendered(0), "[░░░░░░░░░░]0%");
   assert.equal(rendered(20), "[██░░░░░░░░]20%");
@@ -75,7 +78,8 @@ test("unknown context, non-repositories and hidden extension statuses are unambi
   const config = presetConfig();
   config.contextDisplay = "text";
   const output = renderFooter(150, data, config, testTheme());
-  assert.equal(output.length, 1);
+  assert.equal(output.length, 2);
+  assert.ok(!output.map(stripTerminalSequences).join("\n").includes("Example extension status"));
   assert.match(stripTerminalSequences(output[0]!), /\?\/200k\(\?%\)/);
   assert.ok(!stripTerminalSequences(output[0]!).includes("main"));
   data.git.kind = "unknown";
@@ -84,40 +88,40 @@ test("unknown context, non-repositories and hidden extension statuses are unambi
   assert.ok(!text.includes("✓"));
 });
 
-test("threshold colors change only above 70 and 90 percent; explicit colors override presets", () => {
+test("threshold colors change only above 70 and 90 percent; explicit colors override automatic colors", () => {
   const data = sampleSnapshot();
-  const config = presetConfig();
+  const config: StatuslineConfig = { ...presetConfig(), icons: "unicode", separator: "pipe" };
   config.contextDisplay = "text";
-  config.segments = [{ id: "context", enabled: true }];
+  config.segments = [{ id: "context", enabled: true, background: "#112233" }];
   const theme = testTheme();
   const output = (percent: number) => { data.context.percent = percent; return renderFooter(100, data, config, theme)[0]!; };
-  assert.ok(!output(70).includes(theme.style("", { fg: theme.colors.warning })));
-  assert.ok(output(70.1).includes(theme.style("◉ ", { fg: theme.colors.warning })));
-  assert.ok(output(90).includes(theme.style("◉ ", { fg: theme.colors.warning })));
-  assert.ok(output(90.1).includes(theme.style("◉ ", { fg: theme.colors.error })));
+  assert.ok(!output(70).includes(theme.style("", { fg: theme.colors.warning, bg: parseColor("#112233") })));
+  assert.ok(output(70.1).includes(theme.style("◉ ", { fg: theme.colors.warning, bg: parseColor("#112233") })));
+  assert.ok(output(90).includes(theme.style("◉ ", { fg: theme.colors.warning, bg: parseColor("#112233") })));
+  assert.ok(output(90.1).includes(theme.style("◉ ", { fg: theme.colors.error, bg: parseColor("#112233") })));
   config.segments[0]!.color = "accent";
-  assert.ok(output(95).includes(theme.style("◉ ", { fg: theme.colors.accent })));
+  assert.ok(output(95).includes(theme.style("◉ ", { fg: theme.colors.accent, bg: parseColor("#112233") })));
   delete config.segments[0]!.color;
   config.contextDisplay = "bar";
-  assert.ok(output(71).includes(theme.style("◉ ", { fg: theme.colors.warning })));
-  assert.ok(output(91).includes(theme.style("◉ ", { fg: theme.colors.error })));
+  assert.ok(output(71).includes(theme.style("◉ ", { fg: theme.colors.warning, bg: parseColor("#112233") })));
+  assert.ok(output(91).includes(theme.style("◉ ", { fg: theme.colors.error, bg: parseColor("#112233") })));
 });
 
 test("icons can be hidden and control characters never reach a terminal", () => {
-  const config = presetConfig();
+  const config: StatuslineConfig = { ...presetConfig(), icons: "unicode", separator: "pipe" };
   config.icons = "ascii";
   config.segments = [{ id: "model", enabled: true, icon: "" }];
-  assert.equal(stripTerminalSequences(renderFooter(100, sampleSnapshot(), config, testTheme())[0]!), "Example model");
+  assert.equal(stripTerminalSequences(renderFooter(100, sampleSnapshot(), config, testTheme())[0]!).trim(), "Example model");
   assert.equal(cleanText("a\r\nb\x1b[2J\x07"), "a  b");
 });
 
-test("last-component mode uses the raw model ID, while default mode preserves the friendly name", () => {
+test("default name mode preserves the friendly name, while explicit last-component mode uses the raw ID", () => {
   const data = sampleSnapshot();
   data.model = "Friendly model name";
   data.modelId = "provider/a/b/c/d";
   const config = presetConfig();
   config.segments = [{ id: "model", enabled: true, icon: "" }];
-  const rendered = () => stripTerminalSequences(renderFooter(100, data, config, testTheme())[0]!);
+  const rendered = () => stripTerminalSequences(renderFooter(100, data, config, testTheme())[0]!).trim();
   assert.equal(rendered(), "Friendly model name");
   config.modelDisplay = "last";
   assert.equal(rendered(), "d");
@@ -133,44 +137,45 @@ test("last-component mode uses the raw model ID, while default mode preserves th
 test("thinking is a colored model suffix, with no legacy icon or separator", () => {
   const data = sampleSnapshot();
   data.model = "demo";
-  const config = presetConfig();
+  const config: StatuslineConfig = { ...presetConfig(), icons: "unicode", separator: "pipe" };
   config.segments = [
     { id: "thinking", enabled: true, icon: "OLD", background: "#ffffff" },
-    { id: "model", enabled: true },
+    { id: "model", enabled: true, background: "#112233" },
     { id: "directory", enabled: true },
   ];
   const theme = testTheme();
   const render = () => renderFooter(150, data, config, theme)[0]!;
+  const plain = (line: string) => stripTerminalSequences(line).replace(/\s+/g, " ").trim();
   for (const [level, color] of [["off", "thinkingOff"], ["minimal", "thinkingMinimal"], ["low", "thinkingLow"], ["medium", "thinkingMedium"]] as const) {
     data.thinking = level;
     const line = render();
-    assert.equal(stripTerminalSequences(line), ` demo(${level}) | ▸ pi-packages`);
-    assert.ok(line.includes(theme.style(`(${level})`, { fg: theme.colors[color] })));
+    assert.equal(plain(line), ` demo(${level}) | ▸ pi-packages`);
+    assert.ok(line.includes(theme.style(`(${level})`, { fg: theme.colors[color], bg: parseColor("#112233") })));
   }
   for (const level of ["high", "xhigh", "max"]) {
     data.thinking = level;
     const line = render();
-    assert.equal(stripTerminalSequences(line), ` demo(${level}) | ▸ pi-packages`);
-    assert.ok(line.includes(theme.style("(", { fg: parseColor("#c084fc") })));
-    assert.ok(line.includes(theme.style(")", { fg: parseColor("#60a5fa") })));
+    assert.equal(plain(line), ` demo(${level}) | ▸ pi-packages`);
+    assert.ok(line.includes(theme.style("(", { fg: parseColor("#c084fc"), bg: parseColor("#112233") })));
+    assert.ok(line.includes(theme.style(")", { fg: parseColor("#60a5fa"), bg: parseColor("#112233") })));
   }
   data.thinking = "high";
   config.segments[0]!.color = "warning";
-  assert.ok(render().includes(theme.style("(high)", { fg: theme.colors.warning })));
+  assert.ok(render().includes(theme.style("(high)", { fg: theme.colors.warning, bg: parseColor("#112233") })));
   config.segments[0]!.enabled = false;
-  assert.equal(stripTerminalSequences(render()), " demo | ▸ pi-packages");
+  assert.equal(plain(render()), " demo | ▸ pi-packages");
   config.segments[0]!.enabled = true;
   data.reasoning = false;
-  assert.equal(stripTerminalSequences(render()), " demo | ▸ pi-packages");
+  assert.equal(plain(render()), " demo | ▸ pi-packages");
   data.reasoning = true;
   config.segments[1]!.enabled = false;
-  assert.equal(stripTerminalSequences(render()), "▸ pi-packages");
+  assert.equal(plain(render()), "▸ pi-packages");
 });
 
 test("inline thinking preserves model backgrounds, short IDs, ASCII fallback and width limits", () => {
   const data = sampleSnapshot();
   data.modelId = "provider/a/b/c/d";
-  const config = presetConfig("powerline");
+  const config = presetConfig();
   config.modelDisplay = "last";
   config.segments = [{ id: "model", enabled: true, background: "#112233" }, { id: "thinking", enabled: true }];
   const theme = testTheme();

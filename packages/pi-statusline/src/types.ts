@@ -3,8 +3,19 @@ import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 export const SEGMENT_IDS = ["model", "thinking", "context", "directory", "git", "cost", "input", "output", "tokens", "cacheRead", "cacheWrite", "statuses"] as const;
 export type SegmentId = typeof SEGMENT_IDS[number];
 export type ColorValue = ThemeColor | `#${string}`;
-export type Preset = "cometix" | "minimal" | "powerline";
+export type Preset = "powerline";
 export type IconMode = "unicode" | "nerd" | "ascii";
+export interface RuntimeConfig {
+  enabled: boolean;
+  status: boolean;
+  tools: boolean;
+  noContent: boolean;
+  noContentSeconds: number;
+  avg: boolean;
+  cache: boolean;
+  counts: boolean;
+  retainSummary: boolean;
+}
 export interface SegmentConfig {
   id: SegmentId;
   enabled: boolean;
@@ -23,6 +34,7 @@ export interface StatuslineConfig {
   modelDisplay: "name" | "last";
   contextDisplay: "text" | "bar";
   segments: SegmentConfig[];
+  runtime: RuntimeConfig;
 }
 export interface UsageTotals {
   input: number;
@@ -53,4 +65,6 @@ export interface StatuslineSnapshot {
   usage: UsageTotals;
   git: GitState;
   statuses: ReadonlyMap<string, string>;
+  runtime?: import("./runtime.ts").RuntimeSnapshot;
+  compaction?: import("./compaction.ts").CompactionSnapshot;
 }

@@ -1,19 +1,71 @@
 {
   "version": 1,
   "enabled": true,
-  "preset": "cometix",
-  "icons": "unicode",
-  "separator": "pipe",
+  "preset": "powerline",
+  "icons": "nerd",
+  "separator": "powerline",
   "pathMode": "basename",
   "modelDisplay": "name",
   "contextDisplay": "bar",
   "segments": [
-    { "id": "model", "enabled": true, "color": "accent" },
-    { "id": "thinking", "enabled": true },
-    { "id": "context", "enabled": true },
-    { "id": "directory", "enabled": true },
-    { "id": "git", "enabled": true },
-    { "id": "cost", "enabled": false },
-    { "id": "statuses", "enabled": true }
-  ]
+    {
+      "id": "model",
+      "enabled": true
+    },
+    {
+      "id": "thinking",
+      "enabled": true
+    },
+    {
+      "id": "context",
+      "enabled": true
+    },
+    {
+      "id": "directory",
+      "enabled": true
+    },
+    {
+      "id": "git",
+      "enabled": true
+    },
+    {
+      "id": "cost",
+      "enabled": false
+    },
+    {
+      "id": "input",
+      "enabled": false
+    },
+    {
+      "id": "output",
+      "enabled": false
+    },
+    {
+      "id": "tokens",
+      "enabled": true
+    },
+    {
+      "id": "cacheRead",
+      "enabled": false
+    },
+    {
+      "id": "cacheWrite",
+      "enabled": false
+    },
+    {
+      "id": "statuses",
+      "enabled": true
+    }
+  ],
+  "runtime": {
+    "enabled": true,
+    "status": true,
+    "tools": true,
+    "noContent": true,
+    "noContentSeconds": 10,
+    "avg": true,
+    "cache": true,
+    "counts": true,
+    "retainSummary": true
+  }
 }

@@ -19,7 +19,8 @@ PACKAGE = Path(__file__).resolve().parents[1]
 ANSI = re.compile(r"\x1b\][^\x07]*(?:\x07)|\x1b\[[0-?]*[ -/]*[@-~]")
 
 
-def run(mode):
+def run(layout):
+    mode = layout
     with tempfile.TemporaryDirectory(prefix="pi-statusline-pty-") as directory:
         root = Path(directory)
         agent = root / "agent"
@@ -44,10 +45,10 @@ def run(mode):
         fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 28, 100, 0, 0))
         process = subprocess.Popen([
             executable, "--offline", "--no-approve", "--no-extensions",
-            "--no-skills", "--no-prompt-templates", "--no-themes", "--no-session",
+            "--no-skills", "--no-prompt-templates", "--no-themes", "--no-session", "--tools", "smoke_parent,smoke_child",
             "--extension", str(PACKAGE / "test/fixtures/smoke-provider.ts"),
             "--extension", str(PACKAGE / "src/index.ts"),
-            "--model", "statusline-smoke/demo", "--tui-mode", mode,
+            "--model", "statusline-smoke/demo", "--tui-mode", layout,
         ], cwd=project, stdin=slave, stdout=slave, stderr=slave, start_new_session=True,
             env={**os.environ, "PI_CODING_AGENT_DIR": str(agent), "TERM": "xterm-256color"})
         os.close(slave)
@@ -92,26 +93,61 @@ def run(mode):
             expect(startup, "Smoke demo(high)", "native footer with inline thinking")
             expect(startup, "[░░░░░░░░░░]0%", "bar mode enabled by default")
             assert "$ 0.000" not in startup, "Default footer must not show the cost segment"
-            expect(send("one\r", 1.2), "complete.", "streaming response")
+            assert "Idle" not in startup, "Startup footer must not show Idle"
+            assert "Until compact" not in startup, "Footer must not show removed compaction capacity"
+            first = send("one\r", 1.2)
+            expect(first, "complete.", "streaming response")
+            expect(first, "Elapsed", "runtime elapsed")
+            expect(first, "Turns 1", "model turn count")
+            assert "Running 0s" not in first and "Done 0s" not in first, "Elapsed must not duplicate a status duration"
             expect(send("two\r", 1.2), "complete.", "second response")
-            expect(send("/compact\r", 2), "[??????????]?%", "unknown context after successful compaction")
+            resize(160, 44)
+            tool_text = send("tools\r", 0.8)
+            expect(tool_text, "Tools 2 active", "nested tool lifecycle")
+            input_text = drain(1.2)
+            expect(input_text, "Smoke input", "real TUI prompt")
+            expect(input_text, "Awaiting input", "UI wait overrides active tools")
+            assert "No content" not in tool_text + input_text
+            continuation = send("\r", 1.2)
+            expect(continuation, "complete.", "tool continuation settles")
+            expect(continuation, "Turns 2", "tool continuation does not reset run")
+            expect(send("slow\r", 11.4), "No content", "default ten-second observation timeout")
+            send("\x1b", 0.7)
+            resumed = send("after cancel\r", 1.2)
+            expect(resumed, "complete.", "new run after cancelling a slow stream")
+            expect(resumed, "Turns 1", "new run resets the turn count")
+            send("/smoke-fail-compact\r")
+            expect(send("/compact\r", 1), "Compaction failed", "failed compaction restores runtime")
+            compacted = send("/compact\r", 2)
+            expect(compacted, "[??????????]?%", "unknown context after successful compaction")
+            expect(compacted, "Compactions 1", "session compaction count")
+            assert "Until compact" not in compacted, "Compaction must not restore removed capacity metrics"
+            resize(100, 28)
             expect(send("/smoke-model\r"), "Smoke alternate(low)", "model and thinking change")
             expect(send("/smoke-theme\r"), "Smoke alternate", "live Pi theme change")
             expect(send("/statusline\r"), "Statusline settings", "configuration panel")
-            expect(send("\r"), "Preset: minimal", "draft preset preview")
+            select_item("Icons:")
+            expect(send("\r"), "Icons: ascii", "draft icon preview")
             send("\x1b")
             assert not config_file.exists(), "Cancel must not persist"
-            expect(send("/statusline\r"), "Preset: cometix", "cancel preserved configuration")
-            send("\r")
-            expect(send("\r"), "Preset: powerline", "Powerline preview")
+            reopened = send("/statusline\r")
+            expect(reopened, "Icons: nerd", "cancel preserved configuration")
+            expect(reopened, "", "Powerline preview")
+            assert "Preset:" not in reopened, "Only one layout: no preset selector"
             select_item("Context display:")
             expect(send("\r"), "?/200k", "switch to text preview")
             expect(send("\r"), "[??????????]?%", "unknown usage in bar preview")
             select_item("Save and apply globally")
             send("\r", 0.5)
+            save_deadline = time.monotonic() + 5
+            while not config_file.exists() and time.monotonic() < save_deadline:
+                drain(0.1)
+            assert config_file.exists(), f"{mode}: configuration save did not complete"
             saved_config = json.loads(config_file.read_text())
             assert saved_config["preset"] == "powerline"
             assert saved_config["contextDisplay"] == "bar"
+            assert saved_config["icons"] == "nerd"
+            assert saved_config["modelDisplay"] == "name"
             visible = [item["id"] for item in saved_config["segments"] if item["enabled"] and item["id"] != "thinking"]
             assert visible[:2] == ["model", "context"]
             assert not (agent / "statusline.json").exists(), "Save must not recreate the old configuration path"
@@ -144,5 +180,5 @@ def run(mode):
 
 
 if __name__ == "__main__":
-    for mode in ("regular", "fullscreen"):
-        run(mode)
+    for layout in ("regular", "fullscreen"):
+        run(layout)

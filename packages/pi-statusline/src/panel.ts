@@ -26,6 +26,7 @@ export class StatuslinePanel implements Component, Focusable {
   private disposed = false;
   private hasFocus = false;
   private listHeight = 0;
+  private section: "runtime" | undefined;
 
   constructor(options: PanelOptions) { this.options = options; this.draft = structuredClone(options.config); this.rebuild(); }
   get focused(): boolean { return this.hasFocus; }
@@ -39,6 +40,10 @@ export class StatuslinePanel implements Component, Focusable {
     return thinking;
   }
   private items(): SelectItem[] {
+    if (this.section) {
+      const labels: Record<string, string> = { enabled: "Runtime metrics", status: "Elapsed / compaction status", tools: "Tool activity", noContent: "No content warning", noContentSeconds: "No content threshold (seconds)", avg: "Average output speed", cache: "Cache read ratio", counts: "Turns and compactions", retainSummary: "Retain last run summary" };
+      return [...Object.entries(this.draft[this.section]).map(([key, value]) => ({ value: `option:${key}`, label: `${labels[key] ?? key}: ${value}` })), { value: "back", label: "Back to settings" }];
+    }
     if (this.editing) {
       const segment = this.editing;
       return [
@@ -52,7 +57,6 @@ export class StatuslinePanel implements Component, Focusable {
       ];
     }
     return [
-      { value: "preset", label: `Preset: ${this.draft.preset}`, description: "Cycles presets and resets segment styles/order" },
       { value: "defaultEnabled", label: `Enable on startup: ${this.draft.enabled ? "yes" : "no"}` },
       { value: "icons", label: `Icons: ${this.draft.icons}` },
       { value: "separator", label: `Separator: ${this.draft.separator}` },
@@ -60,6 +64,7 @@ export class StatuslinePanel implements Component, Focusable {
       { value: "modelDisplay", label: `Model display: ${this.draft.modelDisplay}`, description: "name: display name · last: final model ID component" },
       { value: "contextDisplay", label: `Context display: ${this.draft.contextDisplay}`, description: "text: tokens/capacity(percent) · bar: progress and percent" },
       ...this.draft.segments.filter((segment) => segment.id !== "thinking").map((segment) => ({ value: `segment:${segment.id}`, label: `[${segment.enabled ? "x" : " "}] ${segment.id}`, description: segment.id === "statuses" ? "Secondary row · Space toggles, Enter edits" : "Space toggles · Alt+Up/Down reorders · Enter edits" })),
+      { value: "runtime", label: "Runtime options" },
       { value: "save", label: "Save and apply globally" },
       { value: "reset", label: "Restore defaults in preview" },
       { value: "cancel", label: "Cancel" },
@@ -78,11 +83,29 @@ export class StatuslinePanel implements Component, Focusable {
   }
   private cancel(): void {
     if (this.input) { this.input = undefined; this.error = ""; }
+    else if (this.section) { const section = this.section; this.section = undefined; this.rebuild(section); }
     else if (this.editing) { const id = this.editing.id; this.editing = undefined; this.rebuild(`segment:${id}`); }
     else this.options.done();
   }
   private activate(value: string): void {
     this.error = "";
+    if (this.section) {
+      if (value === "back") { this.cancel(); return; }
+      const key = value.slice("option:".length);
+      if (key === "noContentSeconds") {
+        this.input = new Input(); this.input.focused = this.hasFocus; this.input.setValue(String(this.draft.runtime.noContentSeconds));
+        this.inputLabel = "No content threshold (1–3600 seconds)";
+        this.input.onEscape = () => this.cancel();
+        this.input.onSubmit = (text) => {
+          try { this.draft = parseConfig({ ...this.draft, runtime: { ...this.draft.runtime, noContentSeconds: Number(text) } }); this.input = undefined; this.error = ""; this.rebuild(value); }
+          catch (error) { this.error = error instanceof Error ? error.message : String(error); }
+        };
+      } else {
+        const group = this.draft[this.section] as unknown as Record<string, unknown>;
+        if (typeof group[key] === "boolean") group[key] = !group[key];
+      }
+      this.rebuild(value); return;
+    }
     if (this.editing) {
       if (value === "back") this.cancel();
       else if (value === "enabled") { this.editing.enabled = !this.editing.enabled; this.rebuild(value); }
@@ -92,22 +115,13 @@ export class StatuslinePanel implements Component, Focusable {
     }
     const cycle = <T,>(current: T, options: readonly T[]): T => options[(options.indexOf(current) + 1) % options.length]!;
     switch (value) {
-      case "preset": {
-        const enabled = this.draft.enabled;
-        const modelDisplay = this.draft.modelDisplay;
-        const contextDisplay = this.draft.contextDisplay;
-        this.draft = presetConfig(cycle(this.draft.preset, ["cometix", "minimal", "powerline"]));
-        this.draft.enabled = enabled;
-        this.draft.modelDisplay = modelDisplay;
-        this.draft.contextDisplay = contextDisplay;
-        break;
-      }
       case "defaultEnabled": this.draft.enabled = !this.draft.enabled; break;
       case "icons": this.draft.icons = cycle(this.draft.icons, ["unicode", "nerd", "ascii"]); break;
       case "separator": this.draft.separator = cycle(this.draft.separator, ["pipe", "dot", "space", "powerline"]); break;
       case "pathMode": this.draft.pathMode = cycle(this.draft.pathMode, ["basename", "abbreviated", "full"]); break;
       case "modelDisplay": this.draft.modelDisplay = cycle(this.draft.modelDisplay, ["name", "last"]); break;
       case "contextDisplay": this.draft.contextDisplay = cycle(this.draft.contextDisplay, ["text", "bar"]); break;
+      case "runtime": this.section = value; this.rebuild(); return;
       case "reset": this.draft = presetConfig(); break;
       case "cancel": this.options.done(); return;
       case "save": void this.save(); return;
@@ -160,7 +174,8 @@ export class StatuslinePanel implements Component, Focusable {
           [this.draft.segments[segmentIndex], this.draft.segments[next]] = [this.draft.segments[next]!, this.draft.segments[segmentIndex]!];
           this.rebuild(selected);
         }
-      } else this.list.handleInput(data);
+      } else if (this.section && matchesKey(data, "space") && selected?.startsWith("option:")) this.activate(selected);
+      else this.list.handleInput(data);
     }
     if (!this.disposed) this.options.requestRender();
   }
@@ -172,7 +187,7 @@ export class StatuslinePanel implements Component, Focusable {
     const { data, example } = this.options.snapshot();
     const preview = renderFooter(width, data, this.draft, this.options.theme());
     const lines = [
-      this.paint(`Statusline settings${this.editing ? ` / ${this.editing.id}` : ""}`, "accent"),
+      this.paint(`Statusline settings${this.editing ? ` / ${this.editing.id}` : this.section ? ` / ${this.section}` : ""}`, "accent"),
       this.paint(example ? "Preview · example data" : "Preview · current session", "muted"),
       ...(preview.length ? preview : [this.paint("(all segments hidden)", "muted")]),
       this.paint("Changes are a draft until Save. Fees are Pi-reported USD.", "muted"),
