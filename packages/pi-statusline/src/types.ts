@@ -33,6 +33,8 @@ export interface StatuslineConfig {
   pathMode: "basename" | "abbreviated" | "full";
   modelDisplay: "name" | "last";
   contextDisplay: "text" | "bar";
+  /** Blank lines rendered above the statusline, between the editor and the footer (0–3). */
+  spacing: number;
   segments: SegmentConfig[];
   runtime: RuntimeConfig;
 }

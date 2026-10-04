@@ -13,7 +13,7 @@ export function presetConfig(): StatuslineConfig {
   const enabled = new Set<string>(["model", "thinking", "directory", "git", "context", "tokens", "statuses"]);
   return {
     version: 1, enabled: true, preset: "powerline", icons: "nerd",
-    separator: "powerline", pathMode: "basename", modelDisplay: "name", contextDisplay: "bar",
+    separator: "powerline", pathMode: "basename", modelDisplay: "name", contextDisplay: "bar", spacing: 1,
     segments: SEGMENT_IDS.map((id) => ({ id, enabled: enabled.has(id) })),
     runtime: { enabled: true, status: true, tools: true, noContent: true, noContentSeconds: 10, avg: true, cache: true, counts: true, retainSummary: true },
   };
@@ -29,6 +29,10 @@ function boolean(value: unknown, name: string): boolean {
   if (typeof value !== "boolean") throw new Error(`Invalid ${name}`);
   return value;
 }
+function integer(value: unknown, min: number, max: number, name: string): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) throw new Error(`Invalid ${name} (${min}–${max})`);
+  return value;
+}
 export function parseConfig(raw: unknown): StatuslineConfig {
   if (!record(raw)) throw new Error("Configuration must be an object");
   if (raw.version !== undefined && raw.version !== 1) throw new Error("Unsupported configuration version");
@@ -40,6 +44,7 @@ export function parseConfig(raw: unknown): StatuslineConfig {
   if (raw.pathMode !== undefined) config.pathMode = choice(raw.pathMode, ["basename", "abbreviated", "full"], "pathMode");
   if (raw.modelDisplay !== undefined) config.modelDisplay = choice(raw.modelDisplay, ["name", "last"], "modelDisplay");
   if (raw.contextDisplay !== undefined) config.contextDisplay = choice(raw.contextDisplay, ["text", "bar"], "contextDisplay");
+  if (raw.spacing !== undefined) config.spacing = integer(raw.spacing, 0, 3, "spacing");
   for (const group of ["runtime"] as const) {
     if (raw[group] === undefined) continue;
     if (!record(raw[group])) throw new Error(`Invalid ${group}`);

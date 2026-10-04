@@ -94,6 +94,13 @@ test("runtime partial configuration inherits defaults and rejects invalid known 
   assert.equal(parseConfig({ runtime: { noContentSeconds: 3600 } }).runtime.noContentSeconds, 3600);
 });
 
+test("spacing accepts zero to three blank lines above the statusline and rejects other values", () => {
+  assert.equal(presetConfig().spacing, 1);
+  assert.equal(parseConfig({}).spacing, 1);
+  for (const spacing of [0, 1, 2, 3]) assert.equal(parseConfig({ spacing }).spacing, spacing);
+  for (const spacing of [-1, 4, 1.5, NaN, Infinity, "1", null]) assert.throws(() => parseConfig({ spacing }), /Invalid spacing/);
+});
+
 test("obsolete configuration keys are ignored and not saved", async () => {
   const dir = await mkdtemp(join(tmpdir(), "statusline-obsolete-"));
   try {

@@ -3,7 +3,7 @@ import test from "node:test";
 import { parseColor, stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { presetConfig } from "../src/config.ts";
 import type { StatuslineConfig } from "../src/types.ts";
-import { cleanText, renderFooter, sampleSnapshot } from "../src/render.ts";
+import { cleanText, renderFooter, sampleSnapshot, withSpacing } from "../src/render.ts";
 import { testTheme } from "./helpers.ts";
 
 test("all themes and icon modes fit every width including wide Unicode and escape sequences", () => {
@@ -192,6 +192,19 @@ test("inline thinking preserves model backgrounds, short IDs, ASCII fallback and
       assert.equal(text.includes("(high"), text.includes("(high)"));
     }
   }
+});
+
+test("withSpacing prepends blank lines above the footer without changing its content", () => {
+  const base = renderFooter(100, sampleSnapshot(), presetConfig(), testTheme());
+  assert.ok(base.length > 0 && base[0] !== "");
+  for (const spacing of [1, 2, 3]) {
+    const lines = withSpacing(base, spacing);
+    assert.deepEqual(lines.slice(0, spacing), Array<string>(spacing).fill(""));
+    assert.deepEqual(lines.slice(spacing), base);
+  }
+  assert.deepEqual(withSpacing(base, 0), base);
+  assert.deepEqual(withSpacing(base, -1), base);
+  assert.deepEqual(withSpacing([], 2), []);
 });
 
 test("rainbow thinking keeps distinct hues even when a theme uses one semantic color", () => {

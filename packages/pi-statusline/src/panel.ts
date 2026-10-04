@@ -1,6 +1,6 @@
 import { Input, matchesKey, SelectList, truncateToWidth, type Component, type Focusable, type SelectItem } from "@earendil-works/pi-tui";
 import { COLORS, parseConfig, presetConfig } from "./config.ts";
-import { cleanText, renderFooter, type RenderTheme } from "./render.ts";
+import { cleanText, renderFooter, withSpacing, type RenderTheme } from "./render.ts";
 import type { SegmentConfig, StatuslineConfig, StatuslineSnapshot } from "./types.ts";
 
 interface PanelOptions {
@@ -63,6 +63,7 @@ export class StatuslinePanel implements Component, Focusable {
       { value: "pathMode", label: `Path: ${this.draft.pathMode}` },
       { value: "modelDisplay", label: `Model display: ${this.draft.modelDisplay}`, description: "name: display name · last: final model ID component" },
       { value: "contextDisplay", label: `Context display: ${this.draft.contextDisplay}`, description: "text: tokens/capacity(percent) · bar: progress and percent" },
+      { value: "spacing", label: `Spacing above statusline: ${this.draft.spacing}`, description: "Blank lines between the input box and the statusline (0–3)" },
       ...this.draft.segments.filter((segment) => segment.id !== "thinking").map((segment) => ({ value: `segment:${segment.id}`, label: `[${segment.enabled ? "x" : " "}] ${segment.id}`, description: segment.id === "statuses" ? "Secondary row · Space toggles, Enter edits" : "Space toggles · Alt+Up/Down reorders · Enter edits" })),
       { value: "runtime", label: "Runtime options" },
       { value: "save", label: "Save and apply globally" },
@@ -121,6 +122,7 @@ export class StatuslinePanel implements Component, Focusable {
       case "pathMode": this.draft.pathMode = cycle(this.draft.pathMode, ["basename", "abbreviated", "full"]); break;
       case "modelDisplay": this.draft.modelDisplay = cycle(this.draft.modelDisplay, ["name", "last"]); break;
       case "contextDisplay": this.draft.contextDisplay = cycle(this.draft.contextDisplay, ["text", "bar"]); break;
+      case "spacing": this.draft.spacing = cycle(this.draft.spacing, [0, 1, 2, 3]); break;
       case "runtime": this.section = value; this.rebuild(); return;
       case "reset": this.draft = presetConfig(); break;
       case "cancel": this.options.done(); return;
@@ -185,7 +187,7 @@ export class StatuslinePanel implements Component, Focusable {
     if (width <= 0) return [];
     if (this.listHeight !== Math.max(1, this.options.height() - 12)) this.rebuild(this.list.getSelectedItem()?.value);
     const { data, example } = this.options.snapshot();
-    const preview = renderFooter(width, data, this.draft, this.options.theme());
+    const preview = withSpacing(renderFooter(width, data, this.draft, this.options.theme()), this.draft.spacing);
     const lines = [
       this.paint(`Statusline settings${this.editing ? ` / ${this.editing.id}` : this.section ? ` / ${this.section}` : ""}`, "accent"),
       this.paint(example ? "Preview · example data" : "Preview · current session", "muted"),

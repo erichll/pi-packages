@@ -4,7 +4,7 @@ import test from "node:test";
 import { CURSOR_MARKER, stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { presetConfig } from "../src/config.ts";
 import { StatuslinePanel } from "../src/panel.ts";
-import { renderFooter, sampleSnapshot } from "../src/render.ts";
+import { renderFooter, sampleSnapshot, withSpacing } from "../src/render.ts";
 import type { StatuslineConfig } from "../src/types.ts";
 import { testTheme } from "./helpers.ts";
 
@@ -22,7 +22,7 @@ test("draft preview uses the footer renderer; cancellation never saves or mutate
   let saves = 0, closed = 0;
   const theme = testTheme(), data = sampleSnapshot();
   const panel = new StatuslinePanel({ config, theme: () => theme, snapshot: () => ({ data, example: true }), requestRender() {}, height: () => 30, save: async () => { saves++; }, done: () => { closed++; } });
-  const preview = renderFooter(100, data, config, theme);
+  const preview = withSpacing(renderFooter(100, data, config, theme), config.spacing);
   assert.deepEqual(panel.render(100).slice(2, 2 + preview.length), preview);
   assert.match(stripTerminalSequences(panel.render(100)[1]!), /example data/);
   assert.doesNotMatch(panel.render(100).map(stripTerminalSequences).join("\n"), /Preset:/);
@@ -105,4 +105,18 @@ test("runtime drafts support numeric validation and save without mutating active
   assert.deepEqual(config, original); assert.equal(saves[0]?.runtime.tools, false);
   assert.equal(saves[0]?.runtime.noContentSeconds, 20);
   assert.ok(saves[0] && !("providerMetrics" in saves[0]) && !("integrations" in saves[0]));
+});
+
+test("panel cycles statusline spacing, previews it and saves the draft", async () => {
+  let saved: StatuslineConfig | undefined, closed = 0;
+  const panel = new StatuslinePanel({ config: presetConfig(), theme: testTheme, snapshot: () => ({ data: sampleSnapshot(), example: false }), requestRender() {}, height: () => 30, save: async (config) => { saved = config; }, done: () => { closed++; } });
+  select(panel, "Spacing above statusline: 1");
+  panel.handleInput(enter);
+  assert.ok(panel.render(140).some((line) => stripTerminalSequences(line).includes("Spacing above statusline: 2")));
+  const preview = withSpacing(renderFooter(140, sampleSnapshot(), presetConfig(), testTheme()), 2);
+  assert.equal(preview[0], "");
+  assert.deepEqual(panel.render(140).slice(2, 2 + preview.length), preview);
+  select(panel, "Save and apply"); panel.handleInput(enter); await delay(0);
+  assert.equal(closed, 1);
+  assert.equal(saved?.spacing, 2);
 });

@@ -203,6 +203,16 @@ export function renderFooter(width: number, data: StatuslineSnapshot, config: St
   return lines;
 }
 
+/**
+ * Pi renders the footer directly under the editor, so leading blank lines are the only
+ * extension-side way to adjust the gap between the input box and the statusline.
+ */
+export function withSpacing(lines: string[], spacing: number): string[] {
+  const count = Number.isFinite(spacing) ? Math.max(0, Math.floor(spacing)) : 0;
+  if (lines.length === 0 || count === 0) return lines;
+  return [...Array<string>(count).fill(""), ...lines];
+}
+
 export function sampleSnapshot(): StatuslineSnapshot {
   return {
     model: "Example model", modelId: "example/provider/model", reasoning: true, thinking: "high", cwd: "/projects/pi-packages", home: "/home/example",

@@ -60,6 +60,15 @@ test("tool, input, no-content, compaction and truthful turn labels", () => {
   assert.doesNotMatch(second(data), /Until compact|Avg|Cache/);
 });
 
+test("zero compactions are omitted until the first success", () => {
+  const data = sampleSnapshot(); data.statuses = new Map(); data.compaction!.count = 0;
+  assert.doesNotMatch(second(data), /Compactions/);
+  data.compaction!.active = true; data.compaction!.elapsedMs = 4000;
+  assert.match(second(data), /Compacting… 4s/); assert.doesNotMatch(second(data), /Compactions/);
+  data.compaction!.active = false; data.compaction!.count = 2;
+  assert.match(second(data), /Compactions 2/);
+});
+
 test("no-content activity uses the same color as Avg in dark and light themes", () => {
   const data = sampleSnapshot(); data.statuses = new Map();
   const config = presetConfig();

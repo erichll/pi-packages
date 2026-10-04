@@ -35,7 +35,7 @@ test("extension wiring spans agent_end/continuation, cancellation, UI/tools, com
   const row = () => footer!.render(200).map(stripTerminalSequences).join("\n");
   statusline({ get events() { throw new Error("No provider-specific event bus should be required"); }, get getSettings() { throw new Error("Footer statistics must not need compaction settings"); }, on(name: string, handler: (event: any, ctx: ExtensionContext) => unknown) { handlers.set(name, handler); }, registerCommand(_name: string, options: { handler: typeof command }) { command = options.handler; } } as unknown as ExtensionAPI);
   try {
-    await fire("session_start"); assert.match(row(), /Compactions 0/); assert.doesNotMatch(row(), /Idle|Until compact/);
+    await fire("session_start"); assert.doesNotMatch(row(), /Compactions 0|Idle|Until compact/);
     await command("details", ctx); assert.equal(settings, "");
     assert.equal(notifications.at(-1), "Usage: /statusline [on|off|reload]");
     await command("", ctx); assert.match(settings, /Statusline settings/);
@@ -60,7 +60,7 @@ test("extension wiring spans agent_end/continuation, cancellation, UI/tools, com
     await fire("session_before_compact"); assert.match(row(), /Compacting/);
     await fire("session_compact_failed", { aborted: true }); assert.match(row(), /Compaction cancelled/);
     await fire("session_before_compact"); await fire("session_compact", { compactionEntry: { id: "compact" } });
-    assert.doesNotMatch(row(), /Compacting|Compaction cancelled/);
+    assert.doesNotMatch(row(), /Compacting|Compaction cancelled/); assert.match(row(), /Compactions 1/);
     await command("off", ctx); assert.equal(footer, undefined);
     const reads = contextReads; await fire("message_update", { message: assistant(), assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "", partial: assistant() } });
     await delay(120); assert.equal(contextReads, reads);

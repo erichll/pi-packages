@@ -7,6 +7,7 @@
   "pathMode": "basename",
   "modelDisplay": "name",
   "contextDisplay": "bar",
+  "spacing": 1,
   "segments": [
     {
       "id": "model",

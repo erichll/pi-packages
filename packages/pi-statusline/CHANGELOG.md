@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add `spacing` (0–3 blank lines, default 1) to control the gap between the input box and the statusline; configurable in the panel and persisted in the configuration.
+- Hide the `Compactions` count while it is zero, including the first active compaction.
+
 ## 0.2.0 - 2026-10-04
 
 - Use the same muted color for No content and Avg; default modelDisplay to name while preserving explicit last preferences.

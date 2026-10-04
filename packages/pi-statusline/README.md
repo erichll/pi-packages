@@ -79,6 +79,7 @@ existing file to the new path before running `/reload`; the old path is no longe
   "pathMode": "basename",
   "modelDisplay": "name",
   "contextDisplay": "bar",
+  "spacing": 1,
   "segments": [
     {
       "id": "model",
@@ -167,6 +168,11 @@ existing file to the new path before running `/reload`; the old path is no longe
   the bar completely and retain the reported percentage. Both modes use the
   existing context warning colors. Text mode includes token counts and capacity;
   bar mode shows progress and percentage.
+- Spacing: `1` (default), `0`, `2` or `3` blank lines above the statusline.
+  Pi renders the footer directly under the editor, so this is the only supported
+  way to add breathing room between the input box and the statusline; the editor's
+  own bottom border cannot be removed. Choose **Spacing above statusline** in the
+  panel or set `"spacing": 0` for a flush footer.
 - `segments`: optional ordered array of `{ id, enabled, icon?, color?, iconColor?, background? }`.
   An explicit list is authoritative: omitted segments are disabled but remain
   available in the panel. The `statuses` segment always occupies the second row.
@@ -245,7 +251,8 @@ footer has no Idle label or leading separator.
   show `Compaction failed` / `Compaction cancelled` while no model run is active,
   until subsequent activity.
 - `Compactions` counts unique successful entries across the **whole session file**,
-  including other branches, not merely the selected tree path.
+  including other branches, not merely the selected tree path. It is hidden
+  while the count is zero, including during the first active compaction.
 `runtime.enabled: false` hides the statusline's runtime metrics. Individual
 options hide their corresponding items; `status` controls the local Elapsed
 and compaction-result labels. The `statuses` segment independently controls other

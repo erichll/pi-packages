@@ -3,7 +3,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionContext, ReadonlyFooterDataProvider } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import { emptyGit, GitPoller, type GitReader } from "./git.ts";
-import { renderFooter } from "./render.ts";
+import { renderFooter, withSpacing } from "./render.ts";
 import type { StatuslineConfig, StatuslineSnapshot } from "./types.ts";
 import { UsageCache } from "./usage.ts";
 import { RuntimeState } from "./runtime.ts";
@@ -67,7 +67,7 @@ export class FooterSession {
       this.timer = setInterval(() => this.refresh(), 1000);
       this.timer.unref();
       return {
-        render: (width: number) => renderFooter(width, this.snapshot(), this.config, this.ctx.ui.theme),
+        render: (width: number) => withSpacing(renderFooter(width, this.snapshot(), this.config, this.ctx.ui.theme), this.config.spacing),
         invalidate: () => {}, // Theme and extension statuses are read fresh on every render.
         dispose: () => this.stopResources(),
       };

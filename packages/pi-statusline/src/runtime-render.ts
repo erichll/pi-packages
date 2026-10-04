@@ -25,7 +25,7 @@ export function renderRuntime(width: number, data: StatuslineSnapshot, config: S
   else if (enabled && config.runtime.status && runtime?.runId) add("elapsed", `Elapsed ${elapsed(runtime.elapsedMs)}`);
   if (enabled && compact?.active) {
     add("status", `${config.icons === "ascii" ? "Compacting..." : "Compacting…"} ${seconds(compact.elapsedMs)}`, "warning");
-    if (config.runtime.counts) add("compactions", `Compactions ${compact.count}`);
+    if (config.runtime.counts && compact.count > 0) add("compactions", `Compactions ${compact.count}`);
   } else {
     if (enabled && runtime) {
       if (config.runtime.status) {
@@ -46,7 +46,7 @@ export function renderRuntime(width: number, data: StatuslineSnapshot, config: S
       }
       if (config.runtime.counts && runtime.runId) add("turns", `Turns ${runtime.turns}`);
     }
-    if (enabled && config.runtime.counts && compact) add("compactions", `Compactions ${compact.count}`);
+    if (enabled && config.runtime.counts && compact && compact.count > 0) add("compactions", `Compactions ${compact.count}`);
     if (extensionStatus) parts.push({ id: "statuses", text: extensionStatus, styled: extensionStatus });
   }
   const separator = config.icons === "ascii" ? " | " : " · ";
