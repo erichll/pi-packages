@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-10-04
 
 - Add `spacing` (0–3 blank lines, default 1) to control the gap between the input box and the statusline; configurable in the panel and persisted in the configuration.
 - Hide the `Compactions` count while it is zero, including the first active compaction.
