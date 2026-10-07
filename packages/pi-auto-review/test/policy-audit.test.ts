@@ -45,7 +45,7 @@ function aggregate(overrides: Partial<PolicyAuditAggregateRow> = {}): PolicyAudi
   return {
     surface: "bash", signature: "git:status", bashCategory: "version_control", risk: "read_only",
     pathClass: "unknown", result: "allow", resolution: "user_approved", origin: "project",
-    forwarded: false, features: "", ruleFingerprint: "none", candidateSurface: "bash",
+    forwarded: false, features: "", ruleFingerprint: "none", spellingFingerprint: "none", candidateSurface: "bash",
     candidatePattern: "git status", candidateSafetyClass: "observed_bash_template", candidateEligible: true,
     candidateBlocker: "", count: 1, ...overrides,
   };
@@ -190,7 +190,7 @@ test("SQLite store persists aggregates, isolates projects, deduplicates forwarde
   let now = new Date("2026-08-27T10:00:00Z");
   try {
     const first = await PolicyAuditStore.open({ directory, retentionDays: 180, now: () => now });
-    assert.equal(POLICY_AUDIT_SCHEMA_VERSION, 2);
+    assert.equal(POLICY_AUDIT_SCHEMA_VERSION, 3);
     assert.equal(statSync(directory).mode & 0o777, 0o700);
     assert.equal(statSync(join(directory, "policy-audit.key")).mode & 0o777, 0o600);
     assert.equal(statSync(join(directory, "policy-audit.sqlite")).mode & 0o777, 0o600);
@@ -340,7 +340,8 @@ test("controller returns a redacted command report", async () => {
     });
     const { report, markdown } = await controller.report({ days: 30, top: 20, minCount: 1, scope: "current" });
     assert.equal(report.total, 1);
-    assert.equal(report.version, 2);
+    assert.equal(report.version, 3);
+    assert.equal(report.spellingFingerprints.length, 0);
     for (const raw of ["ordinary", "/work/project/private"]) {
       assert.equal(JSON.stringify(report).includes(raw), false);
       assert.equal(markdown.includes(raw), false);
@@ -357,12 +358,13 @@ test("report provides bounded structured details and never repeats sensitive inp
     fromDay: "2026-08-01", throughDay: "2026-08-27",
     rows: [{
       surface: "bash", signature: "git:status", bashCategory: "version_control", risk: "read_only", pathClass: "workspace",
-      result: "allow", resolution: "user_approved", origin: "project", forwarded: false, features: "", ruleFingerprint: "abcd1234", count: 7,
+      result: "allow", resolution: "user_approved", origin: "project", forwarded: false, features: "", ruleFingerprint: "abcd1234",
+      spellingFingerprint: "none", count: 7,
       candidateSurface: "bash", candidatePattern: "git status", candidateSafetyClass: "observed_bash_template",
       candidateEligible: true, candidateBlocker: "",
     }],
   }, { days: 30, top: 20, minCount: 5, scope: "current" });
-  assert.equal(report.version, 2);
+  assert.equal(report.version, 3);
   assert.equal(report.lowRiskReviewCandidates[0]?.count, 7);
   assert.equal(report.suggestedAllowRules[0]?.pattern, "git status");
   assert.match(renderPolicyAuditMarkdown(report), /Suggested allow rules/);
@@ -559,6 +561,157 @@ test("v1 databases migrate transactionally without turning old counts into recom
     assert.equal(reportFor(result.rows).suggestedAllowRules.length, 0);
     store.close();
   } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("report surfaces anonymous spelling fingerprints and never repeats the raw spelling", () => {
+  const report = reportFor([
+    aggregate({ ruleFingerprint: "abcd1234", spellingFingerprint: "ef7890ab", count: 7 }),
+    aggregate({ ruleFingerprint: "abcd1234", spellingFingerprint: "none", count: 3 }),
+  ]);
+  assert.deepEqual(report.spellingFingerprints, [{ fingerprint: "ef7890ab", count: 7 }]);
+  assert.match(renderPolicyAuditMarkdown(report), /Anonymous alternate-spelling fingerprints/);
+});
+
+test("v2 databases migrate to the spelling-fingerprint schema without losing counts", async () => {
+  const directory = temp("pi-policy-v2-");
+  const databasePath = join(directory, "policy-audit.sqlite");
+  try {
+    const db = new DatabaseSync(databasePath);
+    db.exec(`
+      CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
+      INSERT INTO meta VALUES ('schema_version','2'), ('collecting_since','2026-01-01T00:00:00.000Z'), ('recommendations_since','2026-01-01T00:00:00.000Z');
+      CREATE TABLE daily_permission_stats (
+        day TEXT NOT NULL, project_hash TEXT NOT NULL, surface TEXT NOT NULL, signature TEXT NOT NULL,
+        bash_category TEXT NOT NULL, risk TEXT NOT NULL, path_class TEXT NOT NULL, result TEXT NOT NULL,
+        resolution TEXT NOT NULL, origin TEXT NOT NULL, forwarded INTEGER NOT NULL, features TEXT NOT NULL,
+        rule_fingerprint TEXT NOT NULL, candidate_surface TEXT NOT NULL, candidate_pattern TEXT NOT NULL,
+        candidate_safety_class TEXT NOT NULL, candidate_eligible INTEGER NOT NULL, candidate_blocker TEXT NOT NULL,
+        count INTEGER NOT NULL,
+        PRIMARY KEY (day,project_hash,surface,signature,bash_category,risk,path_class,result,resolution,origin,forwarded,features,rule_fingerprint,candidate_surface,candidate_pattern,candidate_safety_class,candidate_eligible,candidate_blocker)
+      ) STRICT;
+      INSERT INTO daily_permission_stats VALUES
+        ('2026-08-27','legacy-project','bash','git:status','version_control','read_only','unknown','allow','user_approved','project',0,'','none','','','',0,'',7);
+    `);
+    db.close();
+    const store = await PolicyAuditStore.open({
+      directory, retentionDays: 180, now: () => new Date("2026-08-28T00:00:00.000Z"),
+    });
+    const result = store.query({ days: 30, top: 20, minCount: 5, scope: "all", projectPath: "/ignored" });
+    assert.equal(result.rows.reduce((sum, row) => sum + row.count, 0), 7);
+    assert.equal(result.rows[0]?.spellingFingerprint, "none");
+    store.close();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("ask spellings are joined by request id into anonymous spelling fingerprints", async () => {
+  const directory = temp("pi-policy-spelling-");
+  try {
+    const controller = new PolicyAuditController({
+      config: () => ({ enabled: true, retentionDays: 180 }),
+      cwd: () => "/work/project",
+      directory,
+      warn: () => assert.fail("unexpected audit warning"),
+    });
+    controller.notePrompt({
+      requestId: "ask-1",
+      request: { matchedSpelling: "/usr/bin/git", matchedPattern: "git *" },
+    });
+    controller.record({
+      requestId: "ask-1", surface: "bash", value: "git status /work/project/private",
+      result: "allow", resolution: "user_approved", origin: "project:/work/project/private",
+      matchedPattern: "git status *",
+    });
+    // A decision with no captured ask stays without a spelling.
+    controller.record({
+      requestId: "ask-2", surface: "bash", value: "ls /work/project/private",
+      result: "allow", resolution: "user_approved", origin: "project:/work/project/private",
+      matchedPattern: "ls *",
+    });
+    // A decision event that carries the spelling directly needs no capture.
+    controller.record({
+      requestId: "ask-3", surface: "bash", value: "rm /work/project/private",
+      result: "deny", resolution: "user_denied", origin: "project:/work/project/private",
+      matchedPattern: "rm *", matchedSpelling: "/bin/rm",
+    });
+    const { report, markdown } = await controller.report({ days: 30, top: 20, minCount: 1, scope: "current" });
+    assert.equal(report.total, 3);
+    assert.equal(report.spellingFingerprints.length, 2);
+    assert.ok(report.spellingFingerprints.every((item) =>
+      !report.ruleFingerprints.some((rule) => rule.fingerprint === item.fingerprint)));
+    assert.match(markdown, /Anonymous alternate-spelling fingerprints/);
+    // The raw spelling never reaches the report.
+    assert.equal(markdown.includes("/usr/bin/git"), false);
+    assert.equal(markdown.includes("/bin/rm"), false);
+    await controller.close();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("remembered ask spellings are bounded and dropped oldest-first", async () => {
+  const directory = temp("pi-policy-spelling-cap-");
+  try {
+    const controller = new PolicyAuditController({
+      config: () => ({ enabled: true, retentionDays: 180 }),
+      cwd: () => "/work/project",
+      directory,
+      warn: () => assert.fail("unexpected audit warning"),
+    });
+    for (let index = 0; index < 300; index++) {
+      controller.notePrompt({ requestId: `bulk-${index}`, request: { matchedSpelling: `/bin/tool-${index}` } });
+    }
+    // 300 prompts against the 256-entry cache evicted the oldest 44: bulk-0
+    // lost its spelling while bulk-299 kept it.
+    controller.record({
+      requestId: "bulk-0", surface: "bash", value: "tool-0",
+      result: "allow", resolution: "policy_allow", origin: "default", matchedPattern: "tool-*",
+    });
+    controller.record({
+      requestId: "bulk-299", surface: "bash", value: "tool-299",
+      result: "allow", resolution: "policy_allow", origin: "default", matchedPattern: "tool-*",
+    });
+    const { report } = await controller.report({ days: 30, top: 50, minCount: 1, scope: "current" });
+    assert.equal(report.spellingFingerprints.length, 1);
+    await controller.close();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("authorizer and UI capture of the same ask do not evict unrelated spellings", async () => {
+  const directory = temp("pi-policy-spelling-repeat-");
+  const controller = new PolicyAuditController({
+    config: () => ({ enabled: true, retentionDays: 180 }),
+    cwd: () => "/work/project", directory,
+    warn: () => assert.fail("unexpected audit warning"),
+  });
+  try {
+    for (let index = 0; index < 256; index++) {
+      controller.noteRequest(`ask-${index}`, { matchedSpelling: `/bin/tool-${index}` });
+    }
+    controller.notePrompt({ requestId: "ask-255", request: { matchedSpelling: "/bin/tool-255" } });
+    for (const index of [0, 255]) {
+      controller.record({
+        requestId: `ask-${index}`, surface: "bash", value: `tool-${index}`,
+        result: "allow", resolution: "authorizer_allowed", origin: "global",
+      });
+    }
+    const { report } = await controller.report({ days: 30, top: 20, minCount: 1, scope: "current" });
+    assert.equal(report.spellingFingerprints.length, 2);
+    // Repeated decision broadcasts remain deduplicated, even after capture.
+    controller.record({
+      requestId: "ask-255", surface: "bash", value: "tool-255",
+      result: "allow", resolution: "authorizer_allowed", origin: "global",
+    });
+    const repeated = await controller.report({ days: 30, top: 20, minCount: 1, scope: "current" });
+    assert.equal(repeated.report.total, 2);
+    assert.equal(repeated.report.spellingFingerprints.reduce((sum, item) => sum + item.count, 0), 2);
+  } finally {
+    await controller.close();
     rmSync(directory, { recursive: true, force: true });
   }
 });

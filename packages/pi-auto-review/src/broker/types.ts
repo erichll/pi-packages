@@ -26,6 +26,12 @@ export type BoundaryRequest = {
   /** Rule (or synthetic sentinel) that produced this ask. */
   matchedPattern?: string;
   /**
+   * The spelling of the rule-matched bash unit when it differs from `command`
+   * as typed — the absolute spelling of a relative path argument, say
+   * (permission-system #910). Display-only: never bound into request hashes.
+   */
+  matchedSpelling?: string;
+  /**
    * Set only on the bounded reviewer view when a command fact was truncated;
    * never set on the stored request used for hashing or hard denies.
    */

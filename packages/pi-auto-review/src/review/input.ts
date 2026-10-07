@@ -119,6 +119,9 @@ export function boundaryRequest(
     ...(evidence.matchedPattern
       ? { matchedPattern: evidence.matchedPattern }
       : {}),
+    ...(evidence.matchedSpelling
+      ? { matchedSpelling: evidence.matchedSpelling }
+      : {}),
     path: evidence.path,
     resolvedPath: evidence.resolvedPath,
     destination: evidence.destination,

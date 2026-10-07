@@ -13,7 +13,7 @@ import { dirname, join, resolve } from "node:path";
 import type { ClassifiedPermission } from "./classifier.ts";
 import { loadSqlite, type SqliteDatabase, type SqliteModule } from "./sqlite.ts";
 
-export const POLICY_AUDIT_SCHEMA_VERSION = 2;
+export const POLICY_AUDIT_SCHEMA_VERSION = 3;
 export const POLICY_AUDIT_DATABASE_NAME = "policy-audit.sqlite";
 export const POLICY_AUDIT_KEY_NAME = "policy-audit.key";
 
@@ -24,6 +24,11 @@ export type SanitizedPermissionDecision = ClassifiedPermission & {
   origin: string;
   forwarded: boolean;
   matchedPattern?: string;
+  /**
+   * Already-digested spelling of the rule-matched bash unit when it differed
+   * from the command as typed (#910); absent when the typed text decided.
+   */
+  matchedSpelling?: string;
 };
 
 export type PolicyAuditStoreOptions = {
@@ -53,6 +58,7 @@ export type PolicyAuditAggregateRow = {
   forwarded: boolean;
   features: string;
   ruleFingerprint: string;
+  spellingFingerprint: string;
   candidateSurface: string;
   candidatePattern: string;
   candidateSafetyClass: string;
@@ -146,18 +152,19 @@ export class PolicyAuditStore {
     `);
     const version = this.db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()?.value;
     const now = this.now().toISOString();
-    if (version !== undefined && version !== "1" && version !== String(POLICY_AUDIT_SCHEMA_VERSION)) {
+    if (version !== undefined && version !== "1" && version !== "2" && version !== String(POLICY_AUDIT_SCHEMA_VERSION)) {
       throw new Error("unsupported policy audit schema version");
     }
     if (version === "1") this.migrateV1(now);
-    else this.createV2Table();
+    else if (version === "2") this.migrateV2(now);
+    else this.createV3Table();
     this.db.prepare("INSERT OR IGNORE INTO meta(key,value) VALUES('schema_version',?)").run(String(POLICY_AUDIT_SCHEMA_VERSION));
     this.db.prepare("INSERT OR IGNORE INTO meta(key,value) VALUES('collecting_since',?)").run(now);
     this.db.prepare("INSERT OR IGNORE INTO meta(key,value) VALUES('recommendations_since',?)").run(now);
     this.secureSidecars();
   }
 
-  private createV2Table(): void {
+  private createV3Table(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS daily_permission_stats (
         day TEXT NOT NULL,
@@ -173,13 +180,14 @@ export class PolicyAuditStore {
         forwarded INTEGER NOT NULL,
         features TEXT NOT NULL,
         rule_fingerprint TEXT NOT NULL,
+        spelling_fingerprint TEXT NOT NULL,
         candidate_surface TEXT NOT NULL,
         candidate_pattern TEXT NOT NULL,
         candidate_safety_class TEXT NOT NULL,
         candidate_eligible INTEGER NOT NULL,
         candidate_blocker TEXT NOT NULL,
         count INTEGER NOT NULL,
-        PRIMARY KEY (day, project_hash, surface, signature, bash_category, risk, path_class, result, resolution, origin, forwarded, features, rule_fingerprint, candidate_surface, candidate_pattern, candidate_safety_class, candidate_eligible, candidate_blocker)
+        PRIMARY KEY (day, project_hash, surface, signature, bash_category, risk, path_class, result, resolution, origin, forwarded, features, rule_fingerprint, spelling_fingerprint, candidate_surface, candidate_pattern, candidate_safety_class, candidate_eligible, candidate_blocker)
       ) STRICT;
       CREATE INDEX IF NOT EXISTS daily_permission_stats_project_day ON daily_permission_stats(project_hash, day);
     `);
@@ -189,24 +197,57 @@ export class PolicyAuditStore {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       this.db.exec(`
-        CREATE TABLE daily_permission_stats_v2 (
+        CREATE TABLE daily_permission_stats_v3 (
           day TEXT NOT NULL, project_hash TEXT NOT NULL, surface TEXT NOT NULL, signature TEXT NOT NULL,
           bash_category TEXT NOT NULL, risk TEXT NOT NULL, path_class TEXT NOT NULL, result TEXT NOT NULL,
           resolution TEXT NOT NULL, origin TEXT NOT NULL, forwarded INTEGER NOT NULL, features TEXT NOT NULL,
-          rule_fingerprint TEXT NOT NULL, candidate_surface TEXT NOT NULL, candidate_pattern TEXT NOT NULL,
-          candidate_safety_class TEXT NOT NULL, candidate_eligible INTEGER NOT NULL, candidate_blocker TEXT NOT NULL,
-          count INTEGER NOT NULL,
-          PRIMARY KEY (day, project_hash, surface, signature, bash_category, risk, path_class, result, resolution, origin, forwarded, features, rule_fingerprint, candidate_surface, candidate_pattern, candidate_safety_class, candidate_eligible, candidate_blocker)
+          rule_fingerprint TEXT NOT NULL, spelling_fingerprint TEXT NOT NULL, candidate_surface TEXT NOT NULL,
+          candidate_pattern TEXT NOT NULL, candidate_safety_class TEXT NOT NULL, candidate_eligible INTEGER NOT NULL,
+          candidate_blocker TEXT NOT NULL, count INTEGER NOT NULL,
+          PRIMARY KEY (day, project_hash, surface, signature, bash_category, risk, path_class, result, resolution, origin, forwarded, features, rule_fingerprint, spelling_fingerprint, candidate_surface, candidate_pattern, candidate_safety_class, candidate_eligible, candidate_blocker)
         ) STRICT;
-        INSERT INTO daily_permission_stats_v2
-          SELECT day,project_hash,surface,signature,bash_category,risk,path_class,result,resolution,origin,forwarded,features,rule_fingerprint,'','','',0,'',count
+        INSERT INTO daily_permission_stats_v3
+          SELECT day,project_hash,surface,signature,bash_category,risk,path_class,result,resolution,origin,forwarded,features,rule_fingerprint,'none','','','',0,'',count
           FROM daily_permission_stats;
         DROP TABLE daily_permission_stats;
-        ALTER TABLE daily_permission_stats_v2 RENAME TO daily_permission_stats;
+        ALTER TABLE daily_permission_stats_v3 RENAME TO daily_permission_stats;
         CREATE INDEX daily_permission_stats_project_day ON daily_permission_stats(project_hash, day);
       `);
       this.db.prepare("UPDATE meta SET value=? WHERE key='schema_version'").run(String(POLICY_AUDIT_SCHEMA_VERSION));
       this.db.prepare("INSERT OR REPLACE INTO meta(key,value) VALUES('recommendations_since',?)").run(now);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      try { this.db.exec("ROLLBACK"); } catch { /* preserve migration error */ }
+      throw error;
+    }
+  }
+
+  /**
+   * v2 → v3: adds `spelling_fingerprint` (#910). Pre-v3 rows never carried a
+   * spelling, so they copy over with the same 'none' sentinel fresh no-spelling
+   * rows use, and keep contributing to every recommendation unchanged.
+   */
+  private migrateV2(now: string): void {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.exec(`
+        CREATE TABLE daily_permission_stats_v3 (
+          day TEXT NOT NULL, project_hash TEXT NOT NULL, surface TEXT NOT NULL, signature TEXT NOT NULL,
+          bash_category TEXT NOT NULL, risk TEXT NOT NULL, path_class TEXT NOT NULL, result TEXT NOT NULL,
+          resolution TEXT NOT NULL, origin TEXT NOT NULL, forwarded INTEGER NOT NULL, features TEXT NOT NULL,
+          rule_fingerprint TEXT NOT NULL, spelling_fingerprint TEXT NOT NULL, candidate_surface TEXT NOT NULL,
+          candidate_pattern TEXT NOT NULL, candidate_safety_class TEXT NOT NULL, candidate_eligible INTEGER NOT NULL,
+          candidate_blocker TEXT NOT NULL, count INTEGER NOT NULL,
+          PRIMARY KEY (day, project_hash, surface, signature, bash_category, risk, path_class, result, resolution, origin, forwarded, features, rule_fingerprint, spelling_fingerprint, candidate_surface, candidate_pattern, candidate_safety_class, candidate_eligible, candidate_blocker)
+        ) STRICT;
+        INSERT INTO daily_permission_stats_v3
+          SELECT day,project_hash,surface,signature,bash_category,risk,path_class,result,resolution,origin,forwarded,features,rule_fingerprint,'none',candidate_surface,candidate_pattern,candidate_safety_class,candidate_eligible,candidate_blocker,count
+          FROM daily_permission_stats;
+        DROP TABLE daily_permission_stats;
+        ALTER TABLE daily_permission_stats_v3 RENAME TO daily_permission_stats;
+        CREATE INDEX daily_permission_stats_project_day ON daily_permission_stats(project_hash, day);
+      `);
+      this.db.prepare("UPDATE meta SET value=? WHERE key='schema_version'").run(String(POLICY_AUDIT_SCHEMA_VERSION));
       this.db.exec("COMMIT");
     } catch (error) {
       try { this.db.exec("ROLLBACK"); } catch { /* preserve migration error */ }
@@ -224,6 +265,10 @@ export class PolicyAuditStore {
 
   ruleFingerprint(pattern: string | undefined): string {
     return pattern ? this.hash("rule", pattern).slice(0, 16) : "none";
+  }
+
+  spellingFingerprint(spelling: string | undefined): string {
+    return spelling ? this.hash("spelling", spelling).slice(0, 16) : "none";
   }
 
   private retry<T>(operation: () => T): T {
@@ -255,9 +300,9 @@ export class PolicyAuditStore {
         }
         this.db.prepare(`
           INSERT INTO daily_permission_stats(
-            day,project_hash,surface,signature,bash_category,risk,path_class,result,resolution,origin,forwarded,features,rule_fingerprint,
+            day,project_hash,surface,signature,bash_category,risk,path_class,result,resolution,origin,forwarded,features,rule_fingerprint,spelling_fingerprint,
             candidate_surface,candidate_pattern,candidate_safety_class,candidate_eligible,candidate_blocker,count
-          ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
+          ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
           ON CONFLICT DO UPDATE SET count=count+1
         `).run(
           day,
@@ -273,6 +318,7 @@ export class PolicyAuditStore {
           event.forwarded ? 1 : 0,
           event.features.join(","),
           this.ruleFingerprint(event.matchedPattern),
+          this.spellingFingerprint(event.matchedSpelling),
           event.candidate?.surface ?? "",
           event.candidate?.pattern ?? "",
           event.candidate?.safetyClass ?? "",
@@ -306,17 +352,18 @@ export class PolicyAuditStore {
       const params: unknown[] = [fromDay];
       if (input.scope === "current") params.push(this.projectHash(input.projectPath));
       const rows = this.db.prepare(`
-        SELECT surface,signature,bash_category,risk,path_class,result,resolution,origin,forwarded,features,rule_fingerprint,
+        SELECT surface,signature,bash_category,risk,path_class,result,resolution,origin,forwarded,features,rule_fingerprint,spelling_fingerprint,
           candidate_surface,candidate_pattern,candidate_safety_class,candidate_eligible,candidate_blocker,SUM(count) AS count
         FROM daily_permission_stats
         WHERE day >= ? ${projectClause}
-        GROUP BY surface,signature,bash_category,risk,path_class,result,resolution,origin,forwarded,features,rule_fingerprint,
+        GROUP BY surface,signature,bash_category,risk,path_class,result,resolution,origin,forwarded,features,rule_fingerprint,spelling_fingerprint,
           candidate_surface,candidate_pattern,candidate_safety_class,candidate_eligible,candidate_blocker
       `).all(...params).map((row) => ({
         surface: String(row.surface), signature: String(row.signature), bashCategory: String(row.bash_category),
         risk: String(row.risk), pathClass: String(row.path_class), result: String(row.result),
         resolution: String(row.resolution), origin: String(row.origin), forwarded: Number(row.forwarded) === 1,
-        features: String(row.features), ruleFingerprint: String(row.rule_fingerprint), count: Number(row.count),
+        features: String(row.features), ruleFingerprint: String(row.rule_fingerprint),
+        spellingFingerprint: String(row.spelling_fingerprint), count: Number(row.count),
         candidateSurface: String(row.candidate_surface), candidatePattern: String(row.candidate_pattern),
         candidateSafetyClass: String(row.candidate_safety_class), candidateEligible: Number(row.candidate_eligible) === 1,
         candidateBlocker: String(row.candidate_blocker),

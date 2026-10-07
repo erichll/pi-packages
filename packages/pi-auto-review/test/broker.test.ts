@@ -524,6 +524,13 @@ test("the exact-match hash ignores retry-minted identifiers (requestId, toolCall
   );
 });
 
+test("the exact-match hash ignores the display-only matched spelling (#910)", () => {
+  assert.equal(
+    boundaryRequestHash({ ...request, matchedSpelling: "/usr/bin/git" }),
+    boundaryRequestHash(request),
+  );
+});
+
 test("the exact-match hash binds the whole executed program", () => {
   const wrapped: BoundaryRequest = {
     ...request,

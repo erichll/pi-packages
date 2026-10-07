@@ -18,6 +18,7 @@ export type PermissionDecisionLike = {
   resolution?: unknown;
   origin?: unknown;
   matchedPattern?: unknown;
+  matchedSpelling?: unknown;
   forwarding?: unknown;
 };
 
@@ -37,6 +38,9 @@ const PERMISSION_RESOLUTIONS = new Set([
   "confirmation_unavailable",
   "gate_error",
 ]);
+
+/** Upper bound on remembered ask spellings awaiting their decision event. */
+const PROMPT_SPELLING_CACHE_LIMIT = 256;
 
 export function parsePolicyAuditArguments(raw: string, retentionDays: number): PolicyAuditArguments {
   const result: PolicyAuditArguments = { days: Math.min(30, retentionDays), top: 20, minCount: 5, scope: "current" };
@@ -76,8 +80,42 @@ export class PolicyAuditController {
   private disabled = false;
   private warned = false;
   private queue = Promise.resolve();
+  /**
+   * Ask spelling captured at authorizer entry or from `permissions:ui_prompt`,
+   * keyed by request id. Automatic allow/deny decisions never open a UI prompt.
+   * The `permissions:decision` event still carries only `matchedPattern`, so
+   * the #910 spelling has to be joined by request id at record time. The map
+   * is bounded FIFO: spellings for asks whose decision never arrives are
+   * dropped oldest-first, and the spelling is display-only anyway.
+   */
+  private readonly promptSpellings = new Map<string, string>();
 
   constructor(private readonly options: PolicyAuditControllerOptions) {}
+
+  /** Capture spelling before an authorizer or human can decide the ask. */
+  noteRequest(requestId: unknown, rawRequest: unknown): void {
+    if (!this.options.config().enabled || this.disabled) return;
+    const request = rawRequest && typeof rawRequest === "object" && !Array.isArray(rawRequest)
+      ? rawRequest as Record<string, unknown>
+      : undefined;
+    const spelling = request?.matchedSpelling;
+    if (typeof requestId !== "string" || !requestId || typeof spelling !== "string" || spelling.length === 0) return;
+    // A deferred authorizer and its eventual UI prompt describe the same ask.
+    // Updating that entry must not evict an unrelated outstanding request.
+    if (!this.promptSpellings.has(requestId) && this.promptSpellings.size >= PROMPT_SPELLING_CACHE_LIMIT) {
+      const oldest = this.promptSpellings.keys().next().value;
+      if (oldest !== undefined) this.promptSpellings.delete(oldest);
+    }
+    this.promptSpellings.set(requestId, spelling);
+  }
+
+  /** Capture human prompts, including asks that bypass our authorizer. */
+  notePrompt(raw: unknown): void {
+    const event = raw && typeof raw === "object" && !Array.isArray(raw)
+      ? raw as Record<string, unknown>
+      : undefined;
+    this.noteRequest(event?.requestId, event?.request);
+  }
 
   warmup(): void {
     if (this.options.config().enabled) void this.getStore().catch(() => undefined);
@@ -137,7 +175,13 @@ export class PolicyAuditController {
       matchedPattern: typeof event.matchedPattern === "string"
         ? digest("rule", event.matchedPattern)
         : undefined,
+      matchedSpelling: typeof event.matchedSpelling === "string" && event.matchedSpelling.length > 0
+        ? digest("spelling", event.matchedSpelling)
+        : this.promptSpellings.has(event.requestId)
+          ? digest("spelling", this.promptSpellings.get(event.requestId)!)
+        : undefined,
     };
+    this.promptSpellings.delete(event.requestId);
     this.queue = this.queue
       .then(async () => (await this.getStore()).record(cwd, sanitized))
       .then(() => undefined)
@@ -165,6 +209,7 @@ export class PolicyAuditController {
   }
 
   async close(): Promise<void> {
+    this.promptSpellings.clear();
     await this.queue;
     // Detach before awaiting so concurrent shutdowns cannot double-close.
     const storePromise = this.storePromise;

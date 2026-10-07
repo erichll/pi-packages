@@ -356,6 +356,7 @@ export function createPiAutoReviewExtension(
           executedUnit: request.executedUnit,
           fullCommand: request.fullCommand,
           matchedPattern: request.matchedPattern,
+          matchedSpelling: request.matchedSpelling,
           path: request.path,
           target: request.destination,
           toolName: request.toolName,
@@ -670,6 +671,7 @@ export function createPiAutoReviewExtension(
 
   pi.events.on("permissions:ui_prompt", (event) => {
     if (context) uiAutoConfirmer.handlePrompt(event, context);
+    policyAudit.notePrompt(event);
   });
 
   pi.events.on("permissions:decision", (event) => {
@@ -716,6 +718,7 @@ export function createPiAutoReviewExtension(
         EXTENSION_NAME,
         async (details, query, log: AuthorizerLog) => {
           const evidence = normalizePermissionEvidence(details);
+          policyAudit.noteRequest(details.requestId, evidence);
           const surface = evidence.surface;
           if (!context || !broker) {
             const reason = "review context is unavailable";

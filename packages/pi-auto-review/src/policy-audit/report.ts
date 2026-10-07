@@ -1,6 +1,6 @@
 import type { PolicyAuditAggregateRow, PolicyAuditQueryResult } from "./store.ts";
 
-export const POLICY_AUDIT_REPORT_VERSION = 2 as const;
+export const POLICY_AUDIT_REPORT_VERSION = 3 as const;
 
 export type PolicyAuditReportItem = { name: string; count: number; denied: number; denialRate: number };
 export type SuggestedAllowRule = {
@@ -35,6 +35,7 @@ export type PolicyAuditReport = {
   lowRiskReviewCandidates: PolicyAuditReportItem[];
   keepAskRecommendations: PolicyAuditReportItem[];
   ruleFingerprints: Array<{ fingerprint: string; count: number }>;
+  spellingFingerprints: Array<{ fingerprint: string; count: number }>;
   warnings: string[];
 };
 
@@ -213,6 +214,14 @@ export function buildPolicyAuditReport(
     if (row.ruleFingerprint === "none") continue;
     fingerprintCounts.set(row.ruleFingerprint, (fingerprintCounts.get(row.ruleFingerprint) ?? 0) + row.count);
   }
+  // Anonymous spelling fingerprints (#910): how often the matched rule hit a
+  // bash spelling other than the command as typed, e.g. its absolute path.
+  // Rows without an alternate spelling carry the 'none' sentinel and are skipped.
+  const spellingCounts = new Map<string, number>();
+  for (const row of result.rows) {
+    if (row.spellingFingerprint === "none") continue;
+    spellingCounts.set(row.spellingFingerprint, (spellingCounts.get(row.spellingFingerprint) ?? 0) + row.count);
+  }
   const warnings = [
     "Counts begin at first successful enablement; no historical logs are imported.",
     "Suggestions are evidence-based decision aids and never modify permission configuration.",
@@ -247,6 +256,11 @@ export function buildPolicyAuditReport(
     lowRiskReviewCandidates: rank(lowRisk, (row) => `${row.surface}:${row.signature}`, options.top, options.minCount),
     keepAskRecommendations: rank(keepAsk, (row) => `${row.risk}:${row.surface}:${row.signature}`, options.top, options.minCount),
     ruleFingerprints: [...fingerprintCounts]
+      .map(([fingerprint, count]) => ({ fingerprint, count }))
+      .filter((item) => item.count >= options.minCount)
+      .sort((a, b) => b.count - a.count || a.fingerprint.localeCompare(b.fingerprint))
+      .slice(0, options.top),
+    spellingFingerprints: [...spellingCounts]
       .map(([fingerprint, count]) => ({ fingerprint, count }))
       .filter((item) => item.count >= options.minCount)
       .sort((a, b) => b.count - a.count || a.fingerprint.localeCompare(b.fingerprint))
@@ -298,6 +312,10 @@ function renderHotspotSections(report: PolicyAuditReport): string[] {
   if (report.ruleFingerprints.length > 0) {
     groups.push({ title: "Anonymous rule-hit fingerprints",
       items: report.ruleFingerprints.map((f) => ({ name: f.fingerprint, count: f.count, denied: 0, denialRate: 0 })) });
+  }
+  if (report.spellingFingerprints.length > 0) {
+    groups.push({ title: "Anonymous alternate-spelling fingerprints",
+      items: report.spellingFingerprints.map((f) => ({ name: f.fingerprint, count: f.count, denied: 0, denialRate: 0 })) });
   }
   return groups.flatMap((group) => ["", `## ${group.title}`, "", ...group.items.map(hotspotRow)]);
 }

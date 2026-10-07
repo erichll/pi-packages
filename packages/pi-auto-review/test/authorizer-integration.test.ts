@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 // These deep imports reach pi-permission-system internals that its public
-// entry (".") does not export. They are pinned to the 33.x source layout:
+// entry (".") does not export. They are verified against the 40.0.2 source layout:
 // 31.1.1 moved path-normalizer.ts, 33.0.0 changed MCP target derivation and
 // rule evaluation (see test/mcp-rule-semantics.test.ts). When upgrading across
 // minor/major lines, re-verify every path below.
@@ -102,6 +104,9 @@ function config(overrides: Partial<Config> = {}): Config {
     ...loadConfig(),
     retries: 0,
     timeoutMs: 1_000,
+    // Ordinary extension tests must never open or migrate the operator's DB.
+    // Audit integration opts in only after switching HOME to a temporary dir.
+    policyAudit: { enabled: false, retentionDays: 180 },
     ...overrides,
   };
 }
@@ -498,8 +503,9 @@ function harness(
       sessionModel = model;
     },
     dispose() {
-      handlers.get("session_shutdown")?.();
+      const shutdown = handlers.get("session_shutdown")?.();
       unpublishPermissionsService(harnessSessionId, service as never);
+      return shutdown;
     },
   };
 }
@@ -692,6 +698,72 @@ test("in-process nodes register independently and child shutdown preserves paren
   } finally {
     parent.dispose();
     unpublishPermissionsService("child-session", {} as never);
+  }
+});
+
+test("automatic authorizer spellings reach policy audit without a UI prompt", async () => {
+  const previousHome = process.env.HOME;
+  const home = mkdtempSync(join(tmpdir(), "pi-authorizer-spelling-"));
+  process.env.HOME = home;
+  try {
+    const cases = [
+      { outcome: "allow", command: "cat ./notes.txt", approved: true, modelCalls: 1 },
+      { outcome: "deny", command: "cat ./notes.txt", approved: false, modelCalls: 1 },
+      { outcome: "allow", command: "env NODE_TLS_REJECT_UNAUTHORIZED=0 node ./app.js", approved: false, modelCalls: 0 },
+    ];
+    for (const [index, sample] of cases.entries()) {
+      const instance = harness(JSON.stringify({
+        outcome: sample.outcome, risk_level: "low", user_authorization: "high",
+        rationale: "test verdict",
+      }), {
+        sessionId: `automatic-spelling-${index}`,
+        config: config({ policyAudit: { enabled: true, retentionDays: 180 } }),
+      });
+      let prompts = 0;
+      instance.events.on("permissions:ui_prompt", () => { prompts++; });
+      try {
+        const program = await BashProgram.parse(sample.command, new PathNormalizer(posixPathFlavor, process.cwd()));
+        const unit = program.commands()[0];
+        const spelling = unit?.spellings?.[0];
+        assert.ok(spelling, "real parser supplies the alternate spelling");
+        const requestId = `automatic-spelling-${index}`;
+        const payload = buildToolAskPayload({
+          check: { toolName: "bash", command: unit.text, executedUnit: unit.executedUnit,
+            state: "ask", matchedPattern: spelling, matchedSpelling: spelling },
+          agentName: null, surface: "bash", input: { command: sample.command },
+        });
+        const result = await instance.authorize("bash", { requestId, command: unit.text, payload });
+        assert.equal(result.decision.approved, sample.approved);
+        assert.equal(result.terminalCalls, 0);
+        assert.equal(prompts, 0);
+        assert.equal(instance.modelContexts.length, sample.modelCalls);
+        if (sample.modelCalls > 0) {
+          const input = JSON.parse(reviewerTranscript(instance.modelContexts[0]).userPrompt);
+          assert.equal(input.request.matchedSpelling, spelling);
+        }
+        // Match the real decision contract: it has a pattern but no spelling.
+        instance.events.emit("permissions:decision", {
+          requestId, surface: "bash", value: unit.text,
+          result: sample.approved ? "allow" : "deny",
+          resolution: sample.approved ? "authorizer_allowed" : "authorizer_denied",
+          origin: "global", matchedPattern: spelling,
+        });
+        await instance.commands.get("auto-review-policy-audit")!.handler("--min-count 1", instance.context);
+        const entry = instance.appendedEntries.find((item) => item.type === "pi-auto-review-policy-audit");
+        assert.ok(entry, "audit report was appended");
+        const report = entry.data.report as { total: number; spellingFingerprints: Array<{ count: number }> };
+        assert.equal(report.total, index + 1);
+        assert.equal(report.spellingFingerprints.reduce((sum, item) => sum + item.count, 0), index + 1);
+        assert.ok(report.spellingFingerprints.length > 0);
+        assert.equal(JSON.stringify(entry).includes(spelling), false, "raw spelling stays private");
+      } finally {
+        await instance.dispose();
+      }
+    }
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    rmSync(home, { recursive: true, force: true });
   }
 });
 
@@ -988,7 +1060,9 @@ test("real permission-system authorizer chain integration", async (t) => {
       });
       const context = reviewerTranscript(instance.modelContexts.at(-1));
       assert.equal(context.messages.length, 2);
-      assert.ok(context.systemPrompt.length < 2_011);
+      // Loose guard against unbounded prompt growth; the #910 matchedSpelling
+      // sentence sits at ~2.0k characters, so keep headroom for doc tweaks.
+      assert.ok(context.systemPrompt.length < 2_100);
       assert.equal(context.systemPrompt.match(/"outcome"/g)?.length, 1);
       assert.match(context.systemPrompt, /\$HOME/);
       assert.match(

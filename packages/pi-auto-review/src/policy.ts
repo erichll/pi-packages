@@ -31,6 +31,7 @@ export type PermissionDetailsLike = {
   executedUnit?: unknown;
   fullCommand?: unknown;
   matchedPattern?: unknown;
+  matchedSpelling?: unknown;
 };
 
 export type NormalizedPermissionEvidence = {
@@ -40,6 +41,13 @@ export type NormalizedPermissionEvidence = {
   executedUnit?: string;
   fullCommand?: string;
   matchedPattern?: string;
+  /**
+   * The spelling of the bash unit the matched rule hit when it did not match
+   * the command as typed — the absolute spelling of a relative path argument,
+   * say (permission-system #910). Display-only: absent whenever the typed text
+   * decided.
+   */
+  matchedSpelling?: string;
   path?: string;
   resolvedPath?: string;
   destination?: string;
@@ -171,6 +179,7 @@ export type RelevantBoundaryRequest = {
   executedUnit?: string;
   fullCommand?: string;
   matchedPattern?: string;
+  matchedSpelling?: string;
   path?: string;
   resolvedPath?: string;
   destination?: string;
@@ -390,6 +399,9 @@ export function normalizePermissionEvidence(
   const matchedPattern =
     nonEmptyString(payloadRequest?.matchedPattern) ??
     nonEmptyString(details.matchedPattern);
+  const matchedSpelling =
+    nonEmptyString(payloadRequest?.matchedSpelling) ??
+    nonEmptyString(details.matchedSpelling);
   const executedUnitCandidate =
     nonEmptyString(payloadRequest?.executedUnit) ??
     nonEmptyString(details.executedUnit);
@@ -412,6 +424,7 @@ export function normalizePermissionEvidence(
     ...(executedUnit ? { executedUnit } : {}),
     ...(fullCommand ? { fullCommand } : {}),
     ...(matchedPattern ? { matchedPattern } : {}),
+    ...(matchedSpelling ? { matchedSpelling } : {}),
     path,
     resolvedPath: accessIntent?.boundaryValue,
     destination,

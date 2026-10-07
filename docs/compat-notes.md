@@ -125,6 +125,12 @@ parent model `cliproxyapi/codex-auto-review` and child model
 `protected: sandboxed-bash-blocked-host-read`. Model-backed native child
 acceptance remains part of the release gate below.
 
+Release preparation for auto-review / sandbox 0.25.0 revalidated the same
+deterministic and model gates on 2026-10-07, with permission-system 40.0.2 and
+Pi 1.0.0. Both phases passed using the same parent/child models and reported
+`baseline: native-host-readable`, `protected: sandboxed-bash-blocked-host-read`,
+and `acknowledgement: @erichll:pi-sandbox`.
+
 Since 0.72.0 `typebox` is the same kind of host-provided dependency: it moved
 from `pi-subagents`' `dependencies` to an optional `peerDependencies` entry, so
 the extension no longer ships a copy. The loader's module graph does reach it -

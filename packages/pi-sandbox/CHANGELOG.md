@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.25.0 - 2026-10-07
+
+- Align the `@erichll/pi-auto-review` dependency with `^0.25.0` so the
+  workspace and sandbox use the same broker implementation and include the
+  permission-system 40.0.2 integration baseline.
+- Revalidate the deterministic and model-backed pi-subagents 0.75.0 gate:
+  the native baseline reads the host probe, while the protected native
+  background child blocks that read and acknowledges the sandbox extension.
+
 ## 0.24.0 - 2026-10-03
 
 - Raise the `@earendil-works/pi-coding-agent` peer floor to `^1.0.0` and the

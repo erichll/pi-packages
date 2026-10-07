@@ -119,7 +119,7 @@ bunTest("Bun-compiled Pi loads the audit backend and produces a persistent repor
     const result = JSON.parse(run.stdout);
     assert.deepEqual(result.warnings, []);
     assert.equal(result.report.total, 1);
-    assert.equal(result.report.version, 2);
+    assert.equal(result.report.version, 3);
     assert.doesNotMatch(run.stdout, /secret-path|compiled-request/);
     assert.match(result.markdown, /git status/);
     const store = await PolicyAuditStore.open({ directory, retentionDays: 180 });

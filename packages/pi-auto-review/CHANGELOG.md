@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.25.0 - 2026-10-07
+
+- Pass permission-system's matched bash spelling (#910) through the review and
+  audit pipeline. The ask payload's `request.matchedSpelling` — the alternate
+  spelling the matched rule hit when it did not match the command as typed,
+  e.g. the absolute spelling of a relative path argument — is now normalized
+  into the reviewer evidence and `BoundaryRequest`, described to the model
+  reviewer, carried through hard-deny audits, and persisted in the policy
+  audit as an anonymous `spelling_fingerprint` (schema v3; v1 and v2
+  databases migrate transactionally). Because `permissions:decision` still
+  carries only `matchedPattern`, the spelling is captured from
+  authorizer entry (including automatic allow/deny) and
+  `permissions:ui_prompt` by request id and joined at record time with a
+  bounded FIFO cache; decisions that carry the field directly are used
+  as-is. The report grows a "spelling fingerprints" section (v3); the
+  spelling stays out of the boundary request hash, which is display-only
+  input. On permission-system 39.x the field is simply absent and the audit
+  behaves exactly as before. The development baseline moves to ^40.0.2,
+  including the /dev/null core-reader exemption fix and bash-chain session
+  grant isolation security fix; the peer floor stays `>=39.0.0`. Real
+  permission-system integration tests cover alternate spellings, redirect
+  exemptions, automatic spelling audits, and sibling-unit isolation.
+- Isolate authorizer tests from the real user audit database: ordinary tests
+  disable audit collection, while audit integration uses a temporary HOME.
+  Schema v3 is a forward migration; upgrade and restart all audit collectors
+  rather than leaving pre-v3 sessions writing to the upgraded database.
+
 ## 0.24.0 - 2026-10-03
 
 - Raise the `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent`

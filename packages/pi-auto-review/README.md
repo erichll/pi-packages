@@ -33,7 +33,8 @@ that dependency is a hard prerequisite (see [Install and enable](#install-and-en
 > install the permission system separately (once per machine) before this
 > extension. This release line requires Pi 1.0.0 or later and supports
 > permission-system 39.0.0 and later (development baseline validated against
-> permission-system 39.0.0):
+> permission-system 40.0.2). Use 40.0.2 or later for the bash-chain session-grant
+> security fix; the older peer floor is retained for API compatibility:
 
 Node-based Pi requires Node.js 22.13.0 or newer. Permission auditing uses the
 host runtime's built-in SQLite: `node:sqlite` on Node and `bun:sqlite` on Bun,
@@ -108,6 +109,13 @@ interpreter payloads and heredoc bodies are conservatively scanned as raw text;
 credential rules also keep scanning raw text. When a command fact exceeds the
 reviewer bound (10 KiB), the ask defers to a human instead of being reviewed from
 a truncated program.
+
+Permission-system 40.x also reports the alternate command spelling a rule
+matched, for example `cat /repo/file` when the command was `cat ./file`.
+The reviewer sees this as explanatory evidence; it does not replace the actual
+command or enter the grant/retry hash. Absolute-path Bash rules now also reach
+relative spellings of that path, so review existing allow/ask/deny rules when
+upgrading from 39.x.
 
 Nested interpreter expansion is limited to 32 payloads and 32 KiB of cumulative
 payload text per command fact, across all recursion levels. Exceeding either
@@ -409,7 +417,10 @@ assignments, quoted values, and option values are replaced with `*`; safe bare
 command words remain in plaintext so the report can emit a matching rule.
 Paths used for path-surface statistics become only
 `workspace`, `temp`, `home`, `external`, `sensitive`, or `unknown`. Request IDs,
-project locations, and matched-rule patterns are HMACed. Syntactically valid
+project locations, matched-rule patterns, and alternate command spellings are
+HMACed. Spelling facts are captured at authorizer entry as well as human prompts,
+so automatic allow/deny decisions are included; 39.x requests simply lack the
+field. Reports expose only anonymous spelling fingerprints. Syntactically valid
 custom tool names are also retained in plaintext; invalid names stay anonymous
 as `<custom-tool>`. The database never stores raw commands, raw paths,
 URLs, credentials, or non-Bash tool arguments and inputs. Because safe bare Bash
@@ -418,7 +429,11 @@ project-specific labels; inspect suggestions before copying them.
 
 Data lives at
 `~/.pi/agent/extensions/pi-auto-review/policy-audit.sqlite`, beside an
-owner-only HMAC key. Node and Bun use the same database schema and key, so
+owner-only HMAC key. Version 0.25.0 migrates the database to schema v3; older
+auto-review collectors cannot use that schema. After upgrading, restart or
+reload all sessions using the old extension. Do not delete the database to
+resolve a mixed-version collector warning. Node and Bun use the same database
+schema and key, so
 switching runtimes preserves statistics and request deduplication.
 The directory is mode `0700`; the key, database, WAL, and
 SHM are mode `0600`. Initialization, lock, write, or corruption failures disable

@@ -580,6 +580,7 @@ test("normalizePermissionEvidence reads execution facts from payload", () => {
       request: {
         executedUnit: "rm -rf /tmp/x",
         matchedPattern: "<opaque-bash-wrapper>",
+        matchedSpelling: "/usr/bin/python3",
       },
       evidence: [{ label: "full command", text: full }],
     },
@@ -587,6 +588,7 @@ test("normalizePermissionEvidence reads execution facts from payload", () => {
   assert.equal(evidence.executedUnit, "rm -rf /tmp/x");
   assert.equal(evidence.fullCommand, full);
   assert.equal(evidence.matchedPattern, "<opaque-bash-wrapper>");
+  assert.equal(evidence.matchedSpelling, "/usr/bin/python3");
 
   // Facts that add nothing over the gated unit are suppressed.
   const deduped = normalizePermissionEvidence({
@@ -619,6 +621,36 @@ test("normalizePermissionEvidence reads execution facts from payload", () => {
     assert.equal(normalized.executedUnit, undefined);
     assert.equal(normalized.fullCommand, undefined);
     assert.equal(normalized.matchedPattern, undefined);
+    assert.equal(normalized.matchedSpelling, undefined);
+  }
+});
+
+test("normalizePermissionEvidence reads the matched spelling from the ask payload and details", () => {
+  // The ask payload (permission-system ≥ 40) carries the spelling; the
+  // pre-projected broker entry may carry it at the top level instead.
+  for (const details of [
+    { payload: { request: { matchedSpelling: "/usr/bin/git" } } },
+    { matchedSpelling: "/usr/bin/git" },
+  ]) {
+    const evidence = normalizePermissionEvidence({
+      surface: "bash",
+      command: "git status",
+      ...details,
+    });
+    assert.equal(evidence.matchedSpelling, "/usr/bin/git");
+  }
+  // Null ("typed text decided") and non-string values add no fact.
+  for (const details of [
+    { payload: { request: { matchedSpelling: null } } },
+    { payload: { request: { matchedSpelling: 7 } } },
+    {},
+  ]) {
+    const evidence = normalizePermissionEvidence({
+      surface: "bash",
+      command: "ls",
+      ...details,
+    });
+    assert.equal(evidence.matchedSpelling, undefined);
   }
 });
 
