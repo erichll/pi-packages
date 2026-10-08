@@ -669,6 +669,14 @@ export function createPiAutoReviewExtension(
     }
   });
 
+  pi.on("agent_settled", (event) => {
+    // Pi 1.0.x omits aborted. Only an explicit cancellation revokes staged
+    // allows and any one-shot UI interceptor left by that run.
+    if ((event as { aborted?: unknown }).aborted === true) {
+      uiAutoConfirmer.clear();
+    }
+  });
+
   pi.events.on("permissions:ui_prompt", (event) => {
     if (context) uiAutoConfirmer.handlePrompt(event, context);
     policyAudit.notePrompt(event);

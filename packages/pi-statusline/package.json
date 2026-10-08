@@ -1,6 +1,6 @@
 {
   "name": "@erichll/pi-statusline",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Configurable Pi statusline with live preview, Git and session usage",
   "type": "module",
   "license": "MIT",
@@ -17,14 +17,14 @@
     "smoke": "python3 test/pty-smoke.py"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*"
+    "@earendil-works/pi-ai": "^1.1.0",
+    "@earendil-works/pi-coding-agent": "^1.1.0",
+    "@earendil-works/pi-tui": "^1.1.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^1.0.0",
-    "@earendil-works/pi-coding-agent": "^1.0.0",
-    "@earendil-works/pi-tui": "^1.0.0",
+    "@earendil-works/pi-ai": "^1.1.0",
+    "@earendil-works/pi-coding-agent": "^1.1.0",
+    "@earendil-works/pi-tui": "^1.1.0",
     "@types/node": "^26.6.4",
     "typescript": "^7.0.2"
   }

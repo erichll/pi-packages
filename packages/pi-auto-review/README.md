@@ -31,12 +31,11 @@ that dependency is a hard prerequisite (see [Install and enable](#install-and-en
 > **Prerequisite:** pi-auto-review is an authorizer inside
 > `@gotgenes/pi-permission-system`. Pi does not auto-install peer packages, so
 > install the permission system separately (once per machine) before this
-> extension. This release line requires Pi 1.0.0 or later and supports
-> permission-system 39.0.0 and later (development baseline validated against
-> permission-system 40.0.2). Use 40.0.2 or later for the bash-chain session-grant
-> security fix; the older peer floor is retained for API compatibility:
+> extension. This release line requires Pi 1.1.0 or later and
+> permission-system 40.0.2 or later, including the bash-chain session-grant
+> security fix:
 
-Node-based Pi requires Node.js 22.13.0 or newer. Permission auditing uses the
+Node-based Pi requires Node.js 22.19.0 or newer. Permission auditing uses the
 host runtime's built-in SQLite: `node:sqlite` on Node and `bun:sqlite` on Bun,
 including Bun-compiled Pi (verified with Bun 1.3.14). It does not require a
 SQLite CLI, system SQLite library, or npm SQLite package.

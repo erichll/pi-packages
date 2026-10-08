@@ -52,6 +52,7 @@ async function runPrompt(options: {
   stageId?: string;
   stageSurface?: string;
   surfaces?: readonly string[];
+  clearAfterFactory?: boolean;
 }) {
   const decisions: unknown[] = [];
   const ctx = {
@@ -76,6 +77,7 @@ async function runPrompt(options: {
             resolve(decision);
           };
           factory({}, {}, {}, done);
+          if (options.clearAfterFactory) confirmer.clear();
           queueMicrotask(() => done(HUMAN_DENIED));
         });
       },
@@ -112,6 +114,16 @@ test("26.x ui_prompt without message auto-confirms the matching dialog", async (
   });
   assert.deepEqual(result.decision, AUTO_APPROVED);
   assert.deepEqual(result.decisions, [AUTO_APPROVED]);
+});
+
+test("clearing after recognition cancels an already queued automatic decision", async () => {
+  const result = await runPrompt({
+    event: v26Prompt(),
+    component: dialog(),
+    clearAfterFactory: true,
+  });
+  assert.deepEqual(result.decision, HUMAN_DENIED);
+  assert.deepEqual(result.decisions, [HUMAN_DENIED]);
 });
 
 test("top-level value is enough when request.value is absent", async () => {

@@ -128,6 +128,7 @@ export function classifyProviderFailure(
   }
 
   const code = errorCode(error);
+  if (code === "server_busy") return "transient_server";
   if (
     code &&
     new Set([
@@ -157,7 +158,13 @@ export function classifyProviderFailure(
   if (/\b429\b|rate.?limit|too many requests/i.test(detail)) {
     return "rate_limit";
   }
-  if (/\b5(?:00|02|03|04)\b|service.?unavailable|server.?error|internal.?error|overloaded/i.test(detail)) {
+  if (/\b5(?:00|02|03|04)\b|service.?unavailable|server.?error|internal.?error|overloaded|\bservers?[ _-]busy\b|\bservers? (?:are|is) currently busy\b/i.test(detail)) {
+    return "transient_server";
+  }
+  // pi-ai 1.0.x maps Mistral finish_reason "error" to this exact message.
+  // 1.1.0 (#10487) adds "(server error)", covered above. Do not make all
+  // stopReason="error" messages retryable: auth/config failures use it too.
+  if (/^Provider stopped with: error$/i.test(detail.trim())) {
     return "transient_server";
   }
   if (/unknown model|model not found|invalid model|unsupported model/i.test(detail)) {

@@ -31,8 +31,8 @@ see its [README](packages/pi-statusline/README.md) for local loading and configu
 
 - Node.js 22.19 or newer
 - npm 11
-- Pi 1.0.0 or newer
-- `@gotgenes/pi-permission-system` 39.0.0 or later
+- Pi 1.1.0 or newer
+- `@gotgenes/pi-permission-system` 40.0.2 or later
 - Linux: `bubblewrap`, `socat`, and `ripgrep`
 
 ## Development
@@ -107,7 +107,7 @@ network connections through Sandbox Runtime's reviewed proxy. Its default
 persistent background RPC sessions, follow-up, and nested handoff. Set the
 trusted global provider to `pi-subagents` to let that extension own
 orchestration under the required native-background protection mode
-(`pi-subagents >=0.66.0`, validated through 0.75.0).
+(`pi-subagents >=0.76.1`, deterministically validated on 0.76.1).
 That mode validates a canonical agent whitelist and restricts children to
 `bash`, `read`, `grep`, `find`, and `ls`; writes go through sandboxed Bash. It
 is not whole-worker process isolation. Keep the default `builtin` provider for
@@ -117,8 +117,8 @@ tool. See the package READMEs for provider, platform, and trust-boundary details
 ## Development and release verification
 
 Run deterministic checks with `npm run check` and `npm test`. The external
-provider peer dependency is the range `pi-subagents >=0.66.0` with no upper pin,
-and the development dependency is pinned to `^0.75.0`. The compatibility gate
+provider peer dependency is the range `pi-subagents >=0.76.1` with no upper pin,
+and the development dependency is pinned to `^0.76.1`. The compatibility gate
 verifies package layout, discovery, ceiling registration, launch guards, and
 child acknowledgement. Its model portion uses
 only already-exported credentials and prints `SKIP` rather than claiming

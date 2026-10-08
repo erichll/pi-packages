@@ -7,7 +7,8 @@ import * as hostPiTui from "@earendil-works/pi-tui";
 import * as hostTypebox from "typebox";
 
 /**
- * Compatible pi-subagents line: 0.66.0 and above (no upper pin). Any new minor
+ * Structural loader compatibility: 0.66.0 and above; the package peer floor
+ * is >=0.76.1 (no upper pin). Any new minor
  * is accepted, so the exports/ceiling checks below are the real compatibility
  * gate; this range only rejects old lines and guards against blind
  * accept-on-drift. Revalidated against 0.70.0: ceiling registry
@@ -35,7 +36,13 @@ import * as hostTypebox from "typebox";
  * mode needs Pi 0.86.0 or newer
  * (the pi-subagents 0.68.0+ floor): 0.85.0 does not ship
  * `@earendil-works/pi-server`, so background children fail to launch there.
- * This package's own peer floor is Pi 1.0.0 (validated 2026-10-02).
+ * Revalidated 2026-10-08 against 0.76.1 / Pi 1.1.0: capability-ceiling and
+ * config modules are byte-identical to 0.75.0; discovery changes add settings
+ * write leases without changing the loader seams. The deterministic gate and
+ * isolated Node/Bun/compiled-Bun host-peer tests pass. Model-backed native
+ * baseline / protected child acceptance also passes, with the host read
+ * blocked by sandboxed Bash and the runtime acknowledgement verified. This
+ * package's own peer floor is Pi 1.1.0.
  */
 export const PI_SUBAGENTS_COMPAT_RANGE = ">=0.66.0";
 export const NATIVE_CHILD_TOOLS = ["bash", "read", "grep", "find", "ls"] as const;

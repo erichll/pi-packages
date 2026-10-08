@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.26.0 - 2026-10-08
+
+- Upgrade Pi development dependencies and peer floors to `^1.1.0`, require
+  permission-system `>=40.0.2`, and align the Node engine with Pi
+  (`>=22.19.0`). Node types (`^26.6.4`) and TypeScript (`^7.0.2`) already
+  match the latest stable registry versions.
+- Retry `server_busy` and server-busy provider details within the existing
+  two-attempt review budget, aligning with Pi 1.1.0
+  ([#10543](https://github.com/earendil-works/pi/issues/10543)).
+- Recognize the exact Mistral `finish_reason: "error"` message from pi-ai
+  1.0.x as a transient server failure. pi-ai 1.1.0 adds a server-error suffix
+  that the existing classifier already recognizes
+  ([#10487](https://github.com/earendil-works/pi/issues/10487)); keep unknown,
+  authentication, and configuration failures non-retryable.
+- Clear staged UI auto-confirmations and one-shot interceptors when Pi 1.1.0
+  emits `agent_settled.aborted: true`
+  ([#10607](https://github.com/earendil-works/pi/issues/10607)). Preserve
+  existing behavior when the field is absent, false, or malformed.
+
 ## 0.25.0 - 2026-10-07
 
 - Pass permission-system's matched bash spelling (#910) through the review and

@@ -120,6 +120,8 @@ function harness(
     interactiveTui?: boolean;
     uiPromptRequestId?: string;
     recognizePermissionComponent?: boolean;
+    settledBeforePrompt?: Record<string, unknown>;
+    settledAfterPrompt?: Record<string, unknown>;
     emitReady?: boolean;
     sessionId?: string;
     adjudicatesLocally?: boolean;
@@ -389,6 +391,9 @@ function harness(
                 (typeof details.surface === "string"
                   ? details.surface
                   : "external_directory");
+              if (options.settledBeforePrompt) {
+                handlers.get("agent_settled")?.(options.settledBeforePrompt, context);
+              }
               events.emit("permissions:ui_prompt", {
                 requestId:
                   options.uiPromptRequestId ?? details.requestId,
@@ -413,6 +418,9 @@ function harness(
                 },
                 forwarding: details.forwarding ?? null,
               });
+              if (options.settledAfterPrompt) {
+                handlers.get("agent_settled")?.(options.settledAfterPrompt, context);
+              }
               return context.ui.custom(
                 (_tui, _theme, _keybindings, _done) =>
                   options.recognizePermissionComponent === false
@@ -1342,6 +1350,42 @@ test("real permission-system authorizer chain integration", async (t) => {
           stopReason: "error",
           errorMessage: "private upstream body",
           providerResponse: { status: 503 },
+        },
+        expectedClass: "transient_server",
+        expectedCalls: 2,
+      },
+      {
+        name: "busy code",
+        first: Object.assign(new Error("private busy response"), { code: "server_busy" }),
+        expectedClass: "transient_server",
+        expectedCalls: 2,
+      },
+      {
+        name: "busy SSE detail",
+        first: {
+          stopReason: "error",
+          errorMessage: "servers are currently busy",
+          providerResponse: { status: 200 },
+        },
+        expectedClass: "transient_server",
+        expectedCalls: 2,
+      },
+      {
+        name: "Mistral old error detail",
+        first: {
+          stopReason: "error",
+          errorMessage: "Provider stopped with: error",
+          providerResponse: { status: 200 },
+        },
+        expectedClass: "transient_server",
+        expectedCalls: 2,
+      },
+      {
+        name: "Mistral new error detail",
+        first: {
+          stopReason: "error",
+          errorMessage: "Provider stopped with: error (server error)",
+          providerResponse: { status: 200 },
         },
         expectedClass: "transient_server",
         expectedCalls: 2,
@@ -2420,6 +2464,25 @@ test("real permission-system authorizer chain integration", async (t) => {
       );
     } finally {
       instance.dispose();
+    }
+  });
+
+  await t.test("only explicit aborted settlement invalidates staged allows and installed interceptors", async () => {
+    for (const event of [{}, { aborted: false }, { aborted: "true" }, { aborted: true }]) {
+      for (const phase of ["settledBeforePrompt", "settledAfterPrompt"] as const) {
+        const instance = harness(allow, { interactiveTui: true, [phase]: event });
+        try {
+          const result = await instance.authorize("external_directory");
+          const expectedApproval = event.aborted !== true;
+          assert.equal(result.decision.approved, expectedApproval, `${phase}: ${JSON.stringify(event)}`);
+          assert.deepEqual(instance.uiDecisions, [expectedApproval
+            ? { approved: true, state: "approved", autoApproved: true }
+            : { approved: false, state: "denied" }]);
+          assert.equal(instance.reviews.at(-1)?.data.autoConfirmQueued, true);
+        } finally {
+          instance.dispose();
+        }
+      }
     }
   });
 

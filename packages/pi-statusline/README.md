@@ -1,6 +1,6 @@
 # @erichll/pi-statusline
 
-A configurable footer for Pi 1.0 with Git status, session usage, runtime/tool activity, themes, and live configuration preview. Uses Pi's native footer and leaves the editor intact.
+A configurable footer for Pi 1.1 with Git status, session usage, runtime/tool activity, themes, and live configuration preview. Uses Pi's native footer and leaves the editor intact.
 
 ```text
   Example model(high)  󰆼 [█░░░░░░░░░]11.9%  󰉋 pi-packages   main ● *2 ↑2  󰊄 49.4k
@@ -13,7 +13,7 @@ Elapsed 5m 42s · Avg 45 tok/s · Cache 86% · Turns 3 · Compactions 1
 pi install npm:@erichll/pi-statusline
 ```
 
-Requires Node.js >=22.19, Pi >=1.0.0, a Nerd Font for the default Powerline layout,
+Requires Node.js >=22.19, Pi >=1.1.0, a Nerd Font for the default Powerline layout,
 and optionally Git. Switch icons/separators in the panel for a font-independent
 layout. The package has no
 other runtime dependencies and makes no network requests or credential lookups.

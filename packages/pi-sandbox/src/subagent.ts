@@ -294,6 +294,9 @@ export class ProcessBackedSubagentSession {
   private stdin: Writable | undefined;
   private rpcSequence = 0;
   private settledCount = 0;
+  // Keep cancellation tied to its run even when settlement beats the RPC
+  // response/waiter registration or later follow-ups complete successfully.
+  private readonly abortedSettlements = new Set<number>();
   private requestedSettlements = 0;
   private activePrompt:
     | {
@@ -421,6 +424,8 @@ export class ProcessBackedSubagentSession {
     if (this.stateValue === "stopped") {
       return Promise.reject(new Error(`subagent session ${this.id} is stopped`));
     }
+    const aborted = this.settlementAbortError(target);
+    if (aborted) return Promise.reject(aborted);
     if (this.settledCount >= target) {
       return Promise.resolve(sessionResult(this.textValue, this.rawOutput));
     }
@@ -531,12 +536,20 @@ export class ProcessBackedSubagentSession {
     this.startReady = undefined;
   }
 
+  private settlementAbortError(target: number): Error | undefined {
+    return this.abortedSettlements.has(target)
+      ? new Error(`subagent session ${this.id} run ${target} aborted`)
+      : undefined;
+  }
+
   private resolveSettledWaiters(): void {
     const result = sessionResult(this.textValue, this.rawOutput);
     for (const waiter of [...this.waiters]) {
       if (waiter.target <= this.settledCount) {
         waiter.cleanup();
-        waiter.resolve(result);
+        const aborted = this.settlementAbortError(waiter.target);
+        if (aborted) waiter.reject(aborted);
+        else waiter.resolve(result);
       }
     }
   }
@@ -573,6 +586,9 @@ export class ProcessBackedSubagentSession {
       pending.resolve(event as RpcResponse);
       return;
     }
+    // Buffered lifecycle records after shutdown/failure must not resurrect a
+    // terminal session or resolve a waiter already rejected by that path.
+    if (this.stateValue === "stopped" || this.stateValue === "failed") return;
     const text = rpcAssistantText(event);
     if (text) {
       this.textValue = text;
@@ -584,6 +600,9 @@ export class ProcessBackedSubagentSession {
     if (event.type === "agent_settled") {
       this.stateValue = "idle";
       this.settledCount++;
+      // Pi 1.1.0 distinguishes an aborted run from a completed one. The child
+      // process is still alive/idle; cancel its result, not the whole session.
+      if (event.aborted === true) this.abortedSettlements.add(this.settledCount);
       if (
         this.activePrompt &&
         this.activePrompt.target <= this.settledCount

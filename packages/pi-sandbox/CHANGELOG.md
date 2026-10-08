@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.26.0 - 2026-10-08
+
+- Require `@erichll/pi-auto-review ^0.26.0` so sandbox approvals use the
+  coordinated Pi 1.1.0 reviewer and cancellation fixes.
+- Upgrade Pi development dependencies and the coding-agent peer floor to
+  `^1.1.0`; move pi-subagents to development `^0.76.1` / peer `>=0.76.1` and
+  typebox to development `^1.3.36` / peer `>=1.3.36`. Keep pi-subagents optional
+  and leave the sandbox-runtime and jiti dependency declarations unchanged.
+- Revalidate the deterministic 0.76.1 compatibility gate and isolated Node,
+  Bun, and compiled-Bun host-peer loading on Pi 1.1.0. Fix the copied-package
+  test for dependencies that do not export package.json, including the new
+  Temporal polyfill. Revalidate model-backed acceptance with the native host
+  read baseline and the protected child blocking that read, including the
+  required sandbox runtime acknowledgement.
+- Reject settlement waiters for RPC runs cancelled with Pi 1.1.0
+  `agent_settled.aborted: true`
+  ([#10607](https://github.com/earendil-works/pi/issues/10607)), including
+  waiters registered after the event or after subsequent successful runs.
+  Keep the persistent child idle and available for follow-up instead of
+  reporting a successful result or terminating the session. Legacy events
+  without the field retain their existing behavior.
+- Ignore buffered lifecycle events after an RPC session stops or fails so
+  cancellation and shutdown cannot resurrect a terminal session.
+
 ## 0.25.0 - 2026-10-07
 
 - Align the `@erichll/pi-auto-review` dependency with `^0.25.0` so the

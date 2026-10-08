@@ -13,6 +13,7 @@ import type { SandboxPolicy } from "../src/policy.ts";
 import {
   finalAssistantText,
   ProcessBackedSubagentManager,
+  ProcessBackedSubagentSession,
   runProcessBackedSubagent,
   splitModelThinking,
   validateSubagentModel,
@@ -47,7 +48,10 @@ function policy(root: string, workspace: string): SandboxPolicy {
   };
 }
 
-function writeRpcWorker(workspace: string): string {
+function writeRpcWorker(
+  workspace: string,
+  settlementFields: Record<string, unknown> = {},
+): string {
   const worker = join(workspace, "rpc-worker.mjs");
   writeFileSync(
     worker,
@@ -55,25 +59,37 @@ function writeRpcWorker(workspace: string): string {
       'import { readFileSync } from "node:fs";',
       "let buffer = '';",
       "const history = [];",
+      "let activeTimer;",
+      `const settlementFields = ${JSON.stringify(settlementFields)};`,
       "const send = value => process.stdout.write(`${JSON.stringify(value)}\\n`);",
       "const respond = command => send({id: command.id, type:'response', command:command.type, success:true, data: command.type === 'get_state' ? {sessionId:'fixture',isStreaming:false} : undefined});",
       "const run = command => {",
       "  send({type:'agent_start'});",
-      "  setTimeout(() => {",
+      "  const finish = () => {",
+      "    activeTimer = undefined;",
       "    let text = command.message;",
       "    if (text.startsWith('read:')) text = readFileSync(text.slice(5), 'utf8');",
       "    history.push(text);",
       "    send({type:'message_end',message:{role:'assistant',content:[{type:'text',text:history.join(' -> ')}]}});",
-      "    send({type:'agent_settled'});",
-      "  }, command.message.includes('slow') ? 40 : 5);",
+      "    send({type:'agent_settled', ...(command.message.startsWith('fixture-settlement:') ? settlementFields : {})});",
+      "  };",
+      "  if (command.message.includes('before-response')) finish();",
+      "  else activeTimer = setTimeout(finish, command.message.includes('slow') ? 40 : 5);",
       "};",
       "process.stdin.on('data', chunk => {",
       "  buffer += chunk.toString('utf8');",
       "  let newline = buffer.indexOf('\\n');",
       "  while (newline >= 0) {",
       "    const line = buffer.slice(0, newline); buffer = buffer.slice(newline + 1);",
-      "    const command = JSON.parse(line); respond(command);",
-      "    if (command.type === 'prompt' || command.type === 'follow_up') run(command);",
+      "    const command = JSON.parse(line);",
+      "    if (command.type === 'abort' && activeTimer) {",
+      "      clearTimeout(activeTimer); activeTimer = undefined;",
+      "      send({type:'agent_settled',aborted:true});",
+      "    }",
+      "    const isPrompt = command.type === 'prompt' || command.type === 'follow_up';",
+      "    if (isPrompt && command.message.includes('before-response')) run(command);",
+      "    respond(command);",
+      "    if (isPrompt && !command.message.includes('before-response')) run(command);",
       "    newline = buffer.indexOf('\\n');",
       "  }",
       "});",
@@ -294,6 +310,126 @@ linuxTest("background RPC session supports follow-up inside one outer sandbox", 
   } finally {
     await manager.shutdown();
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+linuxTest("aborted RPC settlement rejects current and late waiters without terminating the session", async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "pi-sandbox-rpc-aborted-"));
+  const worker = writeRpcWorker(workspace, { aborted: true });
+  const manager = new ProcessBackedSubagentManager({
+    maxConcurrency: 1,
+    invocation: { command: process.execPath, args: [worker] },
+  });
+  try {
+    const session = await manager.start({
+      task: "aborted settlement fixture",
+      cwd: workspace,
+      sandbox: { broker: fakeBroker },
+      async review() { return "deny"; },
+      async reviewDomain() { return "deny"; },
+    });
+    const target = await session.prompt("fixture-settlement:slow");
+    const first = assert.rejects(session.waitForSettled(target), /run 1 aborted/);
+    const second = assert.rejects(session.waitForSettled(target), /run 1 aborted/);
+    await Promise.all([first, second]);
+    assert.equal(session.info.state, "idle");
+    await assert.rejects(session.waitForSettled(target), /run 1 aborted/);
+    await assert.rejects(session.waitForSettled(), /run 1 aborted/);
+
+    // Cancellation does not release the concurrency slot: the RPC child lives.
+    await assert.rejects(manager.start({
+      task: "another session",
+      cwd: workspace,
+      sandbox: { broker: fakeBroker },
+      async review() { return "deny"; },
+      async reviewDomain() { return "deny"; },
+    }), /concurrency limit/);
+    const successTarget = await session.followUp("resume after cancellation");
+    assert.equal(successTarget, target + 1);
+    assert.match((await session.waitForSettled(successTarget)).text, /resume after cancellation/);
+    await assert.rejects(session.waitForSettled(target), /run 1 aborted/);
+
+    // The event can arrive in the same stdout chunk before prompt's RPC reply.
+    const earlyTarget = await session.prompt("fixture-settlement:before-response");
+    await assert.rejects(session.waitForSettled(earlyTarget), /run 3 aborted/);
+    assert.equal(session.info.state, "idle");
+  } finally {
+    await manager.shutdown();
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+linuxTest("RPC abort signal and explicit abort reject only the cancelled run", async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "pi-sandbox-rpc-abort-"));
+  const manager = new ProcessBackedSubagentManager({
+    invocation: { command: process.execPath, args: [writeRpcWorker(workspace)] },
+  });
+  try {
+    const session = await manager.start({
+      task: "abort race fixture", cwd: workspace,
+      sandbox: { broker: fakeBroker },
+      async review() { return "deny"; },
+      async reviewDomain() { return "deny"; },
+    });
+    const target = await session.prompt("slow run");
+    const controller = new AbortController();
+    const localWait = assert.rejects(session.waitForSettled(target, controller.signal), /^Error: aborted$/);
+    const runWait = assert.rejects(session.waitForSettled(target), /run 1 aborted/);
+    controller.abort();
+    await session.abort();
+    await Promise.all([localWait, runWait]);
+    assert.equal(session.info.state, "idle");
+    await assert.rejects(session.waitForSettled(target), /run 1 aborted/);
+    const result = await session.waitForSettled(await session.followUp("normal run"));
+    assert.equal(result.exitCode, 0);
+    assert.match(result.text, /normal run/);
+  } finally {
+    await manager.shutdown();
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+linuxTest("legacy, false and malformed aborted fields preserve successful RPC settlement", async () => {
+  for (const fields of [{}, { aborted: false }, { aborted: "true" }, { aborted: null }]) {
+    const workspace = mkdtempSync(join(tmpdir(), "pi-sandbox-rpc-legacy-"));
+    const manager = new ProcessBackedSubagentManager({
+      invocation: { command: process.execPath, args: [writeRpcWorker(workspace, fields)] },
+    });
+    try {
+      const session = await manager.start({
+        task: "legacy fixture", cwd: workspace,
+        sandbox: { broker: fakeBroker },
+        async review() { return "deny"; },
+        async reviewDomain() { return "deny"; },
+      });
+      const target = await session.prompt("fixture-settlement:before-response");
+      assert.equal((await session.waitForSettled(target)).exitCode, 0);
+      assert.equal(session.info.state, "idle");
+    } finally {
+      await manager.shutdown();
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  }
+});
+
+test("late protocol events cannot resurrect stopped or failed RPC sessions", async () => {
+  for (const terminalState of ["stopped", "failed"] as const) {
+    const session = new ProcessBackedSubagentSession({
+      task: "terminal race", cwd: process.cwd(),
+      async review() { return "deny"; },
+      async reviewDomain() { return "deny"; },
+    });
+    // Inject final buffered records without racing an OS pipe close.
+    const protocol = session as unknown as { consumeLine(line: string): void; fail(error: Error): void };
+    if (terminalState === "stopped") await session.stop();
+    else protocol.fail(new Error("fixture failure"));
+    for (const event of [
+      { type: "agent_start" },
+      { type: "agent_settled", aborted: true },
+      { type: "agent_settled" },
+    ]) protocol.consumeLine(JSON.stringify(event));
+    assert.equal(session.info.state, terminalState);
+    await assert.rejects(session.waitForSettled(1), /stopped|fixture failure/);
   }
 });
 

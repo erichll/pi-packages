@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -36,10 +36,21 @@ test("Pi supplies missing host peers to the protected loader on Node, Bun, and c
       filter: (source) => source === peerRoot || !source.slice(peerRoot.length).split(/[/\\]/).includes("node_modules"),
     });
     const dependencies = JSON.parse(readFileSync(join(peerRoot, "package.json"), "utf8")).dependencies;
-    const require = createRequire(import.meta.url);
+    const require = createRequire(join(peerRoot, "package.json"));
     for (const name of Object.keys(dependencies)) {
-      const manifest = require.resolve(`${name}/package.json`);
-      symlinkSync(dirname(manifest), join(modules, name), "dir");
+      // Some dependencies (e.g. Temporal's polyfill) export their entry but
+      // not package.json. Walk from that entry to the matching package root.
+      let dependencyRoot = dirname(require.resolve(name));
+      for (;;) {
+        const manifest = join(dependencyRoot, "package.json");
+        if (existsSync(manifest) && JSON.parse(readFileSync(manifest, "utf8")).name === name) break;
+        const parent = dirname(dependencyRoot);
+        assert.notEqual(parent, dependencyRoot, `cannot locate package root for ${name}`);
+        dependencyRoot = parent;
+      }
+      const target = join(modules, name);
+      mkdirSync(dirname(target), { recursive: true });
+      symlinkSync(dependencyRoot, target, "dir");
     }
     const consumerRequire = createRequire(join(modules, "pi-subagents", "package.json"));
     for (const peer of ["@earendil-works/pi-tui", "typebox"]) {

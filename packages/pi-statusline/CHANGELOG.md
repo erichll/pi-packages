@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0 - 2026-10-08
+
+- Upgrade Pi AI, coding-agent, and TUI development dependencies to `^1.1.0`
+  and replace wildcard peers with the same tested baseline. Node types
+  (`^26.6.4`) and TypeScript (`^7.0.2`) already match the latest stable versions.
+
 ## 0.3.0 - 2026-10-04
 
 - Add `spacing` (0–3 blank lines, default 1) to control the gap between the input box and the statusline; configurable in the panel and persisted in the configuration.

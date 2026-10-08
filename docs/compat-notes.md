@@ -1,8 +1,11 @@
 # Compatibility seams with `pi-subagents`
 
 `@erichll/pi-sandbox` supports protected external orchestration on the
-`pi-subagents >=0.66.0` line: the peer dependency is a floor with no upper pin,
-and the development dependency is pinned to `^0.75.0` (validated on 0.75.0). The real gates are the
+`pi-subagents >=0.76.1` line: the peer dependency is a floor with no upper pin,
+and the development dependency is pinned to `^0.76.1` (deterministically
+validated on 0.76.1). The structural loader retains its historical 0.66.0
+minimum and source-layout support; published installs must meet the newer
+peer floor. The real gates are the
 `./capability-ceiling` export and the capability-ceiling API version, which the
 loader checks at load time; the version range only rejects old lines and guards
 against blind accept-on-drift. Any mismatch disables the whole mode rather than
@@ -40,9 +43,9 @@ default `builtin` provider for complete worker-process-tree isolation.
 
 ## Versioned seams
 
-| Seam | Status on the `>=0.66.0` line (validated on 0.75.0) | Verification |
+| Seam | Status on the `>=0.76.1` peer line (validated on 0.76.1) | Verification |
 | --- | --- | --- |
-| package version | must be `>=0.66.0`; below it the loader fails closed | runtime loader + deterministic gate |
+| package version | peer requires `>=0.76.1`; structural loader retains the historical 0.66.0 minimum | npm peer + runtime loader + deterministic gate |
 | `./capability-ceiling` export | public; expected path and API v1 | runtime loader + tests |
 | module layout | `.ts` source (0.66.0-0.69.0) or compiled `.js`/`.d.ts` (0.70.0+) under `src/`, same relative paths | runtime loader + tests |
 | host peer `@earendil-works/pi-tui` | supplied by Pi; filesystem alias on Node, host module object on Bun | runtime loader + isolated Node/Bun/compiled-Bun tests |
@@ -74,9 +77,9 @@ mode requires `async: true` children (detached runners), so forwarded-permission
 routing is unaffected; `scripts/pi-subagents-parent-forwarding-adapter.ts`
 remains only as a no-op shim for the 0.69.0-and-earlier line.
 
-Host requirement: these packages require Pi 1.0.0 or newer (the
-`peerDependencies` floor, validated 2026-10-02). Historically the floor was
-0.87.1, before that 0.86.0, and before that 0.85.1: Pi 0.85.0
+Host requirement: these packages require Pi 1.1.0 or newer (the
+`peerDependencies` floor, validated 2026-10-08). Historically the floor was
+1.0.0, before that 0.87.1, 0.86.0, and 0.85.1: Pi 0.85.0
 does not ship `@earendil-works/pi-server`, which 0.68.0 stopped bundling, so
 background children fail to launch there with an explicit error. The `builtin`
 provider is unaffected.
@@ -111,7 +114,7 @@ compiled loader supplies its embedded modules to these imports. Our adapter
 remains an on-disk extension and can use the normal jiti entry; it does not need
 to import Pi's private `virtual-modules.js` or compiled loader internals.
 
-Validated on Pi 1.0.0 / Bun 1.3.14 with a copied pi-subagents 0.75.0 package in
+Revalidated on Pi 1.1.0 with a copied pi-subagents 0.76.1 package in
 an isolated directory containing neither `pi-tui` nor `typebox`. Node Pi,
 plain Bun Pi, and compiled Bun Pi all load the protected adapter. The test reads
 the inner loader's capability ceiling through the host-loaded public API and
@@ -131,6 +134,19 @@ Pi 1.0.0. Both phases passed using the same parent/child models and reported
 `baseline: native-host-readable`, `protected: sandboxed-bash-blocked-host-read`,
 and `acknowledgement: @erichll:pi-sandbox`.
 
+The 2026-10-08 upgrade to Pi 1.1.0 / pi-subagents 0.76.1 passes the
+deterministic gate and the isolated Node, Bun, and compiled-Bun tests. The
+capability-ceiling and config modules are byte-identical to 0.75.0; discovery
+changes add settings-file leases without changing the loader's read seams.
+The copied-package test now locates regular dependencies through their
+exported entry because the new Temporal polyfill does not export package.json.
+Release preparation for auto-review / sandbox 0.26.0 additionally passed
+model-backed acceptance on 2026-10-08, using parent
+`cliproxyapi/codex-auto-review` and child `cliproxyapi/gpt-5.6-luna` with Pi
+1.1.0 / pi-subagents 0.76.1. Both phases report
+`baseline: native-host-readable`, `protected: sandboxed-bash-blocked-host-read`,
+and `acknowledgement: @erichll:pi-sandbox`.
+
 Since 0.72.0 `typebox` is the same kind of host-provided dependency: it moved
 from `pi-subagents`' `dependencies` to an optional `peerDependencies` entry, so
 the extension no longer ships a copy. The loader's module graph does reach it -
@@ -139,8 +155,11 @@ the extension no longer ships a copy. The loader's module graph does reach it -
 object described above. Node retains ordinary package resolution for these
 imports. The importing module set is unchanged
 from 0.71.0, in a global `~/.pi/agent/npm` install the hoisted copy comes from
-Pi's own `@earendil-works/pi-ai`, and `@erichll/pi-sandbox`'s `typebox >=1.0.0`
-peer is satisfied by that same hoisted copy.
+Pi's own `@earendil-works/pi-ai`. The current sandbox peer floor is
+`typebox >=1.3.36`; install that version separately when the host's embedded
+or hoisted copy is older. The development workspace installs 1.3.36, while
+Pi 1.1.0 itself pins 1.3.27 internally; the host-peer tests cover the loader
+with those host-provided modules.
 
 ## Upgrade procedure
 

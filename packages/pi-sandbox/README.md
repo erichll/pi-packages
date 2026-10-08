@@ -91,14 +91,14 @@ Supported modes:
 
 - `builtin` (default): register the process-backed `subagent` tool and sandbox
   each complete worker process tree.
-- `pi-subagents`: let `pi-subagents >=0.66.0` own orchestration under the required
+- `pi-subagents`: let `pi-subagents >=0.76.1` own orchestration under the required
   native-background tool boundary described below.
 - `off`: protect Bash only.
 
 ### `pi-subagents` native-background tool boundary
 
-This provider supports the `pi-subagents >=0.66.0` line (validated through
-0.75.0) and fails closed if its public ceiling API, module layout, or internal
+This provider requires `pi-subagents >=0.76.1` (deterministically validated on
+0.76.1) and fails closed if its public ceiling API, module layout, or internal
 discovery layout drifts. The peer dependency is a floor with no upper pin; the
 loader's explicit export and layout checks are the real gate. On Node, the
 loader aliases the `@earendil-works/pi-tui` host peer to the running Pi package.
@@ -342,9 +342,10 @@ discovery behavior,
 capability ceiling, and protected launch policy in an isolated temporary agent
 directory. It never reads or updates production Pi configuration. Model-backed
 acceptance requires `PI_SUBAGENTS_GATE_MODEL` and an already-exported matching
-credential; missing prerequisites are reported as `SKIP`. Protected mode with
-pi-subagents 0.68.0 or newer needs Pi 0.86.0 or newer. The development
-baseline is validated against Pi 1.0.0.
+credential; missing prerequisites are reported as `SKIP`. The current peer
+floor and development baseline are Pi 1.1.0, with pi-subagents 0.76.1 and
+`typebox >=1.3.36`. The deterministic and model-backed native-baseline /
+protected-child gates pass on this baseline.
 
 The test suite covers real Linux Sandbox Runtime enforcement when its native
 dependencies are installed, plus deterministic broker, network approval,
