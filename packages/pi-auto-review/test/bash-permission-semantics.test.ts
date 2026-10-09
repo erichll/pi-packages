@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-// These real permission-system internals are verified against 40.0.2. Like
+// These real permission-system internals are verified against 40.1.1. Like
 // authorizer-integration.test.ts, this file is excluded from tsc and loaded
 // through register-external-ts.mjs because upstream uses extensionless imports.
 import { BashProgram } from "../../../node_modules/@gotgenes/pi-permission-system/src/access-intent/bash/program.ts";

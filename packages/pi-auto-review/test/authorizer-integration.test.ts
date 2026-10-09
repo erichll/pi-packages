@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 // These deep imports reach pi-permission-system internals that its public
-// entry (".") does not export. They are verified against the 40.0.2 source layout:
+// entry (".") does not export. They are verified against the 40.1.1 source layout:
 // 31.1.1 moved path-normalizer.ts, 33.0.0 changed MCP target derivation and
 // rule evaluation (see test/mcp-rule-semantics.test.ts). When upgrading across
 // minor/major lines, re-verify every path below.

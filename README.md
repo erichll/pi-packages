@@ -32,7 +32,7 @@ see its [README](packages/pi-statusline/README.md) for local loading and configu
 - Node.js 22.19 or newer
 - npm 11
 - Pi 1.1.0 or newer
-- `@gotgenes/pi-permission-system` 40.0.2 or later
+- `@gotgenes/pi-permission-system` 40.1.1 or later
 - Linux: `bubblewrap`, `socat`, and `ripgrep`
 
 ## Development

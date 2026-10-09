@@ -32,7 +32,7 @@ that dependency is a hard prerequisite (see [Install and enable](#install-and-en
 > `@gotgenes/pi-permission-system`. Pi does not auto-install peer packages, so
 > install the permission system separately (once per machine) before this
 > extension. This release line requires Pi 1.1.0 or later and
-> permission-system 40.0.2 or later, including the bash-chain session-grant
+> permission-system 40.1.1 or later, including the bash-chain session-grant
 > security fix:
 
 Node-based Pi requires Node.js 22.19.0 or newer. Permission auditing uses the
