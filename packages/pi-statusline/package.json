@@ -1,31 +1,31 @@
 {
   "name": "@erichll/pi-statusline",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Configurable Pi statusline with live preview, Git and session usage",
   "type": "module",
   "license": "MIT",
-  "keywords": ["pi-package", "pi-extension", "pi", "statusline"],
-  "repository": {"type": "git", "url": "git+https://github.com/erichll/pi-packages.git", "directory": "packages/pi-statusline"},
-  "publishConfig": {"access": "public"},
-  "engines": {"node": ">=22.19.0"},
-  "files": ["src", "README.md", "CHANGELOG.md", "LICENSE", "examples"],
-  "exports": {".": "./src/index.ts"},
-  "pi": {"extensions": ["./src/index.ts"]},
+  "keywords": ["pi-package","pi-extension","pi","statusline"],
+  "repository": {"type":"git","url":"git+https://github.com/erichll/pi-packages.git","directory":"packages/pi-statusline"},
+  "publishConfig": {"access":"public"},
+  "engines": {"node":">=22.19.0"},
+  "files": ["src","README.md","CHANGELOG.md","LICENSE","examples"],
+  "exports": {".":"./src/index.ts"},
+  "pi": {"extensions":["./src/index.ts"]},
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "smoke": "python3 test/pty-smoke.py"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": "^1.1.0",
-    "@earendil-works/pi-coding-agent": "^1.1.0",
-    "@earendil-works/pi-tui": "^1.1.0"
+    "@earendil-works/pi-ai": ">=1.1.0",
+    "@earendil-works/pi-coding-agent": ">=1.1.0",
+    "@earendil-works/pi-tui": ">=1.1.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^1.1.0",
-    "@earendil-works/pi-coding-agent": "^1.1.0",
-    "@earendil-works/pi-tui": "^1.1.0",
-    "@types/node": "^26.6.4",
+    "@earendil-works/pi-ai": "^1.2.0",
+    "@earendil-works/pi-coding-agent": "^1.2.0",
+    "@earendil-works/pi-tui": "^1.2.0",
+    "@types/node": "^26.6.5",
     "typescript": "^7.0.2"
   }
 }

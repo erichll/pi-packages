@@ -43,6 +43,14 @@ import * as hostTypebox from "typebox";
  * baseline / protected child acceptance also passes, with the host read
  * blocked by sandboxed Bash and the runtime acknowledgement verified. This
  * package's own peer floor is Pi 1.1.0.
+ * Revalidated 2026-10-13 against 0.78.0 / Pi 1.2.0: pi-subagents 0.77.0
+ * required chord aliases for every host from Pi 0.85 onward, which broke
+ * background children on Pi 1.2.0 (chord removed upstream); 0.78.0 requires
+ * chord only when the host manifest declares it, so no host-side workaround
+ * is needed. The subagent tool schema moved management fields into `options`
+ * in 0.77.0 (top-level aliases keep working) and the loader seams are
+ * unchanged. The deterministic gate and model-backed native baseline /
+ * protected child acceptance pass.
  */
 export const PI_SUBAGENTS_COMPAT_RANGE = ">=0.66.0";
 export const NATIVE_CHILD_TOOLS = ["bash", "read", "grep", "find", "ls"] as const;

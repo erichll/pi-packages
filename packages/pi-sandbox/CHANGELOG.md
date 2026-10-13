@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.26.1 - 2026-10-13
+
+- Upgrade the Pi 1.2.0 development baseline (`pi-coding-agent`, `pi-ai`,
+  typebox `>=1.3.37`) and drop the unused
+  `@earendil-works/pi-server` development dependency: nothing in this package
+  imports it and pi-subagents 0.77.0 no longer references it, while upstream
+  removed the package in 1.2.0.
+- Revalidate the compatibility gate against pi-subagents 0.78.0 on Pi 1.2.0.
+  pi-subagents 0.77.0 required chord for every host from Pi 0.85 onward,
+  which broke background children on Pi 1.2.0 (chord removed upstream);
+  0.78.0 requires chord only when the host manifest declares it, so the
+  package needs no workaround. The deterministic gate and the model-backed
+  native baseline / protected child acceptance pass. Raise the pi-subagents
+  peer floor to `>=0.78.0` because 0.77.x background children fail on
+  Pi 1.2.0; 0.78.0 also works on Pi 1.1.0.
+- Keep the pi-coding-agent peer floor at `>=1.1.0`: both 1.1.0 and 1.2.0 are
+  verified, so 1.1.0 users are not forced onto the newer Pi.
+
 ## 0.26.0 - 2026-10-08
 
 - Require `@erichll/pi-auto-review ^0.26.0` so sandbox approvals use the

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.1 - 2026-10-13
+
+- Upgrade the Pi 1.2.0 development baseline (`pi-ai`, `pi-coding-agent`,
+  `pi-tui`) and Node types (`^26.6.5`); TypeScript (`^7.0.2`) already matches
+  the latest stable version.
+- Keep peer floors at `>=1.1.0`: verified against Pi 1.2.0 (type check clean,
+  all 59 tests pass) while 1.1.0 remains supported.
+
 ## 0.4.0 - 2026-10-08
 
 - Upgrade Pi AI, coding-agent, and TUI development dependencies to `^1.1.0`

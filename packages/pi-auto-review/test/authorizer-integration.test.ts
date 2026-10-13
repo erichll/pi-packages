@@ -191,7 +191,7 @@ function harness(
     ) {
       commands.set(name, command);
     },
-    sendUserMessage(message: string) {
+    sendUserMessage(message: string, _options?: { deliverAs?: "steer" | "followUp" }) {
       sentUserMessages.push(message);
     },
     registerEntryRenderer() {},

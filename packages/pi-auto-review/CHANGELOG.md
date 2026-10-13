@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.26.1 - 2026-10-13
+
+- Fix Pi 1.2.0 compatibility: pass an explicit `{ deliverAs: "followUp" }` to both
+  `pi.sendUserMessage()` calls (`/auto-review-approve` and
+  `/auto-review-break-glass`), which 1.2.0 makes required. "followUp" starts a
+  new turn while idle and queues behind any run that started after the
+  `isIdle()` check instead of steering into it, so an authorized retry always
+  lands as a fresh turn. No `before_agent_start` changes are needed: the
+  extension does not register that handler.
+- Upgrade the Pi 1.2.0 development baseline (`pi-ai`, `pi-coding-agent`) and
+  permission-system to `>=40.2.0`, and drop the unused
+  `@earendil-works/pi-server` development dependency, which upstream removed
+  in 1.2.0. Peer floors stay at `>=1.1.0`: the explicit `deliverAs` is also a
+  valid optional argument on 1.1.0, so the fix is compatible with both.
+- Verified against Pi 1.2.0: type check clean, all 252 tests pass.
+
 ## 0.26.0 - 2026-10-08
 
 - Upgrade Pi development dependencies and peer floors to `^1.1.0`, require
