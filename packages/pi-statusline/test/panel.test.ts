@@ -43,8 +43,9 @@ test("keyboard editing, validation, ordering and save produce a usable configura
   assert.ok(!panel.render(140).some((line) => stripTerminalSequences(line).includes("[x] thinking")));
   select(panel, "[x] directory");
   panel.handleInput(" ");
-  panel.handleInput("\x1b[1;3A"); // Alt+Up
+  panel.handleInput("\x1b[1;3A"); // Move past quota.
   panel.handleInput("\x1b[1;3A"); // Move past context and the hidden thinking entry.
+  panel.handleInput("\x1b[1;3A"); // Move past model.
   select(panel, "[x] model"); panel.handleInput(enter);
   select(panel, "Thinking level:"); panel.handleInput(enter);
   select(panel, "color:"); panel.handleInput(enter);
@@ -64,6 +65,16 @@ test("keyboard editing, validation, ordering and save produce a usable configura
   assert.equal(saved?.segments[0]?.enabled, false);
   assert.equal(saved?.segments.find((segment) => segment.id === "thinking")?.enabled, false);
   assert.equal(saved?.segments.find((segment) => segment.id === "model")?.color, "#123456");
+});
+
+test("quota can be disabled in the panel and remains disabled after save", async () => {
+  let saved: StatuslineConfig | undefined;
+  const config = presetConfig();
+  const panel = new StatuslinePanel({ config, theme: testTheme, snapshot: () => ({ data: sampleSnapshot(), example: false }), requestRender() {}, height: () => 40, save: async (next) => { saved = next; }, done() {} });
+  select(panel, "[x] quota"); panel.handleInput(" ");
+  assert.equal(config.segments.find((segment) => segment.id === "quota")!.enabled, true);
+  select(panel, "Save and apply"); panel.handleInput(enter); await delay(0);
+  assert.equal(saved?.segments.find((segment) => segment.id === "quota")!.enabled, false);
 });
 
 test("restore defaults previews the single Powerline layout and only saves on confirmation", async () => {

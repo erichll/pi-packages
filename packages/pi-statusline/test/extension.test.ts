@@ -12,6 +12,9 @@ test("RPC, JSON and print startup perform no terminal setup or session traversal
     const ctx = { mode, get ui() { throw new Error("Unexpected UI access"); }, get sessionManager() { throw new Error("Unexpected session traversal"); } } as unknown as ExtensionContext;
     await handlers.get("session_start")!({ reason: "startup" }, ctx);
     await handlers.get("message_end")!({ message: { role: "assistant" } }, ctx);
+    await handlers.get("before_provider_request")!({ payload: {} }, ctx);
+    await handlers.get("after_provider_response")!({ status: 200, headers: {} }, ctx);
+    await handlers.get("provider_stream_event")!({ data: {} }, ctx);
     await handlers.get("session_shutdown")!({ reason: "quit" }, ctx);
   }
 });

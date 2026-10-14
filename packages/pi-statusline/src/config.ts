@@ -10,7 +10,7 @@ export function validColor(value: unknown): value is ColorValue {
   return typeof value === "string" && (/^#[\da-f]{6}$/i.test(value) || (COLORS as readonly string[]).includes(value));
 }
 export function presetConfig(): StatuslineConfig {
-  const enabled = new Set<string>(["model", "thinking", "directory", "git", "context", "tokens", "statuses"]);
+  const enabled = new Set<string>(["model", "thinking", "directory", "git", "context", "quota", "tokens", "statuses"]);
   return {
     version: 1, enabled: true, preset: "powerline", icons: "nerd",
     separator: "powerline", pathMode: "basename", modelDisplay: "name", contextDisplay: "bar", spacing: 1,
@@ -78,7 +78,13 @@ export function parseConfig(raw: unknown): StatuslineConfig {
       }
       return result;
     });
-    // An explicit list is authoritative. Omitted segments remain editable but disabled.
+    // Upgrade pre-quota lists once; an explicit quota entry (including disabled) wins.
+    if (!seen.has("quota")) {
+      const contextIndex = config.segments.findIndex((segment) => segment.id === "context");
+      config.segments.splice(contextIndex < 0 ? config.segments.length : contextIndex + 1, 0, { id: "quota", enabled: true });
+      seen.add("quota");
+    }
+    // All other omissions remain editable but disabled.
     for (const id of SEGMENT_IDS) if (!seen.has(id)) config.segments.push({ id, enabled: false });
   }
   return config;

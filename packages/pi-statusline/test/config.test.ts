@@ -14,8 +14,8 @@ test("partial configuration inherits a preset, while explicit segment lists pres
   assert.throws(() => parseConfig({ contextDisplay: "invalid" }));
   assert.equal(parseConfig({ modelDisplay: "last" }).modelDisplay, "last");
   assert.throws(() => parseConfig({ modelDisplay: "invalid" }));
-  assert.deepEqual(config.segments.slice(0, 2).map((segment) => segment.id), ["context", "directory"]);
-  assert.equal(config.segments[1]?.icon, "");
+  assert.deepEqual(config.segments.slice(0, 3).map((segment) => segment.id), ["context", "quota", "directory"]);
+  assert.equal(config.segments[2]?.icon, "");
   assert.equal(config.segments.find((segment) => segment.id === "model")?.enabled, false);
   assert.equal(presetConfig().segments.find((segment) => segment.id === "cost")?.enabled, false);
   assert.equal(presetConfig().contextDisplay, "bar");
@@ -30,7 +30,7 @@ test("powerline defaults match the shipped example configuration", async () => {
   assert.equal(example.preset, "powerline"); assert.equal(example.icons, "nerd");
   assert.equal(example.separator, "powerline"); assert.equal(example.modelDisplay, "name");
   assert.equal(example.pathMode, "basename"); assert.equal(example.contextDisplay, "bar");
-  assert.deepEqual(example.segments.filter(s => s.enabled).map(s => s.id), ["model", "thinking", "context", "directory", "git", "tokens", "statuses"]);
+  assert.deepEqual(example.segments.filter(s => s.enabled).map(s => s.id), ["model", "thinking", "context", "quota", "directory", "git", "tokens", "statuses"]);
 });
 
 test("removed presets are rejected without migration", () => {

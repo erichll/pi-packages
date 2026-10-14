@@ -7,13 +7,14 @@ import type { ColorValue, SegmentConfig, SegmentId, StatuslineConfig, Statusline
 import { emptyGit } from "./git.ts";
 import { emptyUsage } from "./usage.ts";
 import { renderRuntime } from "./runtime-render.ts";
+import { renderQuota } from "./quota.ts";
 
 export type RenderTheme = Pick<Theme, "style" | "colors" | "appearance">;
 // Keep rainbow hues independent of semantic theme colors, which can repeat.
 const THINKING_RAINBOW = ["#c084fc", "#f472b6", "#fb923c", "#facc15", "#4ade80", "#22d3ee", "#60a5fa"].map((value) => parseColor(value));
 const ICONS: Record<StatuslineConfig["icons"], Partial<Record<SegmentId, string>>> = {
   unicode: { model: "", directory: "▸", git: "⑂", context: "◉", cost: "$", input: "↑", output: "↓", tokens: "Σ", cacheRead: "R", cacheWrite: "W" },
-  nerd: { model: "", directory: "󰉋", git: "", context: "󰆼", cost: "$", input: "↑", output: "↓", tokens: "󰊄", cacheRead: "R", cacheWrite: "W" },
+  nerd: { model: "", directory: "󰉋", git: "", context: "󰆼", quota: "󰦖", cost: "$", input: "↑", output: "↓", tokens: "󰊄", cacheRead: "R", cacheWrite: "W" },
   ascii: { model: "", directory: "", git: "git:", context: "ctx:", cost: "$", input: "in:", output: "out:", tokens: "tok:", cacheRead: "R:", cacheWrite: "W:" },
 };
 const DROP_ORDER: SegmentId[] = ["cost", "cacheWrite", "cacheRead", "tokens", "output", "input", "thinking", "git", "directory"];
@@ -24,13 +25,13 @@ export function formatTokens(value: number): string {
 }
 function contextBar(percent: number | null, ascii: boolean): string {
   const width = 10;
-  if (percent === null || !Number.isFinite(percent)) return `[${"?".repeat(width)}]?%`;
+  if (percent === null || !Number.isFinite(percent)) return `${"?".repeat(width)} ?%`;
   const fill = Math.max(0, Math.min(100, percent)) / 100 * width;
   // Whole cells avoid the blank right side of fractional glyphs such as ▌.
   // Keep small, non-zero usage visible; the percentage gives the precise value.
   const full = fill > 0 ? Math.max(1, Math.round(fill)) : 0;
   const bar = (ascii ? "#" : "█").repeat(full) + (ascii ? "-" : "░").repeat(width - full);
-  return `[${bar}]${Number(percent.toFixed(1))}%`;
+  return `${bar} ${Number(percent.toFixed(1))}%`;
 }
 function displayPath(data: StatuslineSnapshot, mode: StatuslineConfig["pathMode"]): string {
   if (mode === "basename") return basename(data.cwd) || data.cwd;
@@ -69,6 +70,7 @@ function segmentText(id: SegmentId, data: StatuslineSnapshot, config: Statusline
       const capacity = contextWindow > 0 ? formatTokens(contextWindow) : "?";
       return `${tokens === null ? "?" : formatTokens(tokens)}/${capacity}(${percent === null ? "?" : Number(percent.toFixed(1))}%)`;
     }
+    case "quota": return renderQuota(data.quota, config.icons === "ascii");
     case "cost": return usage.cost.toFixed(3);
     case "input": return formatTokens(usage.input);
     case "output": return formatTokens(usage.output);
@@ -82,6 +84,10 @@ function defaultColor(id: SegmentId, data: StatuslineSnapshot): ColorValue {
   if (id === "context") {
     if ((data.context.percent ?? 0) > 90) return "error";
     if ((data.context.percent ?? 0) > 70) return "warning";
+  }
+  if (id === "quota") {
+    const used = Math.max(data.quota?.primary?.usedPercent ?? 0, data.quota?.secondary?.usedPercent ?? 0);
+    return used > 90 ? "error" : used > 70 ? "warning" : "accent";
   }
   if (id === "git") {
     if (data.git.conflicts) return "error";
@@ -193,6 +199,19 @@ export function renderFooter(width: number, data: StatuslineSnapshot, config: St
         const index = parts.findIndex((p) => p.config.id === id);
         if (index !== -1) parts.splice(index, 1);
       }
+      line = joinParts(parts, config, theme);
+    }
+  }
+  // Keep model/context readable; never leave a half-truncated quota window.
+  const quota = parts.find((part) => part.config.id === "quota");
+  if (quota && visibleWidth(line) > width) {
+    for (const detail of ["bars", "percent"] as const) {
+      quota.text = renderQuota(data.quota, config.icons === "ascii", detail)!;
+      line = joinParts(parts, config, theme);
+      if (visibleWidth(line) <= width) break;
+    }
+    if (visibleWidth(line) > width) {
+      parts.splice(parts.indexOf(quota), 1);
       line = joinParts(parts, config, theme);
     }
   }

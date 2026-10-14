@@ -156,6 +156,21 @@ test("run signal cancellation is observed without before-settle and listeners le
   assert.equal(next.runtime.snapshot().status, "Running"); // disposed signal callback was detached
 });
 
+test("live quota survives styling changes but not footer disable", () => {
+  const f = fixture();
+  const session = new FooterSession(f.ctx, presetConfig(), async () => emptyGit("none"));
+  try {
+    session.install(); session.beginProviderRequest();
+    session.observeProviderResponse({ "x-codex-primary-used-percent": "40", "x-codex-primary-reset-at": String(Math.floor(Date.now() / 1000) + 3600) });
+    assert.equal(session.snapshot().quota?.primary?.usedPercent, 40);
+    session.apply({ ...presetConfig(), icons: "ascii" });
+    assert.equal(session.snapshot().quota?.primary?.usedPercent, 40);
+    assert.match(f.footer!.render(300).map(stripTerminalSequences).join("\n"), /####------ 40%\[1h0m\]/);
+    session.disable(); session.apply(presetConfig());
+    assert.equal(session.snapshot().quota, undefined);
+  } finally { session.dispose(); }
+});
+
 test("unchanged refresh does not retraverse compaction history", () => {
   const f = fixture();
   const session = new FooterSession(f.ctx, presetConfig(), async () => emptyGit("none"));

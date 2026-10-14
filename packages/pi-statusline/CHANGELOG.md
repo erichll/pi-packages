@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.5.0 - 2026-10-14
+
+### Added
+
+- Add Codex subscription Usage (`quota`) with primary/secondary progress bars,
+  used percentages and live reset countdowns. Passively observe SSE response
+  headers and native WebSocket `codex.rate_limits` events on Pi 1.2+, with no
+  extra requests or credential lookups. Existing statusline features retain
+  Pi 1.1 support.
+- Enable quota after context by default, including in existing configurations
+  that omit it. Explicit quota settings preserve enablement and order;
+  the panel supports disabling, reordering and styling it.
+- Use accent/warning/error colors at the 70%/90% usage thresholds, with ASCII
+  support and narrow-screen fallback to bars, percentages or hiding the segment.
+- Hide missing, malformed and expired quota windows; replace snapshots rather
+  than merge credentials' data. Clear old samples on model/provider/API/endpoint
+  changes, reload, new session, footer disable and no-quota WebSocket streams.
+- Add quota parser, lifecycle, countdown and rendering tests, plus offline
+  regular/fullscreen PTY coverage for both headers and WebSocket events.
+
+### Changed
+
+- Simplify context bars from `[██░░░░░░░░]20%` to `██░░░░░░░░ 20%`.
+- Condense the README around installation, configuration, quota setup and
+  statistics; link to the complete example configuration instead of duplicating it.
+
 ## 0.4.1 - 2026-10-13
 
 - Upgrade the Pi 1.2.0 development baseline (`pi-ai`, `pi-coding-agent`,

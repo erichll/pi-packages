@@ -24,6 +24,13 @@ export default function statusline(pi: ExtensionAPI): void {
     session.install();
   });
   pi.on("session_shutdown", () => { generation++; session?.dispose(); session = undefined; });
+  pi.on("before_provider_request", (_event, ctx) => { session?.setContext(ctx); session?.beginProviderRequest(); });
+  pi.on("after_provider_response", (event, ctx) => { session?.setContext(ctx); session?.observeProviderResponse(event.headers); });
+  pi.on("provider_stream_event", (event, ctx) => {
+    if (!session?.active) return;
+    // Observe native quota events as well as disqualifying routed/mismatched requests.
+    if (session.quota.observeStream(event.provider, event.model, event.api, ctx.model, event.data)) session.schedule(true);
+  });
   pi.on("agent_start", (_event, ctx) => { session?.setContext(ctx); session?.startRun(); session?.schedule(true); });
   pi.on("turn_start", (_event, ctx) => { session?.setContext(ctx); session?.startTurn(); session?.schedule(true); });
   pi.on("agent_before_settle", (event) => { session?.runtime.beforeSettle(event.outcome); });
@@ -53,7 +60,7 @@ export default function statusline(pi: ExtensionAPI): void {
   const resetLive = (event: unknown, ctx: ExtensionContext) => { session?.setLive(undefined); refresh(event, ctx); };
   pi.on("agent_end", resetLive);
   pi.on("turn_end", (event, ctx) => { if (event.message.role === "assistant") session?.runtime.message(event.message, true); session?.runtime.turnEnd(); refresh(event, ctx); });
-  pi.on("model_select", refresh);
+  pi.on("model_select", (event, ctx) => { session?.quota.clear(); refresh(event, ctx); });
   pi.on("thinking_level_select", refresh);
   pi.on("session_compact", (event, ctx) => {
     session?.compaction.finish("success", event.compactionEntry.id); session?.runtime.compaction(false); resetLive(event, ctx);

@@ -41,7 +41,7 @@ test("narrow layouts keep model and context ahead of cost and directory", () => 
 test("preset layout puts context immediately after the model", () => {
   const config = presetConfig();
   const line = stripTerminalSequences(renderFooter(200, sampleSnapshot(), config, testTheme())[0]!);
-  assert.match(line, /^  Example model\(high\)  󰆼 \[█░░░░░░░░░\]11\.9%  󰉋 pi-packages/);
+  assert.match(line, /^  Example model\(high\)  󰆼 █░░░░░░░░░ 11\.9%  󰉋 pi-packages/);
   assert.match(line, /󰊄 49\.4k/);
 });
 
@@ -54,20 +54,20 @@ test("whole-cell context bars distinguish unknown, zero, low, full and overflow 
     data.context = { tokens: percent === null ? null : percent * 2000, contextWindow: 200000, percent };
     return stripTerminalSequences(renderFooter(100, data, config, testTheme())[0]!).trim();
   };
-  assert.equal(rendered(0), "[░░░░░░░░░░]0%");
-  assert.equal(rendered(20), "[██░░░░░░░░]20%");
-  assert.equal(rendered(25), "[███░░░░░░░]25%");
-  assert.equal(rendered(4.7), "[█░░░░░░░░░]4.7%");
-  assert.equal(rendered(0.1), "[█░░░░░░░░░]0.1%");
-  assert.equal(rendered(100), "[██████████]100%");
-  assert.equal(rendered(110), "[██████████]110%");
-  assert.equal(rendered(null), "[??????????]?%");
-  assert.equal(rendered(NaN), "[??????????]?%");
+  assert.equal(rendered(0), "░░░░░░░░░░ 0%");
+  assert.equal(rendered(20), "██░░░░░░░░ 20%");
+  assert.equal(rendered(25), "███░░░░░░░ 25%");
+  assert.equal(rendered(4.7), "█░░░░░░░░░ 4.7%");
+  assert.equal(rendered(0.1), "█░░░░░░░░░ 0.1%");
+  assert.equal(rendered(100), "██████████ 100%");
+  assert.equal(rendered(110), "██████████ 110%");
+  assert.equal(rendered(null), "?????????? ?%");
+  assert.equal(rendered(NaN), "?????????? ?%");
   config.icons = "ascii";
-  assert.equal(rendered(4.7), "[#---------]4.7%");
-  assert.equal(rendered(20), "[##--------]20%");
-  assert.equal(rendered(100), "[##########]100%");
-  assert.equal(rendered(null), "[??????????]?%");
+  assert.equal(rendered(4.7), "#--------- 4.7%");
+  assert.equal(rendered(20), "##-------- 20%");
+  assert.equal(rendered(100), "########## 100%");
+  assert.equal(rendered(null), "?????????? ?%");
 });
 
 test("unknown context, non-repositories and hidden extension statuses are unambiguous", () => {
@@ -105,6 +105,22 @@ test("threshold colors change only above 70 and 90 percent; explicit colors over
   config.contextDisplay = "bar";
   assert.ok(output(71).includes(theme.style("◉ ", { fg: theme.colors.warning, bg: parseColor("#112233") })));
   assert.ok(output(91).includes(theme.style("◉ ", { fg: theme.colors.error, bg: parseColor("#112233") })));
+});
+
+test("quota uses the model accent through 70%, then warning/error thresholds and honors overrides", () => {
+  const data = sampleSnapshot();
+  data.quota = { primary: { usedPercent: 70, resetAtSeconds: 1_000_000_000, resetInMinutes: 60 } };
+  const config: StatuslineConfig = { ...presetConfig(), separator: "pipe" };
+  config.segments = [{ id: "quota", enabled: true, background: "#112233" }];
+  const theme = testTheme();
+  const output = (used: number) => { data.quota!.primary!.usedPercent = used; return renderFooter(100, data, config, theme)[0]!; };
+  const bg = parseColor("#112233");
+  assert.ok(output(70).includes(theme.style("󰦖 ", { fg: theme.colors.accent, bg })));
+  assert.ok(output(70.1).includes(theme.style("󰦖 ", { fg: theme.colors.warning, bg })));
+  assert.ok(output(90).includes(theme.style("󰦖 ", { fg: theme.colors.warning, bg })));
+  assert.ok(output(90.1).includes(theme.style("󰦖 ", { fg: theme.colors.error, bg })));
+  config.segments[0]!.color = "accent";
+  assert.ok(output(50).includes(theme.style("󰦖 ", { fg: theme.colors.accent, bg })));
 });
 
 test("icons can be hidden and control characters never reach a terminal", () => {

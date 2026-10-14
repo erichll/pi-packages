@@ -22,6 +22,10 @@
       "enabled": true
     },
     {
+      "id": "quota",
+      "enabled": true
+    },
+    {
       "id": "directory",
       "enabled": true
     },

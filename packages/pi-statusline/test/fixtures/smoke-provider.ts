@@ -31,6 +31,17 @@ export default function smokeProvider(pi: ExtensionAPI): void {
           message.stopReason = "aborted";
           stream.push({ type: "error", reason: "aborted", error: message }); stream.end();
         };
+        await options?.onPayload?.({ model: model.id }, model);
+        const reset = Math.floor(Date.now() / 1000);
+        if (prompt !== "quota-ws") await options?.onResponse?.({ status: 200, headers: prompt === "quota" ? {
+          "x-codex-primary-used-percent": "40", "x-codex-primary-window-minutes": "300", "x-codex-primary-reset-at": String(reset + 10980),
+          "x-codex-secondary-used-percent": "21", "x-codex-secondary-window-minutes": "10080", "x-codex-secondary-reset-at": String(reset + 4 * 86400 + 9 * 3600),
+        } : {} }, model);
+        await options?.onProviderStreamEvent?.({ type: "response.created" }, model);
+        if (prompt === "quota-ws") await options?.onProviderStreamEvent?.({ type: "codex.rate_limits", rate_limits: {
+          primary: { used_percent: 42, window_minutes: 300, reset_at: reset + 10980 },
+          secondary: { used_percent: 27, window_minutes: 10080, reset_at: reset + 4 * 86400 + 9 * 3600 },
+        } }, model);
         stream.push({ type: "start", partial: message });
         if (failCompaction) {
           failCompaction = false; await pause(200, options?.signal);
@@ -54,6 +65,7 @@ export default function smokeProvider(pi: ExtensionAPI): void {
           if (block?.type === "text") block.text += text;
           message.usage.output += 20; message.usage.totalTokens += 20;
           message.usage.cost.output += 0.00004; message.usage.cost.total += 0.00004;
+          if (prompt === "quota-ws") await options?.onProviderStreamEvent?.({ type: "response.output_text.delta", delta: text }, model);
           stream.push({ type: "text_delta", contentIndex: 0, delta: text, partial: message });
         }
         const content = message.content[0];

@@ -91,7 +91,7 @@ def run(layout):
         try:
             startup = drain(2)
             expect(startup, "Smoke demo(high)", "native footer with inline thinking")
-            expect(startup, "[░░░░░░░░░░]0%", "bar mode enabled by default")
+            expect(startup, "░░░░░░░░░░ 0%", "bar mode enabled by default")
             assert "$ 0.000" not in startup, "Default footer must not show the cost segment"
             assert "Idle" not in startup, "Startup footer must not show Idle"
             assert "Until compact" not in startup, "Footer must not show removed compaction capacity"
@@ -101,6 +101,11 @@ def run(layout):
             expect(first, "Turns 1", "model turn count")
             assert "Running 0s" not in first and "Done 0s" not in first, "Elapsed must not duplicate a status duration"
             expect(send("two\r", 1.2), "complete.", "second response")
+            resize(220, 44)
+            quota = send("quota\r", 1.2)
+            expect(quota, "████░░░░░░ 40%[3h3m] | ██░░░░░░░░ 21%[4d9h]", "passive response-header quota")
+            ws_quota = send("quota-ws\r", 1.2)
+            expect(ws_quota, "████░░░░░░ 42%[3h3m] | ███░░░░░░░ 27%[4d9h]", "native WebSocket quota events without HTTP hook")
             resize(160, 44)
             tool_text = send("tools\r", 0.8)
             expect(tool_text, "Tools 2 active", "nested tool lifecycle")
@@ -119,7 +124,7 @@ def run(layout):
             send("/smoke-fail-compact\r")
             expect(send("/compact\r", 1), "Compaction failed", "failed compaction restores runtime")
             compacted = send("/compact\r", 2)
-            expect(compacted, "[??????????]?%", "unknown context after successful compaction")
+            expect(compacted, "?????????? ?%", "unknown context after successful compaction")
             expect(compacted, "Compactions 1", "session compaction count")
             assert "Until compact" not in compacted, "Compaction must not restore removed capacity metrics"
             resize(100, 28)
@@ -136,7 +141,7 @@ def run(layout):
             assert "Preset:" not in reopened, "Only one layout: no preset selector"
             select_item("Context display:")
             expect(send("\r"), "?/200k", "switch to text preview")
-            expect(send("\r"), "[??????????]?%", "unknown usage in bar preview")
+            expect(send("\r"), "?????????? ?%", "unknown usage in bar preview")
             select_item("Save and apply globally")
             send("\r", 0.5)
             save_deadline = time.monotonic() + 5
@@ -160,7 +165,7 @@ def run(layout):
             expect(send("/statusline on\r"), "", "re-enable custom footer")
             expect(send("/reload\r", 2), "Reloaded", "extension reload")
             fresh = send("/new\r", 1)
-            expect(fresh, "[░░░░░░░░░░]0%", "new session resets context bar")
+            expect(fresh, "░░░░░░░░░░ 0%", "new session resets context bar")
             assert "$ 0.000" not in fresh, "Cost stays hidden in saved presets"
             send("\x04")
             process.wait(timeout=5)

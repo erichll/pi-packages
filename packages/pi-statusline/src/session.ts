@@ -8,10 +8,12 @@ import type { StatuslineConfig, StatuslineSnapshot } from "./types.ts";
 import { UsageCache } from "./usage.ts";
 import { RuntimeState } from "./runtime.ts";
 import { CompactionState } from "./compaction.ts";
+import { QuotaState } from "./quota.ts";
 
 export class FooterSession {
   readonly runtime = new RuntimeState();
   readonly compaction = new CompactionState();
+  readonly quota = new QuotaState();
   private ctx: ExtensionContext;
   private config: StatuslineConfig;
   private usage = new UsageCache();
@@ -35,7 +37,12 @@ export class FooterSession {
     this.ctx = ctx; this.config = config; this.gitReader = gitReader;
   }
   get active(): boolean { return this.ownsFooter && !this.closed; }
-  setContext(ctx: ExtensionContext): void { this.ctx = ctx; this.watchSignal(); }
+  setContext(ctx: ExtensionContext): void { this.ctx = ctx; this.quota.select(ctx.model); this.watchSignal(); }
+  beginProviderRequest(): void { if (this.active) this.quota.beginRequest(this.ctx.model); }
+  observeProviderResponse(headers: Record<string, string>): void {
+    if (!this.active) return;
+    this.quota.response(headers, this.ctx.model); this.schedule(true);
+  }
   private watchSignal(): void {
     if (this.closed || !this.ownsFooter || !this.runtime.running) return;
     const signal = this.ctx.signal;
@@ -81,15 +88,19 @@ export class FooterSession {
     this.unsubscribe?.(); this.unsubscribe = undefined;
     this.ownsFooter = false; this.tui = undefined; this.provider = undefined;
   }
-  disable(): void {
+  private uninstall(): void {
     const restore = this.ownsFooter;
     this.stopResources();
     if (restore && !this.closed) this.ctx.ui.setFooter(undefined);
   }
-  dispose(): void { this.stopResources(); this.clearSignal(); this.closed = true; }
+  disable(): void { this.uninstall(); this.quota.clear(); }
+  dispose(): void { this.stopResources(); this.clearSignal(); this.quota.clear(); this.closed = true; }
   apply(config: StatuslineConfig): void {
     if (this.closed) return;
-    this.disable(); this.config = config;
+    const keepQuota = this.active && config.enabled;
+    this.uninstall();
+    if (!keepQuota) this.quota.clear();
+    this.config = config;
     if (config.enabled) this.install();
   }
   setLive(message: AssistantMessage | undefined): void { this.usage.setLive(message); }
@@ -129,7 +140,7 @@ export class FooterSession {
     return {
       model: this.ctx.model?.name || this.ctx.model?.id || "No model", modelId: this.ctx.model?.id ?? "", reasoning: this.ctx.model?.reasoning ?? false,
       thinking: this.ctx.thinkingLevel ?? "off", cwd: this.ctx.cwd, home: homedir(),
-      context: this.context, usage: this.usage.snapshot(), git: this.git,
+      context: this.context, usage: this.usage.snapshot(), quota: this.quota.snapshot(this.ctx.model), git: this.git,
       statuses: this.provider?.getExtensionStatuses() ?? new Map(),
       runtime: this.runtime.snapshot(this.config.runtime.retainSummary), compaction: this.compaction.snapshot(),
     };
