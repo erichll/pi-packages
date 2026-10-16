@@ -97,3 +97,26 @@ test("an observed abort survives a stale success message and boundary outcome", 
   state.message(assistant(2), true); state.beforeSettle("completed"); state.settle();
   assert.equal(state.snapshot().status, "Done");
 });
+
+test("tool calls record targets and outcomes; nested calls count but are represented by their parent", () => {
+  let now = 0; const state = new RuntimeState(() => now); state.start(); state.turnStart();
+  state.toolStart("p", "codemode", { script: "…" });
+  state.toolStart("c1", "read", { path: "/repo/src/render.ts" }, "p");
+  state.toolStart("b", "bash", { command: "cd /repo && npm test" });
+  now = 5000;
+  assert.deepEqual(state.snapshot().tools, [{ name: "codemode", elapsedMs: 5000 }, { name: "bash", target: "npm test", elapsedMs: 5000 }]);
+  state.toolEnd("c1"); state.toolEnd("b", true); state.toolEnd("p"); state.toolEnd("unknown", true);
+  assert.deepEqual(state.snapshot().completed, [{ name: "read", ok: 1, failed: 0 }, { name: "bash", ok: 0, failed: 1 }, { name: "codemode", ok: 1, failed: 0 }]);
+  state.beforeSettle("completed"); state.settle();
+  assert.equal(state.snapshot().completed.length, 3, "the summary keeps completed counts");
+  assert.deepEqual(state.snapshot(false).completed, []);
+  state.start(); assert.deepEqual(state.snapshot().completed, [], "a new run starts from zero");
+});
+
+test("tools interrupted by a cancellation are not counted as failures", () => {
+  const state = new RuntimeState(); state.start(); state.turnStart();
+  state.toolStart("a", "bash", { command: "sleep 100" }); state.toolStart("b", "read", { path: "x.ts" });
+  state.observeAbort(); state.toolEnd("a", true); state.toolEnd("b");
+  assert.deepEqual(state.snapshot().completed, [{ name: "read", ok: 1, failed: 0 }]);
+  assert.deepEqual(state.snapshot().tools, []);
+});

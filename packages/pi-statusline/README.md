@@ -4,9 +4,14 @@ A configurable native Pi footer with Git status, session usage, runtime/tool
 activity and live configuration preview. Leaves the editor intact.
 
 ```text
-  Example model(high)  󰆼 █░░░░░░░░░ 11.9%  󰉋 pi-packages   main ● *2 ↑2  󰊄 49.4k
-Elapsed 5m 42s · Avg 45 tok/s · Cache 86% · Turns 3 · Compactions 1
+  Example model(high)  󰆼 █░░░░░░░░░ 11.9%  󰉋 pi-packages   main ● *2 ↑2
+◐ bash npm test 12s · ✓ read ×5 · ✓ edit ×2
+● 5m 42s · avg 45 tok/s · cache 86% · 3 turns · 1 compaction · 󰥔 2h 6m · 󰊄 49.4k
 ```
+
+Rows, top to bottom: the main segments, tool activity for the current run
+(only once it has used tools), then run status, run metrics, session age and
+tokens, and other extensions' statuses.
 
 ## Install
 
@@ -76,16 +81,17 @@ Available segments:
 | `quota` | Subscription Usage and reset countdowns; hidden without data | On |
 | `directory` | Current directory | On |
 | `git` | Branch, dirty/conflict state, staged/unstaged/untracked counts, ahead/behind | On |
-| `tokens` | Cumulative session tokens | On |
+| `session` | Time since the session was created, on the bottom row | On |
+| `tokens` | Cumulative session tokens, on the bottom row | On |
 | `cost` | Pi-recorded cumulative USD cost | Off |
 | `input`, `output`, `cacheRead`, `cacheWrite` | Individual session token counters | Off |
-| `statuses` | Other extensions' text on the second row | On |
+| `statuses` | Other extensions' text, at the end of the bottom row | On |
 
 `segments` is an ordered array of
 `{ id, enabled, icon?, color?, iconColor?, background? }`. Omitted segments are
-disabled, **except `quota`**: old configurations automatically gain it after
-`context` (or at the end if context is absent). To keep it off, include
-`{ "id": "quota", "enabled": false }`.
+disabled, **except `quota` and `session`**: old configurations automatically
+gain `quota` after `context` and `session` before `tokens` (or at the end when
+the anchor is absent). To keep one off, include it with `"enabled": false`.
 
 Colors accept `#RRGGBB` or supported Pi theme tokens such as `accent`, `muted`,
 `success`, `warning` and `error`; explicit colors override automatic thresholds.
@@ -100,20 +106,23 @@ Removing the file restores defaults on reload; panel saves are atomic.
 Codex quota appears after context when valid data is available:
 
 ```text
-󰆼 █░░░░░░░░░ 4.6%  󰦖 ████░░░░░░ 40%[3h3m] | ██░░░░░░░░ 21%[4d9h]
+󰆼 █░░░░░░░░░ 4.6%  󰦖 5h ████░░░░░░ 40% 3h3m · 7d ██░░░░░░░░ 21% 4d9h
 ```
 
-Bars show **used** percentages for the primary and secondary windows (usually
-5 hours and 7 days), with live reset countdowns. The default color is Pi's
-accent, changing to warning above 70% and error above 90%. Narrow terminals
-omit countdowns, then bars, then the segment rather than truncate a window.
+Bars show **used** percentages for the primary and secondary windows, with live
+reset countdowns. Labels come from the reported window length (`5h`, `1d`,
+`7d`, `30d` within 5%, otherwise exact such as `1h30m`); without one, the
+window is unlabeled rather than guessed. Each window is colored on its own:
+Pi's accent, warning above 70% and error above 90%; a segment `color` overrides
+both. Narrow terminals omit countdowns, then bars, then the segment rather than
+truncate a window; an unlabeled window keeps its countdown instead of its bar.
 
 Data is observed passively through Pi's provider events:
 
-- **SSE:** `x-codex-{primary,secondary}-{used-percent,reset-at}` response headers.
+- **SSE:** `x-codex-{primary,secondary}-{used-percent,reset-at,window-minutes}` response headers.
   CLIProxyAPI needs `requests.passthrough-headers: true`.
-- **WebSocket:** native `codex.rate_limits` events with numeric `used_percent`
-  and `reset_at` in `rate_limits.primary` / `secondary`. Other named metered
+- **WebSocket:** native `codex.rate_limits` events with numeric `used_percent`,
+  `reset_at` and optional `window_minutes` in `rate_limits.primary` / `secondary`. Other named metered
   buckets are ignored. The proxy must forward these events.
 
 For CLIProxyAPI v8.0.28, each eligible Codex credential needs `websockets: true`
@@ -132,21 +141,35 @@ or RPM/TPM rate limit.
 - Context is Pi's current estimate, not cumulative consumption; unknown values
   show `?`. Session totals include recorded usage across the whole session file,
   including compaction and abandoned branches. Cost is Pi-reported, not an invoice.
-- `Elapsed` spans retries, tools, UI waits and compaction. `Avg` is assistant
-  output tokens / total run seconds, **not inference speed**;
-  `Cache` is cache-read / (input + cache-read + cache-write). `Turns` counts Pi
-  turns, not upstream requests; `Compactions` counts successful session entries.
-- Tool activity and `Awaiting input` appear while active. `No content 10s`
-  means no non-empty text, reasoning or tool-call delta was observed; it is not
-  a server timeout and is suppressed during tools, UI waits and compaction.
+- The bottom row starts with the run status (`●` running, `✓` done, `✗` failed,
+  `⊘` cancelled) and its duration, which spans retries, tools, UI waits and
+  compaction. `avg` is assistant output tokens / total run seconds, **not
+  inference speed**; `cache` is cache-read / (input + cache-read + cache-write),
+  green from 80% and warning below 50%. `turns` counts Pi turns, not upstream
+  requests; `compactions` counts successful session entries.
+- The run duration (to the second) covers one run, from your message until the
+  agent settles, across all its turns. The session age (`󰥔 2h 6m`, to the
+  minute) counts from the session header's creation time: it survives reloads
+  and resuming, restarts with `/new` or a fork, and is hidden when the header
+  time is missing or invalid.
+- `awaiting input` and `no content 10s` follow the duration while active. No
+  content means no non-empty text, reasoning or tool-call delta was observed; it
+  is not a server timeout and is suppressed during tools, UI waits and compaction.
+- The tool row shows up to two running tools with what they work on (a shell
+  command without `cd`/env prefixes, a file name or a search pattern), merging
+  same-name calls as `×N`, then this run's completed (`✓`) and failed (`✗`)
+  counts. `toolsMaxVisible` (1–8, default 4) completed kinds show before `+N`.
+  Nested calls count but are represented by their parent while running; calls
+  ended by a cancellation are not failures. Narrow rows fold kinds, then drop
+  targets, then timers.
 
 All runtime options default to enabled; `noContentSeconds` accepts 1–3600
-(default 10). `retainSummary` keeps the last run until the next one;
+(default 10). `tools: false` hides the tool row. `retainSummary` keeps the last run until the next one;
 `runtime.enabled: false` hides local runtime metrics. Reload/new session resets
 in-memory runtime summaries, not persisted session totals.
 
 Extension statuses remain display-only; a plain `tps` status of `Elapsed …`
-replaces the local Elapsed label. Git updates asynchronously; no repository
+supplies the duration. Git updates asynchronously; no repository
 hides the segment, and query failures show `?`. Narrow layouts prioritize model
 and context. RPC, JSON and print mode do not install the footer or start polling.
 

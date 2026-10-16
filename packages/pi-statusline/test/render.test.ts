@@ -3,7 +3,7 @@ import test from "node:test";
 import { parseColor, stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { presetConfig } from "../src/config.ts";
 import type { StatuslineConfig } from "../src/types.ts";
-import { cleanText, renderFooter, sampleSnapshot, withSpacing } from "../src/render.ts";
+import { cleanText, formatSessionAge, renderFooter, sampleSnapshot, withSpacing } from "../src/render.ts";
 import { testTheme } from "./helpers.ts";
 
 test("all themes and icon modes fit every width including wide Unicode and escape sequences", () => {
@@ -42,7 +42,9 @@ test("preset layout puts context immediately after the model", () => {
   const config = presetConfig();
   const line = stripTerminalSequences(renderFooter(200, sampleSnapshot(), config, testTheme())[0]!);
   assert.match(line, /^  Example model\(high\)  󰆼 █░░░░░░░░░ 11\.9%  󰉋 pi-packages/);
-  assert.match(line, /󰊄 49\.4k/);
+  assert.doesNotMatch(line, /󰊄/, "session tokens live on the runtime row");
+  const rows = renderFooter(200, sampleSnapshot(), config, testTheme()).map(stripTerminalSequences);
+  assert.match(rows.at(-1)!, /· 󰊄 49\.4k ·/);
 });
 
 test("whole-cell context bars distinguish unknown, zero, low, full and overflow usage", () => {
@@ -78,7 +80,7 @@ test("unknown context, non-repositories and hidden extension statuses are unambi
   const config = presetConfig();
   config.contextDisplay = "text";
   const output = renderFooter(150, data, config, testTheme());
-  assert.equal(output.length, 2);
+  assert.equal(output.length, 3); // main, tools, runtime
   assert.ok(!output.map(stripTerminalSequences).join("\n").includes("Example extension status"));
   assert.match(stripTerminalSequences(output[0]!), /\?\/200k\(\?%\)/);
   assert.ok(!stripTerminalSequences(output[0]!).includes("main"));
@@ -247,4 +249,15 @@ test("rainbow thinking keeps distinct hues even when a theme uses one semantic c
     assert.equal(suffixColors.length, level.length + 2);
     assert.equal(new Set(suffixColors.map((value) => JSON.stringify(value))).size, level.length + 2);
   }
+});
+
+test("session age formats to the minute and sits before tokens on the runtime row", () => {
+  for (const [minutes, text] of [[0, "<1m"], [35, "35m"], [126, "2h 6m"], [60, "1h 0m"], [4440, "3d 2h"]] as const) assert.equal(formatSessionAge(minutes), text);
+  const config = presetConfig(); const data = sampleSnapshot(); data.statuses = new Map();
+  assert.match(stripTerminalSequences(renderFooter(240, data, config, testTheme()).at(-1)!), /1 compaction · 󰥔 2h 6m · 󰊄 49\.4k$/);
+  for (const [icons, icon] of [["unicode", "◷"], ["ascii", "ses:"]] as const) {
+    assert.match(stripTerminalSequences(renderFooter(240, data, { ...config, icons }, testTheme()).at(-1)!), new RegExp(`${icon} 2h 6m`));
+  }
+  data.sessionMinutes = null;
+  assert.doesNotMatch(stripTerminalSequences(renderFooter(240, data, config, testTheme()).at(-1)!), /󰥔/);
 });

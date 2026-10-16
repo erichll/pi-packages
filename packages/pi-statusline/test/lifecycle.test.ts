@@ -23,7 +23,7 @@ test("extension wiring spans agent_end/continuation, cancellation, UI/tools, com
   const theme = testTheme() as Theme;
   const ctx = {
     mode: "tui", hasUI: true, cwd: dir, model: { id: "model", name: "Model", provider: "example", contextWindow: 200000 },
-    sessionManager: { getSessionId: () => "session", getLeafId: () => null, getEntries: () => [] },
+    sessionManager: { getSessionId: () => "session", getLeafId: () => null, getEntries: () => [], getHeader: () => ({ type: "session", id: "session", cwd: dir, timestamp: new Date().toISOString() }) },
     getContextUsage: () => { contextReads++; return { tokens: 1000, percent: 0.5, contextWindow: 200000 }; },
     ui: {
       theme, notify(message: string) { notifications.push(message); },
@@ -44,29 +44,33 @@ test("extension wiring spans agent_end/continuation, cancellation, UI/tools, com
     await fire("message_start", { message: first });
     await fire("message_update", { message: first, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "hello", partial: first } });
     await fire("message_end", { message: first }); await fire("turn_end", { message: first });
-    await fire("agent_end"); assert.match(row(), /Elapsed.*Turns 1/);
+    await fire("agent_end"); assert.match(row(), /● \d+s .*1 turn/);
     await fire("agent_start"); await fire("turn_start");
-    await fire("tool_execution_start", { toolCallId: "parent", toolName: "bash" });
-    await fire("tool_execution_start", { toolCallId: "child", toolName: "read" }); assert.match(row(), /Tools 2 active/);
-    await fire("tool_execution_end", { toolCallId: "parent" }); await fire("tool_execution_end", { toolCallId: "child" });
-    await fire("ui_prompt_start"); assert.match(row(), /Awaiting input/); await fire("ui_prompt_end");
+    await fire("tool_execution_start", { toolCallId: "parent", toolName: "bash", args: { command: "cd /x && npm test" } });
+    await fire("tool_execution_start", { toolCallId: "child", toolName: "read", args: { path: "/x/a.ts" }, parentToolCallId: "parent" });
+    await fire("tool_execution_start", { toolCallId: "other", toolName: "read", args: { path: "/x/b.ts" } });
+    assert.match(row(), /◐ bash npm test · ◐ read b\.ts\n/, "nested calls are represented by their parent");
+    await fire("tool_execution_end", { toolCallId: "child", isError: false }); await fire("tool_execution_end", { toolCallId: "other", isError: true });
+    await fire("tool_execution_end", { toolCallId: "parent", isError: false });
+    assert.match(row(), /\n✓ read ×1 · ✓ bash ×1 · ✗ read ×1\n/);
+    await fire("ui_prompt_start"); assert.match(row(), /awaiting input/); await fire("ui_prompt_end");
     await fire("agent_before_settle", { outcome: "completed" }); await fire("agent_settled");
-    assert.match(row(), /Turns 2/); assert.doesNotMatch(row(), /Tools 2 active|Awaiting input|No content/);
-    assert.doesNotMatch(row(), /Running|Done/); assert.match(row(), /Elapsed/);
+    assert.match(row(), /\n✓ \d+s .*2 turns/); assert.doesNotMatch(row(), /◐|awaiting input|no content/);
+    assert.match(row(), /✓ read ×1 · ✓ bash ×1 · ✗ read ×1/, "the run summary keeps tool counts");
     await fire("agent_start"); await fire("turn_start");
     await fire("message_end", { message: { ...assistant(2), stopReason: "aborted" } });
     await fire("agent_end"); await fire("agent_settled"); // Pi skips before-settle on abort
-    assert.match(row(), /Turns 1/); assert.doesNotMatch(row(), /Awaiting input|No content/);
-    await fire("session_before_compact"); assert.match(row(), /Compacting/);
-    await fire("session_compact_failed", { aborted: true }); assert.match(row(), /Compaction cancelled/);
+    assert.match(row(), /⊘ \d+s .*1 turn/); assert.doesNotMatch(row(), /awaiting input|no content|✓ read/);
+    await fire("session_before_compact"); assert.match(row(), /compacting/);
+    await fire("session_compact_failed", { aborted: true }); assert.match(row(), /compaction cancelled/);
     await fire("session_before_compact"); await fire("session_compact", { compactionEntry: { id: "compact" } });
-    assert.doesNotMatch(row(), /Compacting|Compaction cancelled/); assert.match(row(), /Compactions 1/);
+    assert.doesNotMatch(row(), /compacting|compaction cancelled/); assert.match(row(), /1 compaction/);
     await command("off", ctx); assert.equal(footer, undefined);
     const reads = contextReads; await fire("message_update", { message: assistant(), assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "", partial: assistant() } });
     await delay(120); assert.equal(contextReads, reads);
     await command("on", ctx); assert.ok(footer);
-    await command("reload", ctx); assert.doesNotMatch(row(), /Elapsed|Idle/);
-    await fire("session_start"); assert.doesNotMatch(row(), /Elapsed|Idle/);
+    await command("reload", ctx); assert.doesNotMatch(row(), /[●✓✗⊘] \d|Idle/);
+    await fire("session_start"); assert.doesNotMatch(row(), /[●✓✗⊘] \d|Idle/);
     await fire("session_shutdown");
   } finally {
     await fire("session_shutdown"); if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous;

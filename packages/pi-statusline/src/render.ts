@@ -6,22 +6,29 @@ export { cleanText } from "./text.ts";
 import type { ColorValue, SegmentConfig, SegmentId, StatuslineConfig, StatuslineSnapshot } from "./types.ts";
 import { emptyGit } from "./git.ts";
 import { emptyUsage } from "./usage.ts";
-import { renderRuntime } from "./runtime-render.ts";
-import { renderQuota } from "./quota.ts";
+import { renderRuntime, renderTools } from "./runtime-render.ts";
+import { quotaPieces, quotaSeparator, renderQuota, type QuotaDetail } from "./quota.ts";
 
 export type RenderTheme = Pick<Theme, "style" | "colors" | "appearance">;
 // Keep rainbow hues independent of semantic theme colors, which can repeat.
 const THINKING_RAINBOW = ["#c084fc", "#f472b6", "#fb923c", "#facc15", "#4ade80", "#22d3ee", "#60a5fa"].map((value) => parseColor(value));
 const ICONS: Record<StatuslineConfig["icons"], Partial<Record<SegmentId, string>>> = {
-  unicode: { model: "", directory: "▸", git: "⑂", context: "◉", cost: "$", input: "↑", output: "↓", tokens: "Σ", cacheRead: "R", cacheWrite: "W" },
-  nerd: { model: "", directory: "󰉋", git: "", context: "󰆼", quota: "󰦖", cost: "$", input: "↑", output: "↓", tokens: "󰊄", cacheRead: "R", cacheWrite: "W" },
-  ascii: { model: "", directory: "", git: "git:", context: "ctx:", cost: "$", input: "in:", output: "out:", tokens: "tok:", cacheRead: "R:", cacheWrite: "W:" },
+  unicode: { model: "", directory: "▸", git: "⑂", context: "◉", cost: "$", input: "↑", output: "↓", session: "◷", tokens: "Σ", cacheRead: "R", cacheWrite: "W" },
+  nerd: { model: "", directory: "󰉋", git: "", context: "󰆼", quota: "󰦖", cost: "$", input: "↑", output: "↓", session: "󰥔", tokens: "󰊄", cacheRead: "R", cacheWrite: "W" },
+  ascii: { model: "", directory: "", git: "git:", context: "ctx:", cost: "$", input: "in:", output: "out:", session: "ses:", tokens: "tok:", cacheRead: "R:", cacheWrite: "W:" },
 };
-const DROP_ORDER: SegmentId[] = ["cost", "cacheWrite", "cacheRead", "tokens", "output", "input", "thinking", "git", "directory"];
+const DROP_ORDER: SegmentId[] = ["cost", "cacheWrite", "cacheRead", "output", "input", "thinking", "git", "directory"];
 export function formatTokens(value: number): string {
   if (value < 1000) return String(Math.round(value));
   const divisor = value >= 1e6 ? 1e6 : 1000;
   return `${Number((value / divisor).toFixed(1))}${divisor === 1e6 ? "M" : "k"}`;
+}
+/** Session age to the minute: `<1m`, `35m`, `2h 6m`, `3d 2h`. */
+export function formatSessionAge(minutes: number): string {
+  if (minutes < 1) return "<1m";
+  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 1440) return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  return `${Math.floor(minutes / 1440)}d ${Math.floor(minutes % 1440 / 60)}h`;
 }
 function contextBar(percent: number | null, ascii: boolean): string {
   const width = 10;
@@ -71,6 +78,7 @@ function segmentText(id: SegmentId, data: StatuslineSnapshot, config: Statusline
       return `${tokens === null ? "?" : formatTokens(tokens)}/${capacity}(${percent === null ? "?" : Number(percent.toFixed(1))}%)`;
     }
     case "quota": return renderQuota(data.quota, config.icons === "ascii");
+    case "session": return data.sessionMinutes === null ? undefined : formatSessionAge(data.sessionMinutes);
     case "cost": return usage.cost.toFixed(3);
     case "input": return formatTokens(usage.input);
     case "output": return formatTokens(usage.output);
@@ -80,14 +88,14 @@ function segmentText(id: SegmentId, data: StatuslineSnapshot, config: Statusline
     case "statuses": return [...data.statuses.values()].map(cleanText).filter(Boolean).join(" · ") || undefined;
   }
 }
+function usageColor(percent: number): ColorValue { return percent > 90 ? "error" : percent > 70 ? "warning" : "accent"; }
 function defaultColor(id: SegmentId, data: StatuslineSnapshot): ColorValue {
   if (id === "context") {
     if ((data.context.percent ?? 0) > 90) return "error";
     if ((data.context.percent ?? 0) > 70) return "warning";
   }
   if (id === "quota") {
-    const used = Math.max(data.quota?.primary?.usedPercent ?? 0, data.quota?.secondary?.usedPercent ?? 0);
-    return used > 90 ? "error" : used > 70 ? "warning" : "accent";
+    return usageColor(Math.max(data.quota?.primary?.usedPercent ?? 0, data.quota?.secondary?.usedPercent ?? 0));
   }
   if (id === "git") {
     if (data.git.conflicts) return "error";
@@ -114,12 +122,14 @@ interface Part {
   foreground: ColorValue;
   background?: ColorValue;
   thinking?: { text: string; foreground: ColorValue | "rainbow" };
+  /** Multi-colored body; `text` remains its plain equivalent. */
+  content?: (style: { fg: ReturnType<typeof color>; bg?: ReturnType<typeof color> }) => string;
 }
 function renderPart(part: Part, theme: RenderTheme): string {
   const bg = part.background ? color(part.background, theme) : undefined;
   const style = { fg: color(part.foreground, theme), ...(bg ? { bg } : {}) };
   const icon = part.icon ? theme.style(`${part.icon} `, { ...style, fg: color(part.config.iconColor ?? part.foreground, theme) }) : "";
-  const text = theme.style(part.text, style);
+  const text = part.content ? part.content(style) : theme.style(part.text, style);
   let suffix = "";
   if (part.thinking) {
     const { text: level, foreground } = part.thinking;
@@ -154,12 +164,38 @@ function joinParts(parts: Part[], config: StatuslineConfig, theme: RenderTheme):
   }).join("");
 }
 
+/** Each window colors its own bar and percentage; labels, countdowns and separators recede. */
+function setQuota(part: Part, data: StatuslineSnapshot, config: StatuslineConfig, theme: RenderTheme, detail: QuotaDetail): void {
+  const ascii = config.icons === "ascii";
+  const pieces = quotaPieces(data.quota, ascii, detail) ?? [];
+  part.text = renderQuota(data.quota, ascii, detail) ?? "";
+  part.content = (style) => {
+    const paint = (text: string, value: ColorValue) => theme.style(text, { ...style, fg: color(value, theme) });
+    return pieces.map((piece) => {
+      const used = part.config.color ?? usageColor(piece.usedPercent);
+      return [
+        piece.label && paint(piece.label, "dim"), piece.bar && paint(piece.bar, used),
+        paint(piece.percent, used), piece.reset && paint(piece.reset, "muted"),
+      ].filter(Boolean).join(theme.style(" ", style));
+    }).join(paint(quotaSeparator(ascii), "dim"));
+  };
+}
+/** Session-wide values for the runtime row: dim icon, plain value. */
+function sessionText(segment: SegmentConfig, data: StatuslineSnapshot, config: StatuslineConfig, theme: RenderTheme): string | undefined {
+  const icon = cleanText(segment.icon ?? ICONS[config.icons][segment.id] ?? "");
+  const value = segmentText(segment.id, data, config);
+  if (value === undefined) return undefined;
+  const styled = theme.style(value, { fg: color(segment.color ?? "text", theme) });
+  return icon ? `${theme.style(icon, { fg: color(segment.iconColor ?? "dim", theme) })} ${styled}` : styled;
+}
+
 /** Pure terminal rendering: no disk reads, processes or session traversal. */
 export function renderFooter(width: number, data: StatuslineSnapshot, config: StatuslineConfig, theme: RenderTheme): string[] {
   width = Math.max(0, Math.floor(width));
   if (width === 0) return [];
   const parts: Part[] = [];
   let secondary: Part | undefined;
+  const sessionRow: Partial<Record<"session" | "tokens", string>> = {};
   // CLIProxyAPI's published `tps` status is display text only.
   const tps = cleanText(data.statuses.get("tps") ?? "");
   const elapsedStatus = config.segments.some((s) => s.id === "statuses" && s.enabled) && /^Elapsed \d+[dhms](?: \d+[hms])*$/.test(tps) ? tps : undefined;
@@ -167,6 +203,7 @@ export function renderFooter(width: number, data: StatuslineSnapshot, config: St
   const thinking = config.segments.find((segment) => segment.id === "thinking");
   for (const segment of config.segments) {
     if (!segment.enabled) continue;
+    if (segment.id === "session" || segment.id === "tokens") { sessionRow[segment.id] = sessionText(segment, data, config, theme); continue; }
     const raw = segmentText(segment.id, segment.id === "statuses" ? { ...data, statuses } : data, config);
     if (raw === undefined) continue;
     let text = cleanText(raw);
@@ -179,6 +216,7 @@ export function renderFooter(width: number, data: StatuslineSnapshot, config: St
         foreground: thinking.color ?? (["high", "xhigh", "max"].includes(data.thinking) ? "rainbow" : defaultColor("thinking", data)),
       };
     }
+    if (segment.id === "quota") setQuota(part, data, config, theme, "full");
     if (segment.id === "statuses") secondary = part;
     else parts.push(part);
   }
@@ -206,7 +244,7 @@ export function renderFooter(width: number, data: StatuslineSnapshot, config: St
   const quota = parts.find((part) => part.config.id === "quota");
   if (quota && visibleWidth(line) > width) {
     for (const detail of ["bars", "percent"] as const) {
-      quota.text = renderQuota(data.quota, config.icons === "ascii", detail)!;
+      setQuota(quota, data, config, theme, detail);
       line = joinParts(parts, config, theme);
       if (visibleWidth(line) <= width) break;
     }
@@ -217,8 +255,10 @@ export function renderFooter(width: number, data: StatuslineSnapshot, config: St
   }
   const lines: string[] = [];
   if (parts.length) lines.push(truncateToWidth(line, width, ellipsis));
-  const secondLine = renderRuntime(width, data, config, theme, secondary ? renderPart(secondary, theme) : undefined, elapsedStatus);
-  if (secondLine) lines.push(secondLine);
+  const tools = renderTools(width, data, config, theme);
+  if (tools) lines.push(tools);
+  const runtime = renderRuntime(width, data, config, theme, { statuses: secondary ? renderPart(secondary, theme) : undefined, ...sessionRow, elapsedStatus });
+  if (runtime) lines.push(runtime);
   return lines;
 }
 
@@ -238,8 +278,12 @@ export function sampleSnapshot(): StatuslineSnapshot {
     context: { tokens: 23800, contextWindow: 200000, percent: 11.9 },
     usage: { ...emptyUsage(), input: 32000, output: 5400, cacheRead: 12000, cost: 0.12 },
     git: { ...emptyGit("repository"), branch: "main", unstaged: 2, ahead: 2 },
-    statuses: new Map([["example", "Example extension status"]]),
-    runtime: { runId: "example", status: "Running", elapsedMs: 28000, turns: 3, toolCalls: 2, tools: [], awaitingInput: false, noContentMs: 0, usage: { ...emptyUsage(), output: 1260 }, avg: 45, cache: 0.86 },
+    statuses: new Map([["example", "Example extension status"]]), sessionMinutes: 126,
+    runtime: {
+      runId: "example", status: "Running", elapsedMs: 28000, turns: 3, toolCalls: 8, awaitingInput: false, noContentMs: null, usage: { ...emptyUsage(), output: 1260 }, avg: 45, cache: 0.86,
+      tools: [{ name: "bash", target: "npm test", elapsedMs: 12000 }],
+      completed: [{ name: "read", ok: 5, failed: 0 }, { name: "edit", ok: 2, failed: 0 }],
+    },
     compaction: { active: false, elapsedMs: 0, count: 1, showFailure: false },
   };
 }

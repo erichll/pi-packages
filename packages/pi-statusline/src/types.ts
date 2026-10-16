@@ -1,6 +1,6 @@
 import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 
-export const SEGMENT_IDS = ["model", "thinking", "context", "quota", "directory", "git", "cost", "input", "output", "tokens", "cacheRead", "cacheWrite", "statuses"] as const;
+export const SEGMENT_IDS = ["model", "thinking", "context", "quota", "directory", "git", "cost", "input", "output", "session", "tokens", "cacheRead", "cacheWrite", "statuses"] as const;
 export type SegmentId = typeof SEGMENT_IDS[number];
 export type ColorValue = ThemeColor | `#${string}`;
 export type Preset = "powerline";
@@ -15,6 +15,8 @@ export interface RuntimeConfig {
   cache: boolean;
   counts: boolean;
   retainSummary: boolean;
+  /** Completed tool kinds shown before folding into `+N` (1–8). */
+  toolsMaxVisible: number;
 }
 export interface SegmentConfig {
   id: SegmentId;
@@ -68,6 +70,8 @@ export interface StatuslineSnapshot {
   quota?: import("./quota.ts").QuotaSnapshot;
   git: GitState;
   statuses: ReadonlyMap<string, string>;
+  /** Whole minutes since the session file was created; null when unknown. */
+  sessionMinutes: number | null;
   runtime?: import("./runtime.ts").RuntimeSnapshot;
   compaction?: import("./compaction.ts").CompactionSnapshot;
 }

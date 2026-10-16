@@ -46,6 +46,10 @@
       "enabled": false
     },
     {
+      "id": "session",
+      "enabled": true
+    },
+    {
       "id": "tokens",
       "enabled": true
     },
@@ -71,6 +75,7 @@
     "avg": true,
     "cache": true,
     "counts": true,
-    "retainSummary": true
+    "retainSummary": true,
+    "toolsMaxVisible": 4
   }
 }

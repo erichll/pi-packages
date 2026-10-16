@@ -37,7 +37,7 @@ export default function statusline(pi: ExtensionAPI): void {
   pi.on("agent_settled", (_event, ctx) => { session?.setContext(ctx); session?.settle(); session?.schedule(true); });
   pi.on("ui_prompt_start", () => { session?.runtime.uiStart(); session?.schedule(true); });
   pi.on("ui_prompt_end", () => { session?.runtime.uiEnd(); session?.schedule(true); });
-  pi.on("tool_execution_start", (event, ctx) => { session?.setContext(ctx); session?.runtime.toolStart(event.toolCallId, event.toolName); session?.schedule(true); });
+  pi.on("tool_execution_start", (event, ctx) => { session?.setContext(ctx); session?.runtime.toolStart(event.toolCallId, event.toolName, event.args, event.parentToolCallId); session?.schedule(true); });
   pi.on("session_before_compact", (_event, ctx) => {
     session?.setContext(ctx); session?.compaction.start(); session?.runtime.compaction(true); session?.schedule(true);
   });
@@ -69,7 +69,7 @@ export default function statusline(pi: ExtensionAPI): void {
     session?.compaction.finish(event.aborted ? "cancelled" : "failed", undefined, event.errorMessage); session?.runtime.compaction(false); refresh(event, ctx);
   });
   pi.on("session_tree", resetLive);
-  pi.on("tool_execution_end", (event, ctx) => { session?.setContext(ctx); session?.runtime.toolEnd(event.toolCallId); session?.requestGit(); session?.schedule(true); });
+  pi.on("tool_execution_end", (event, ctx) => { session?.setContext(ctx); session?.runtime.toolEnd(event.toolCallId, event.isError); session?.requestGit(); session?.schedule(true); });
   pi.on("user_bash", (_event, ctx) => { session?.setContext(ctx); session?.requestGit(); });
 
   pi.registerCommand("statusline", {

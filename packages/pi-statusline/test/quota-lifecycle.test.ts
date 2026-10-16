@@ -27,7 +27,7 @@ test("native response hooks drive Usage, idle countdown, invalidation and old-co
   const ctx = {
     mode: "tui", cwd: directory, model: { provider: "cliproxyapi", id: "test", name: "Test", api: "cliproxyapi-codex-responses", baseUrl: "http://localhost:8317", contextWindow: 200000 },
     get modelRegistry() { throw new Error("Quota must not look up credentials"); },
-    sessionManager: { getSessionId: () => "session", getLeafId: () => null, getEntries: () => [] },
+    sessionManager: { getSessionId: () => "session", getLeafId: () => null, getEntries: () => [], getHeader: () => ({ type: "session", id: "session", cwd: directory, timestamp: new Date().toISOString() }) },
     getContextUsage: () => ({ tokens: 9200, contextWindow: 200000, percent: 4.6 }),
     ui: { theme, notify(message: string) { notifications.push(message); }, setFooter(factory: Parameters<ExtensionContext["ui"]["setFooter"]>[0]) {
       footer?.dispose?.(); footer = factory?.({ requestRender() { renders++; } } as TUI, theme, provider);
@@ -51,12 +51,12 @@ test("native response hooks drive Usage, idle countdown, invalidation and old-co
     await command("quota", ctx);
     assert.equal(notifications.at(-1), "Usage: /statusline [on|off|reload]", "diagnostic command has been removed");
     await response();
-    assert.match(row(), /4\.6%  󰦖 ████░░░░░░ 40%\[3h3m\].*21%\[4d9h\]/);
+    assert.match(row(), /4\.6%  󰦖 5h ████░░░░░░ 40% 3h3m · 7d ██░░░░░░░░ 21% 4d9h/);
     assert.doesNotMatch(row(), /Usage |resets in|never-store-this|42/);
     const before = renders;
     t.mock.timers.tick(60000);
     assert.ok(renders > before, "idle countdown requests a render without a new inference");
-    assert.match(row(), /\[3h2m\]/);
+    assert.match(row(), /40% 3h2m/);
     await response({}); assert.doesNotMatch(row(), /40%|21%/);
     await response();
     ctx.model = { ...ctx.model!, id: "other" }; await fire("model_select"); assert.doesNotMatch(row(), /40%|21%/);

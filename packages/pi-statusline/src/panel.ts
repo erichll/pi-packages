@@ -41,7 +41,7 @@ export class StatuslinePanel implements Component, Focusable {
   }
   private items(): SelectItem[] {
     if (this.section) {
-      const labels: Record<string, string> = { enabled: "Runtime metrics", status: "Elapsed / compaction status", tools: "Tool activity", noContent: "No content warning", noContentSeconds: "No content threshold (seconds)", avg: "Average output speed", cache: "Cache read ratio", counts: "Turns and compactions", retainSummary: "Retain last run summary" };
+      const labels: Record<string, string> = { enabled: "Runtime metrics", status: "Run status, elapsed and compaction status", tools: "Tool activity row", noContent: "No content warning", noContentSeconds: "No content threshold (seconds)", avg: "Average output speed", cache: "Cache read ratio", counts: "Turns and compactions", retainSummary: "Retain last run summary", toolsMaxVisible: "Completed tool kinds shown" };
       return [...Object.entries(this.draft[this.section]).map(([key, value]) => ({ value: `option:${key}`, label: `${labels[key] ?? key}: ${value}` })), { value: "back", label: "Back to settings" }];
     }
     if (this.editing) {
@@ -64,7 +64,7 @@ export class StatuslinePanel implements Component, Focusable {
       { value: "modelDisplay", label: `Model display: ${this.draft.modelDisplay}`, description: "name: display name · last: final model ID component" },
       { value: "contextDisplay", label: `Context display: ${this.draft.contextDisplay}`, description: "text: tokens/capacity(percent) · bar: progress and percent" },
       { value: "spacing", label: `Spacing above statusline: ${this.draft.spacing}`, description: "Blank lines between the input box and the statusline (0–3)" },
-      ...this.draft.segments.filter((segment) => segment.id !== "thinking").map((segment) => ({ value: `segment:${segment.id}`, label: `[${segment.enabled ? "x" : " "}] ${segment.id}`, description: segment.id === "statuses" ? "Secondary row · Space toggles, Enter edits" : segment.id === "quota" ? "Subscription Usage · passive headers/events; hidden without data" : "Space toggles · Alt+Up/Down reorders · Enter edits" })),
+      ...this.draft.segments.filter((segment) => segment.id !== "thinking").map((segment) => ({ value: `segment:${segment.id}`, label: `[${segment.enabled ? "x" : " "}] ${segment.id}`, description: segment.id === "statuses" || segment.id === "session" || segment.id === "tokens" ? "Runtime row · Space toggles, Enter edits" : segment.id === "quota" ? "Subscription Usage · passive headers/events; hidden without data" : "Space toggles · Alt+Up/Down reorders · Enter edits" })),
       { value: "runtime", label: "Runtime options" },
       { value: "save", label: "Save and apply globally" },
       { value: "reset", label: "Restore defaults in preview" },
@@ -93,12 +93,12 @@ export class StatuslinePanel implements Component, Focusable {
     if (this.section) {
       if (value === "back") { this.cancel(); return; }
       const key = value.slice("option:".length);
-      if (key === "noContentSeconds") {
-        this.input = new Input(); this.input.focused = this.hasFocus; this.input.setValue(String(this.draft.runtime.noContentSeconds));
-        this.inputLabel = "No content threshold (1–3600 seconds)";
+      if (key === "noContentSeconds" || key === "toolsMaxVisible") {
+        this.input = new Input(); this.input.focused = this.hasFocus; this.input.setValue(String(this.draft.runtime[key]));
+        this.inputLabel = key === "noContentSeconds" ? "No content threshold (1–3600 seconds)" : "Completed tool kinds shown before +N (1–8)";
         this.input.onEscape = () => this.cancel();
         this.input.onSubmit = (text) => {
-          try { this.draft = parseConfig({ ...this.draft, runtime: { ...this.draft.runtime, noContentSeconds: Number(text) } }); this.input = undefined; this.error = ""; this.rebuild(value); }
+          try { this.draft = parseConfig({ ...this.draft, runtime: { ...this.draft.runtime, [key]: Number(text) } }); this.input = undefined; this.error = ""; this.rebuild(value); }
           catch (error) { this.error = error instanceof Error ? error.message : String(error); }
         };
       } else {

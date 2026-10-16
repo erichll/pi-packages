@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { parseConfig, presetConfig } from "../src/config.ts";
-import { formatReset, QuotaState, readQuotaHeaders, readQuotaEvent, renderQuota } from "../src/quota.ts";
+import { formatReset, QuotaState, readQuotaHeaders, readQuotaEvent, renderQuota, windowLabel } from "../src/quota.ts";
 import { renderFooter, sampleSnapshot } from "../src/render.ts";
 import { testTheme } from "./helpers.ts";
 
@@ -25,7 +25,7 @@ function snapshot() {
 
 test("Codex quota parser reads only allowlisted numeric fields and preserves a reported zero", () => {
   const quota = readQuotaHeaders({ ...headers(0), Authorization: "secret", "x-codex-credits-balance": "secret", "x-ratelimit-remaining-tokens": "100" });
-  assert.deepEqual(quota?.primary, { usedPercent: 0, resetAtSeconds: now / 1000 + 10980 });
+  assert.deepEqual(quota?.primary, { usedPercent: 0, resetAtSeconds: now / 1000 + 10980, windowMinutes: 300 });
   assert.equal(quota?.secondary?.usedPercent, 21);
   assert.ok(!JSON.stringify(quota).includes("secret"));
   assert.equal(readQuotaHeaders({ "x-ratelimit-remaining-tokens": "100", "x-other-primary-used-percent": "50" }), undefined);
@@ -37,6 +37,10 @@ test("Codex quota parser reads only allowlisted numeric fields and preserves a r
     assert.equal(readQuotaHeaders({ ...headers(), "x-codex-primary-reset-at": invalid })?.primary, undefined);
   }
   assert.equal(readQuotaHeaders({ "x-codex-primary-used-percent": "40" }), undefined);
+  // A malformed window length drops only the label, never the usage.
+  for (const invalid of ["0", "-5", "abc", "1e9"]) {
+    assert.deepEqual(readQuotaHeaders({ ...headers(), "x-codex-primary-window-minutes": invalid })?.primary, { usedPercent: 40, resetAtSeconds: now / 1000 + 10980 });
+  }
 });
 
 function quotaEvent(primary = 40, secondary = 21) {
@@ -59,6 +63,9 @@ test("native Codex WebSocket events use only numeric default-bucket windows", ()
   }
   for (const invalid of ["2000000000", 0, -1, Infinity, 9e12, undefined]) {
     assert.equal(readQuotaEvent({ ...event, rate_limits: { primary: { used_percent: 40, reset_at: invalid } } }), undefined);
+  }
+  for (const invalid of ["300", 0, -1, NaN, null, undefined]) {
+    assert.equal(readQuotaEvent({ ...event, rate_limits: { primary: { used_percent: 40, window_minutes: invalid, reset_at: now / 1000 + 60 } } })?.primary?.windowMinutes, undefined);
   }
 });
 
@@ -149,12 +156,25 @@ test("countdown advances on the clock and hides expired samples without inventin
   assert.equal(formatReset(60), "1h0m");
 });
 
-test("quota renders primary then secondary with compact reset countdowns", () => {
-  assert.equal(renderQuota(snapshot(), false), "████░░░░░░ 40%[3h3m] | ██░░░░░░░░ 21%[4d9h]");
-  assert.equal(renderQuota(snapshot(), true), "####------ 40%[3h3m] | ##-------- 21%[4d9h]");
+test("window labels follow the reported length, matching standard windows within 5%", () => {
+  assert.equal(windowLabel(300), "5h"); assert.equal(windowLabel(290), "5h"); assert.equal(windowLabel(1440), "1d");
+  assert.equal(windowLabel(10080), "7d"); assert.equal(windowLabel(43200), "30d");
+  assert.equal(windowLabel(60), "1h"); assert.equal(windowLabel(15), "15m"); assert.equal(windowLabel(90), "1h30m"); assert.equal(windowLabel(2880), "2d");
+  assert.equal(windowLabel(undefined), undefined);
+});
+
+test("quota renders labeled primary then secondary with compact reset countdowns", () => {
+  assert.equal(renderQuota(snapshot(), false), "5h ████░░░░░░ 40% 3h3m · 7d ██░░░░░░░░ 21% 4d9h");
+  assert.equal(renderQuota(snapshot(), true), "5h ####------ 40% 3h3m / 7d ##-------- 21% 4d9h");
+  assert.equal(renderQuota(snapshot(), false, "bars"), "5h ████░░░░░░ 40% · 7d ██░░░░░░░░ 21%");
+  assert.equal(renderQuota(snapshot(), false, "percent"), "5h 40% · 7d 21%");
   assert.equal(renderQuota(undefined, false), undefined);
   assert.equal(renderQuota({}, false), undefined);
-  assert.equal(renderQuota({ secondary: snapshot().secondary }, false), "██░░░░░░░░ 21%[4d9h]");
+  assert.equal(renderQuota({ secondary: snapshot().secondary }, false), "7d ██░░░░░░░░ 21% 4d9h");
+  // Without a reported length there is no label; the countdown identifies the window instead.
+  const unlabeled = snapshot(); delete unlabeled.primary!.windowMinutes; delete unlabeled.secondary!.windowMinutes;
+  assert.equal(renderQuota(unlabeled, false), "████░░░░░░ 40% 3h3m · ██░░░░░░░░ 21% 4d9h");
+  assert.equal(renderQuota(unlabeled, false, "percent"), "40% 3h3m · 21% 4d9h");
   const value = snapshot(); value.primary!.usedPercent = 0; value.secondary!.usedPercent = 100;
   assert.match(renderQuota(value, false)!, /░{10} 0%.*█{10} 100%/);
   value.primary!.usedPercent = 0.1;
@@ -176,7 +196,7 @@ test("footer places Usage directly after context, hides missing quota and preser
   const data = sampleSnapshot(); data.quota = snapshot(); data.context.percent = 4.6;
   const config = presetConfig();
   const line = stripTerminalSequences(renderFooter(300, data, config, testTheme())[0]!);
-  assert.match(line, /󰆼 █░░░░░░░░░ 4\.6%  󰦖 ████░░░░░░ 40%\[3h3m\] \| ██░░░░░░░░ 21%\[4d9h\]  󰉋/);
+  assert.match(line, /󰆼 █░░░░░░░░░ 4\.6%  󰦖 5h ████░░░░░░ 40% 3h3m · 7d ██░░░░░░░░ 21% 4d9h  󰉋/);
   assert.doesNotMatch(line, /Usage|resets in/);
   for (const appearance of ["dark", "light"] as const) {
     for (const icons of ["unicode", "nerd", "ascii"] as const) {
@@ -198,4 +218,18 @@ test("footer places Usage directly after context, hides missing quota and preser
   config.segments.find((item) => item.id === "quota")!.enabled = true;
   data.quota = undefined;
   assert.doesNotMatch(stripTerminalSequences(renderFooter(300, data, config, testTheme())[0]!), /40%|21%/);
+});
+
+test("each quota window takes its own threshold color; an explicit color overrides both", () => {
+  const theme = testTheme(); const config = presetConfig();
+  const data = sampleSnapshot(); data.quota = snapshot(); data.quota.primary!.usedPercent = 95;
+  const fg = (name: "error" | "accent" | "success") => theme.style("x", { fg: theme.colors[name] }).split("x")[0]!;
+  // The foreground in effect where `text` starts.
+  const colorOf = (line: string, text: string) => line.slice(0, line.indexOf(text)).match(/\x1b\[38;[\d;]+m/g)!.at(-1);
+  const line = renderFooter(300, data, config, theme)[0]!;
+  assert.equal(colorOf(line, "95%"), fg("error"));
+  assert.equal(colorOf(line, "21%"), fg("accent"));
+  config.segments.find((item) => item.id === "quota")!.color = "success";
+  const fixed = renderFooter(300, data, config, theme)[0]!;
+  assert.equal(colorOf(fixed, "95%"), fg("success")); assert.equal(colorOf(fixed, "21%"), fg("success"));
 });

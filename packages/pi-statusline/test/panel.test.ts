@@ -105,16 +105,20 @@ test("runtime drafts support numeric validation and save without mutating active
   const config = presetConfig(), original = structuredClone(config); const saves: StatuslineConfig[] = [];
   const panel = new StatuslinePanel({ config, theme: testTheme, snapshot: () => ({ data: sampleSnapshot(), example: false }), requestRender() {}, height: () => 30, save: async (next) => { saves.push(next); }, done() {} });
   select(panel, "Runtime options"); panel.handleInput(enter);
-  select(panel, "Tool activity:"); panel.handleInput(" ");
+  select(panel, "Tool activity row:"); panel.handleInput(" ");
   select(panel, "No content threshold"); panel.handleInput(enter);
   panel.handleInput("\x01"); panel.handleInput("\x0b"); panel.handleInput("0"); panel.handleInput(enter);
   assert.match(panel.render(140).map(stripTerminalSequences).join("\n"), /Invalid runtime.noContentSeconds/);
-  panel.handleInput("\x01"); panel.handleInput("\x0b"); panel.handleInput("20"); panel.handleInput(enter); panel.handleInput(escape);
+  panel.handleInput("\x01"); panel.handleInput("\x0b"); panel.handleInput("20"); panel.handleInput(enter);
+  select(panel, "Completed tool kinds shown"); panel.handleInput(enter);
+  panel.handleInput("\x01"); panel.handleInput("\x0b"); panel.handleInput("9"); panel.handleInput(enter);
+  assert.match(panel.render(140).map(stripTerminalSequences).join("\n"), /Invalid runtime.toolsMaxVisible \(1–8\)/);
+  panel.handleInput("\x01"); panel.handleInput("\x0b"); panel.handleInput("2"); panel.handleInput(enter); panel.handleInput(escape);
   assert.doesNotMatch(panel.render(140).map(stripTerminalSequences).join("\n"), /Current \/ last run details/);
   assert.equal(saves.length, 0);
   select(panel, "Save and apply"); panel.handleInput(enter); await delay(0);
   assert.deepEqual(config, original); assert.equal(saves[0]?.runtime.tools, false);
-  assert.equal(saves[0]?.runtime.noContentSeconds, 20);
+  assert.equal(saves[0]?.runtime.noContentSeconds, 20); assert.equal(saves[0]?.runtime.toolsMaxVisible, 2);
   assert.ok(saves[0] && !("providerMetrics" in saves[0]) && !("integrations" in saves[0]));
 });
 

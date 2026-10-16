@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AssistantMessage, AssistantMessageEvent } from "@earendil-works/pi-ai";
 import type { AgentActivityOutcome } from "@earendil-works/pi-coding-agent";
 import { cleanText } from "./text.ts";
+import { toolTarget } from "./tools.ts";
 import { emptyUsage, readUsage } from "./usage.ts";
 import type { UsageTotals } from "./types.ts";
 
@@ -12,7 +13,10 @@ export interface RuntimeSnapshot {
   elapsedMs: number;
   turns: number;
   toolCalls: number;
-  tools: { name: string; elapsedMs: number }[];
+  /** Running top-level tools in start order; nested calls are represented by their parent. */
+  tools: { name: string; target?: string; elapsedMs: number }[];
+  /** Finished calls this run, by tool name in first-seen order. */
+  completed: { name: string; ok: number; failed: number }[];
   awaitingInput: boolean;
   noContentMs: number | null;
   usage: UsageTotals | null;
@@ -30,7 +34,8 @@ export class RuntimeState {
   private outcome: AgentActivityOutcome = "completed";
   private aborted = false;
   private turns = 0;
-  private tools = new Map<string, { name: string; start: number }>();
+  private tools = new Map<string, { name: string; target?: string; nested: boolean; start: number }>();
+  private completed = new Map<string, { ok: number; failed: number }>();
   private seenTools = new Set<string>();
   private prompts = 0;
   private modelActive = false;
@@ -45,7 +50,7 @@ export class RuntimeState {
   get id(): string | null { return this.runId; }
   reset(): void {
     this.runId = null; this.state = "Idle"; this.startMs = 0; this.endMs = 0;
-    this.outcome = "completed"; this.aborted = false; this.turns = 0; this.tools.clear(); this.seenTools.clear();
+    this.outcome = "completed"; this.aborted = false; this.turns = 0; this.tools.clear(); this.completed.clear(); this.seenTools.clear();
     this.prompts = 0; this.modelActive = false; this.compacting = false;
     this.messages.clear(); this.messageAliases.clear(); this.activeMessage = undefined; this.sequence = 0;
   }
@@ -102,11 +107,22 @@ export class RuntimeState {
       if (!this.aborted) this.outcome = message.stopReason === "aborted" ? "aborted" : message.stopReason === "error" ? "error" : "completed";
     }
   }
-  toolStart(id: string, name: string): void {
+  toolStart(id: string, name: string, args?: unknown, parentId?: string): void {
     if (!this.running || this.seenTools.has(id)) return;
-    this.seenTools.add(id); this.tools.set(id, { name: cleanText(name).slice(0, 40) || "unknown", start: this.clock() });
+    const target = toolTarget(name, args);
+    this.seenTools.add(id);
+    this.tools.set(id, { name: cleanText(name).slice(0, 40) || "unknown", ...(target ? { target } : {}), nested: !!parentId, start: this.clock() });
   }
-  toolEnd(id: string): void { this.tools.delete(id); }
+  toolEnd(id: string, isError = false): void {
+    const tool = this.tools.get(id);
+    if (!tool) return;
+    this.tools.delete(id);
+    // Calls interrupted by a user cancellation are not tool failures; the run status says so.
+    if (isError && this.aborted) return;
+    const count = this.completed.get(tool.name) ?? { ok: 0, failed: 0 };
+    if (isError) count.failed++; else count.ok++;
+    this.completed.set(tool.name, count);
+  }
   uiStart(): void { this.prompts++; }
   uiEnd(): void { this.prompts = Math.max(0, this.prompts - 1); this.lastContent = this.clock(); }
   compaction(active: boolean): void { this.compacting = active; this.lastContent = this.clock(); }
@@ -120,7 +136,9 @@ export class RuntimeState {
     return {
       runId: hidden ? null : this.runId, status: hidden ? "Idle" : this.state, elapsedMs,
       turns: hidden ? 0 : this.turns, toolCalls: hidden ? 0 : this.seenTools.size,
-      tools: [...this.tools.values()].map((tool) => ({ name: tool.name, elapsedMs: Math.max(0, now - tool.start) })),
+      tools: [...this.tools.values()].filter((tool) => !tool.nested)
+        .map((tool) => ({ name: tool.name, ...(tool.target ? { target: tool.target } : {}), elapsedMs: Math.max(0, now - tool.start) })),
+      completed: hidden ? [] : [...this.completed].map(([name, count]) => ({ name, ...count })),
       awaitingInput: this.prompts > 0,
       noContentMs: this.running && this.modelActive && !this.tools.size && !this.prompts && !this.compacting ? Math.max(0, now - this.lastContent) : null,
       usage, avg: usage && elapsedMs > 0 ? usage.output / (elapsedMs / 1000) : null,

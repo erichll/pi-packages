@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.6.0 - 2026-10-16
+
+### Added
+
+- Add a tool activity row between the main line and the runtime row, shown
+  once the current run has used tools: `◐ bash npm test 12s · ✓ read ×5 ·
+  ✗ bash ×1 · +2`. Up to two running tools show their target (shell command
+  without `cd`/env prefixes, file name, search pattern or directory) and timer;
+  same-name calls merge as `×N`. Completed (`✓`) and failed (`✗`) calls are
+  counted per run and kept in the last-run summary.
+- Count nested calls (`parentToolCallId`) but represent them by their parent
+  while running. Calls ended by a user cancellation are not counted as failures.
+- Add a `session` segment on the runtime row, enabled by default: the time
+  since the session was created (`󰥔 2h 6m`; `◷` in Unicode and `ses:` in ASCII
+  icon modes), to the minute and before session tokens. It is read once per
+  session from Pi's session header, survives reloads and resuming, restarts with
+  `/new` or a fork, and is hidden when the header time is missing or invalid.
+  Existing segment lists gain it before `tokens` unless they list it explicitly.
+- Add `runtime.toolsMaxVisible` (1–8, default 4) for completed tool kinds shown
+  before `+N`, editable in the panel. Narrow rows fold kinds, then drop targets,
+  then timers.
+- Label quota windows from the reported length (`x-codex-*-window-minutes`
+  headers and WebSocket `window_minutes`): `5h`, `1d`, `7d` or `30d` within 5%,
+  otherwise exact (`1h30m`). Without a reported length a window stays unlabeled
+  rather than guessed; a malformed length drops only the label.
+- Add tool target, tool counting, window label, per-window color and session age
+  tests, and extend the offline PTY smoke with the tool row, completed counts
+  and session age.
+
+### Changed
+
+- Render quota as `5h ███░░░░░░░ 27% 4h8m · 7d ████░░░░░░ 44% 6d1h`: dim labels
+  and `·` separators, muted countdowns without brackets, and each window colored
+  by its own usage (accent, warning above 70%, error above 90%). An explicit
+  segment `color` still applies to both. Unlabeled windows keep their countdown
+  instead of their bar on narrow terminals.
+- Restyle the runtime row and move it to the bottom of the footer. A run status
+  symbol (`●` running, `✓` done, `✗` failed, `⊘` cancelled) precedes the
+  duration in place of `Elapsed`; labels are dim and lowercase
+  (`avg 39 tok/s · cache 100% · 11 turns · 1 compaction`); cache is green from
+  80% and warning below 50%. ASCII mode uses `*`, `ok`, `x` and `-`.
+- Keep average speed and cache visible while tools run or input is awaited.
+  `awaiting input`, `no content` and `compacting…` follow the duration in the
+  warning color; `no content` was previously muted.
+- Move the session token total (`tokens`) from the main line to the runtime row,
+  before other extensions' statuses. It keeps its icon, color and enablement.
+- `runtime.tools` now controls the tool row. Existing configurations with
+  `"tools": true` show it after upgrading; set it to `false` to hide it.
+
+### Removed
+
+- Remove `Tool X 3s` / `Tools N active` from the runtime row; the tool row
+  replaces them.
+
 ## 0.5.0 - 2026-10-14
 
 ### Added

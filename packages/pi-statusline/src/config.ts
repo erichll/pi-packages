@@ -10,12 +10,12 @@ export function validColor(value: unknown): value is ColorValue {
   return typeof value === "string" && (/^#[\da-f]{6}$/i.test(value) || (COLORS as readonly string[]).includes(value));
 }
 export function presetConfig(): StatuslineConfig {
-  const enabled = new Set<string>(["model", "thinking", "directory", "git", "context", "quota", "tokens", "statuses"]);
+  const enabled = new Set<string>(["model", "thinking", "directory", "git", "context", "quota", "session", "tokens", "statuses"]);
   return {
     version: 1, enabled: true, preset: "powerline", icons: "nerd",
     separator: "powerline", pathMode: "basename", modelDisplay: "name", contextDisplay: "bar", spacing: 1,
     segments: SEGMENT_IDS.map((id) => ({ id, enabled: enabled.has(id) })),
-    runtime: { enabled: true, status: true, tools: true, noContent: true, noContentSeconds: 10, avg: true, cache: true, counts: true, retainSummary: true },
+    runtime: { enabled: true, status: true, tools: true, noContent: true, noContentSeconds: 10, avg: true, cache: true, counts: true, retainSummary: true, toolsMaxVisible: 4 },
   };
 }
 function record(value: unknown): value is Record<string, unknown> {
@@ -54,7 +54,8 @@ export function parseConfig(raw: unknown): StatuslineConfig {
       if (key === "noContentSeconds") {
         if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 3600) throw new Error("Invalid runtime.noContentSeconds (1–3600)");
         config.runtime.noContentSeconds = value;
-      } else (config[group] as unknown as Record<string, unknown>)[key] = boolean(value, `${group}.${key}`);
+      } else if (key === "toolsMaxVisible") config.runtime.toolsMaxVisible = integer(value, 1, 8, "runtime.toolsMaxVisible");
+      else (config[group] as unknown as Record<string, unknown>)[key] = boolean(value, `${group}.${key}`);
     }
   }
   if (raw.segments !== undefined) {
@@ -78,12 +79,15 @@ export function parseConfig(raw: unknown): StatuslineConfig {
       }
       return result;
     });
-    // Upgrade pre-quota lists once; an explicit quota entry (including disabled) wins.
-    if (!seen.has("quota")) {
-      const contextIndex = config.segments.findIndex((segment) => segment.id === "context");
-      config.segments.splice(contextIndex < 0 ? config.segments.length : contextIndex + 1, 0, { id: "quota", enabled: true });
-      seen.add("quota");
-    }
+    // Upgrade older lists once with segments added later; an explicit entry (including disabled) wins.
+    const insert = (id: "quota" | "session", index: number) => {
+      if (seen.has(id)) return;
+      config.segments.splice(index < 0 ? config.segments.length : index, 0, { id, enabled: true });
+      seen.add(id);
+    };
+    const contextIndex = config.segments.findIndex((segment) => segment.id === "context");
+    insert("quota", contextIndex < 0 ? -1 : contextIndex + 1);
+    insert("session", config.segments.findIndex((segment) => segment.id === "tokens"));
     // All other omissions remain editable but disabled.
     for (const id of SEGMENT_IDS) if (!seen.has(id)) config.segments.push({ id, enabled: false });
   }

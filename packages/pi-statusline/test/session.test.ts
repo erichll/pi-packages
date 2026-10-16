@@ -6,12 +6,13 @@ import type { Component, TUI } from "@earendil-works/pi-tui";
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import { presetConfig } from "../src/config.ts";
 import { emptyGit } from "../src/git.ts";
-import { FooterSession } from "../src/session.ts";
+import { FooterSession, sessionStart } from "../src/session.ts";
 import { assistant, messageEntry, testTheme, usage } from "./helpers.ts";
 
 function fixture() {
   let entries: SessionEntry[] = [messageEntry("1")];
-  let leaf = "1", reads = 0, contextReads = 0, renders = 0, subscriptions = 0;
+  let leaf = "1", reads = 0, contextReads = 0, renders = 0, subscriptions = 0, sessionId = "test-session";
+  let header: { type: "session"; id: string; cwd: string; timestamp: string } | null = { type: "session", id: "test-session", cwd: "/example", timestamp: new Date(Date.now() - 126 * 60000).toISOString() };
   let footer: (Component & { dispose?(): void }) | undefined;
   let context: ReturnType<ExtensionContext["getContextUsage"]> = { tokens: 1000, contextWindow: 10000, percent: 10 };
   let theme = testTheme() as Theme;
@@ -23,7 +24,7 @@ function fixture() {
   } satisfies ReadonlyFooterDataProvider;
   const ctx = {
     mode: "tui", hasUI: true, cwd: "/example", model: { id: "test", name: "Test model", provider: "example", reasoning: true, contextWindow: 10000 }, thinkingLevel: "high",
-    sessionManager: { getSessionId: () => "test-session", getLeafId: () => leaf, getEntries: () => { reads++; return [...entries]; } },
+    sessionManager: { getSessionId: () => sessionId, getLeafId: () => leaf, getEntries: () => { reads++; return [...entries]; }, getHeader: () => header },
     getContextUsage: () => { contextReads++; return context; },
     ui: {
       get theme() { return theme; },
@@ -38,6 +39,7 @@ function fixture() {
     get footer() { return footer; }, get reads() { return reads; }, get contextReads() { return contextReads; }, get renders() { return renders; }, get subscriptions() { return subscriptions; },
     append(entry: SessionEntry) { entries.push(entry); leaf = entry.id; },
     navigate(id: string) { leaf = id; },
+    header(value: typeof header, id = sessionId) { header = value; sessionId = id; },
     context(value: typeof context) { context = value; },
     theme(value: Theme) { theme = value; },
     branchChanged() { branchCallback?.(); },
@@ -94,7 +96,7 @@ test("compaction, tree navigation, model/thinking changes and live extension sta
     f.statuses.clear();
     assert.equal(f.footer!.render(120).length, 3);
     assert.equal(f.footer!.render(120)[0], "");
-    assert.equal(stripTerminalSequences(f.footer!.render(120)[2]!), "Compactions 1");
+    assert.equal(stripTerminalSequences(f.footer!.render(120)[2]!), "1 compaction · 󰥔 2h 6m · 󰊄 275");
     assert.doesNotMatch(stripTerminalSequences(f.footer!.render(120)[2]!), /Idle|^ ·/);
     const before = f.footer!.render(120)[1];
     const altered = testTheme("light") as Theme;
@@ -165,7 +167,7 @@ test("live quota survives styling changes but not footer disable", () => {
     assert.equal(session.snapshot().quota?.primary?.usedPercent, 40);
     session.apply({ ...presetConfig(), icons: "ascii" });
     assert.equal(session.snapshot().quota?.primary?.usedPercent, 40);
-    assert.match(f.footer!.render(300).map(stripTerminalSequences).join("\n"), /####------ 40%\[1h0m\]/);
+    assert.match(f.footer!.render(300).map(stripTerminalSequences).join("\n"), /####------ 40% 1h0m/);
     session.disable(); session.apply(presetConfig());
     assert.equal(session.snapshot().quota, undefined);
   } finally { session.dispose(); }
@@ -183,4 +185,27 @@ test("unchanged refresh does not retraverse compaction history", () => {
     assert.equal(session.snapshot().compaction?.count, 1);
     session.refresh(); assert.equal(f.reads, reads + 1);
   } finally { session.dispose(); }
+});
+
+test("session age comes from the session header, survives repaints and hides unknown starts", async () => {
+  const f = fixture(); const session = new FooterSession(f.ctx, presetConfig(), async () => emptyGit("none"));
+  session.install(); await delay(0);
+  try {
+    assert.equal(session.snapshot().sessionMinutes, 126);
+    assert.equal(f.footer!.render(200).map(stripTerminalSequences).at(-1)!, "󰥔 2h 6m · 󰊄 170");
+    f.header({ type: "session", id: "new", cwd: "/example", timestamp: new Date().toISOString() }, "new");
+    session.schedule(true); await delay(10);
+    assert.equal(session.snapshot().sessionMinutes, 0, "a new session restarts the clock");
+    assert.match(f.footer!.render(200).map(stripTerminalSequences).at(-1)!, /󰥔 <1m/);
+    f.header(null, "headerless"); session.schedule(true); await delay(10);
+    assert.equal(session.snapshot().sessionMinutes, null);
+    assert.doesNotMatch(f.footer!.render(200).map(stripTerminalSequences).join("\n"), /󰥔/);
+  } finally { session.dispose(); }
+});
+
+test("session start parsing rejects malformed and future timestamps", () => {
+  const now = Date.parse("2026-10-16T12:00:00Z");
+  assert.equal(sessionStart("2026-10-16T10:00:00Z", now), now - 7200000);
+  assert.equal(sessionStart("2026-10-16T12:00:30Z", now), now + 30000, "small clock skew is tolerated");
+  for (const invalid of [undefined, "", "yesterday", "2026-10-17T12:00:00Z"]) assert.equal(sessionStart(invalid, now), null);
 });

@@ -10,6 +10,12 @@ import { RuntimeState } from "./runtime.ts";
 import { CompactionState } from "./compaction.ts";
 import { QuotaState } from "./quota.ts";
 
+/** The header's creation time; hidden rather than guessed when missing, malformed or in the future. */
+export function sessionStart(timestamp: string | undefined, now = Date.now()): number | null {
+  const ms = timestamp ? Date.parse(timestamp) : NaN;
+  return Number.isFinite(ms) && ms <= now + 60000 ? ms : null;
+}
+
 export class FooterSession {
   readonly runtime = new RuntimeState();
   readonly compaction = new CompactionState();
@@ -29,6 +35,7 @@ export class FooterSession {
   private statsKey = "";
   private displayKey = "";
   private context: StatuslineSnapshot["context"] = { tokens: null, contextWindow: 0, percent: null };
+  private sessionStartMs: number | null = null;
   private readonly gitReader: GitReader | undefined;
   private signal: AbortSignal | undefined;
   private readonly onAbort = () => { this.runtime.observeAbort(); this.schedule(true); };
@@ -123,6 +130,7 @@ export class FooterSession {
       const entries = manager.getEntries();
       this.usage.update(entries);
       this.compaction.update(entries);
+      this.sessionStartMs = sessionStart(manager.getHeader()?.timestamp);
       const context = this.ctx.getContextUsage();
       this.context = context ?? { tokens: null, contextWindow: this.ctx.model?.contextWindow ?? 0, percent: null };
     }
@@ -142,6 +150,8 @@ export class FooterSession {
       thinking: this.ctx.thinkingLevel ?? "off", cwd: this.ctx.cwd, home: homedir(),
       context: this.context, usage: this.usage.snapshot(), quota: this.quota.snapshot(this.ctx.model), git: this.git,
       statuses: this.provider?.getExtensionStatuses() ?? new Map(),
+      // Minute resolution keeps an idle footer from repainting every second.
+      sessionMinutes: this.sessionStartMs === null ? null : Math.floor(Math.max(0, Date.now() - this.sessionStartMs) / 60000),
       runtime: this.runtime.snapshot(this.config.runtime.retainSummary), compaction: this.compaction.snapshot(),
     };
   }
