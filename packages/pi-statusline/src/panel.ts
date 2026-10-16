@@ -64,7 +64,7 @@ export class StatuslinePanel implements Component, Focusable {
       { value: "modelDisplay", label: `Model display: ${this.draft.modelDisplay}`, description: "name: display name · last: final model ID component" },
       { value: "contextDisplay", label: `Context display: ${this.draft.contextDisplay}`, description: "text: tokens/capacity(percent) · bar: progress and percent" },
       { value: "spacing", label: `Spacing above statusline: ${this.draft.spacing}`, description: "Blank lines between the input box and the statusline (0–3)" },
-      ...this.draft.segments.filter((segment) => segment.id !== "thinking").map((segment) => ({ value: `segment:${segment.id}`, label: `[${segment.enabled ? "x" : " "}] ${segment.id}`, description: segment.id === "statuses" || segment.id === "session" || segment.id === "tokens" ? "Runtime row · Space toggles, Enter edits" : segment.id === "quota" ? "Subscription Usage · passive headers/events; hidden without data" : "Space toggles · Alt+Up/Down reorders · Enter edits" })),
+      ...this.draft.segments.filter((segment) => segment.id !== "thinking").map((segment) => ({ value: `segment:${segment.id}`, label: `[${segment.enabled ? "x" : " "}] ${segment.id}`, description: segment.id === "statuses" || segment.id === "session" || segment.id === "toolTotal" || segment.id === "tokens" ? "Runtime row · Space toggles, Enter edits" : segment.id === "quota" ? "Subscription Usage · passive headers/events; hidden without data" : "Space toggles · Alt+Up/Down reorders · Enter edits" })),
       { value: "runtime", label: "Runtime options" },
       { value: "save", label: "Save and apply globally" },
       { value: "reset", label: "Restore defaults in preview" },

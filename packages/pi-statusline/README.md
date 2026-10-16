@@ -6,12 +6,12 @@ activity and live configuration preview. Leaves the editor intact.
 ```text
   Example model(high)  󰆼 █░░░░░░░░░ 11.9%  󰉋 pi-packages   main ● *2 ↑2
 ◐ bash npm test 12s · ✓ read ×5 · ✓ edit ×2
-● 5m 42s · avg 45 tok/s · cache 86% · turns 3 · compactions 1 · 󰥔 2h 6m · 󰊄 49.4k
+● 5m 42s · avg 45 tok/s · cache 86% · turns 3 · compactions 1 · 󰥔 2h 6m · 󱁤 128 · 󰊄 49.4k
 ```
 
 Rows, top to bottom: the main segments, tool activity for the current run
-(only once it has used tools), then run status, run metrics, session age and
-tokens, and other extensions' statuses.
+(only once it has used tools), then run status, run metrics, session age,
+tool calls and tokens, and other extensions' statuses.
 
 ## Install
 
@@ -82,6 +82,7 @@ Available segments:
 | `directory` | Current directory | On |
 | `git` | Branch, dirty/conflict state, staged/unstaged/untracked counts, ahead/behind | On |
 | `session` | Time since the session was created, on the bottom row | On |
+| `toolTotal` | Tool calls recorded in the whole session (`󱁤 128`), on the bottom row; hidden at zero | On |
 | `tokens` | Cumulative session tokens, on the bottom row | On |
 | `cost` | Pi-recorded cumulative USD cost | Off |
 | `input`, `output`, `cacheRead`, `cacheWrite` | Individual session token counters | Off |
@@ -89,8 +90,8 @@ Available segments:
 
 `segments` is an ordered array of
 `{ id, enabled, icon?, color?, iconColor?, background? }`. Omitted segments are
-disabled, **except `quota` and `session`**: old configurations automatically
-gain `quota` after `context` and `session` before `tokens` (or at the end when
+disabled, **except `quota`, `session` and `toolTotal`**: old configurations automatically
+gain `quota` after `context`, and `session` and `toolTotal` before `tokens` (or at the end when
 the anchor is absent). To keep one off, include it with `"enabled": false`.
 
 Colors accept `#RRGGBB` or supported Pi theme tokens such as `accent`, `muted`,

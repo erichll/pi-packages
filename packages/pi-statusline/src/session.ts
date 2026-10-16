@@ -36,6 +36,7 @@ export class FooterSession {
   private displayKey = "";
   private context: StatuslineSnapshot["context"] = { tokens: null, contextWindow: 0, percent: null };
   private sessionStartMs: number | null = null;
+  private toolCalls = 0;
   private readonly gitReader: GitReader | undefined;
   private signal: AbortSignal | undefined;
   private readonly onAbort = () => { this.runtime.observeAbort(); this.schedule(true); };
@@ -130,6 +131,7 @@ export class FooterSession {
       const entries = manager.getEntries();
       this.usage.update(entries);
       this.compaction.update(entries);
+      this.toolCalls = entries.reduce((total, entry) => total + (entry.type === "message" && entry.message.role === "toolResult" ? 1 : 0), 0);
       this.sessionStartMs = sessionStart(manager.getHeader()?.timestamp);
       const context = this.ctx.getContextUsage();
       this.context = context ?? { tokens: null, contextWindow: this.ctx.model?.contextWindow ?? 0, percent: null };
@@ -152,6 +154,7 @@ export class FooterSession {
       statuses: this.provider?.getExtensionStatuses() ?? new Map(),
       // Minute resolution keeps an idle footer from repainting every second.
       sessionMinutes: this.sessionStartMs === null ? null : Math.floor(Math.max(0, Date.now() - this.sessionStartMs) / 60000),
+      toolCalls: this.toolCalls,
       runtime: this.runtime.snapshot(this.config.runtime.retainSummary), compaction: this.compaction.snapshot(),
     };
   }

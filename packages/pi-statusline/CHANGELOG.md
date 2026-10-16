@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.0 - 2026-10-17
+
+### Added
+
+- Add a `toolTotal` segment on the runtime row, enabled by default: the number
+  of tool calls recorded in the whole session (`󱁤 128`; `⚒` in Unicode and
+  `tool:` in ASCII icon modes), between session age and tokens. Unlike the tool
+  row, which counts the current run, it is read from session entries, so it
+  survives reloads and resuming and covers every run. It is hidden at zero and
+  is the first of these three segments to fold on narrow rows. Existing segment
+  lists gain it before `tokens` unless they list it explicitly.
+
 ## 0.6.1 - 2026-10-16
 
 ### Changed

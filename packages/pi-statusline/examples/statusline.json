@@ -50,6 +50,10 @@
       "enabled": true
     },
     {
+      "id": "toolTotal",
+      "enabled": true
+    },
+    {
       "id": "tokens",
       "enabled": true
     },

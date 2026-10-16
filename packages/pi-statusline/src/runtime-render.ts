@@ -49,6 +49,8 @@ export interface RuntimeExtras {
   statuses?: string;
   /** Session age, already styled. */
   session?: string;
+  /** Completed tool calls in the session, already styled. */
+  toolTotal?: string;
   /** Session token total, already styled. */
   tokens?: string;
   /** A `tps` extension status of the form `Elapsed 5m 42s`. */
@@ -56,7 +58,7 @@ export interface RuntimeExtras {
 }
 
 /**
- * The bottom row: run status and duration, run metrics, then session age, tokens and extension statuses.
+ * The bottom row: run status and duration, run metrics, then session age, tool calls, tokens and extension statuses.
  * It stays muted so it does not compete with the editor; only problems (failure, waits, low cache) are colored.
  */
 export function renderRuntime(width: number, data: StatuslineSnapshot, config: StatuslineConfig, theme: RenderTheme, extras: RuntimeExtras = {}): string | undefined {
@@ -88,9 +90,10 @@ export function renderRuntime(width: number, data: StatuslineSnapshot, config: S
   }
   if (enabled && config.runtime.counts && compact && compact.count > 0) count("compactions", compact.count);
   if (extras.session) parts.push({ id: "session", spans: [], styled: extras.session });
+  if (extras.toolTotal) parts.push({ id: "toolTotal", spans: [], styled: extras.toolTotal });
   if (extras.tokens) parts.push({ id: "tokens", spans: [], styled: extras.tokens });
   if (extras.statuses && !compacting) parts.push({ id: "statuses", spans: [], styled: extras.statuses });
-  return fit(parts, ["statuses", "cache", "avg", "compactions", "session", "tokens", "turns", "activity", "failure"], width, ascii ? " | " : " · ", theme, ascii ? "..." : "…");
+  return fit(parts, ["statuses", "cache", "avg", "compactions", "toolTotal", "session", "tokens", "turns", "activity", "failure"], width, ascii ? " | " : " · ", theme, ascii ? "..." : "…");
 }
 
 /** `◐ bash npm test 12s · ✓ read ×5 · ✗ bash ×1 · +2`: present while the run has used tools. */

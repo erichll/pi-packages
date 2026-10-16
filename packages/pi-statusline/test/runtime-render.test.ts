@@ -15,11 +15,11 @@ const colorOf = (line: string, text: string) => line.slice(0, line.indexOf(text)
 
 test("runtime row leads with run status and duration, then metrics, tokens and statuses", () => {
   const data = sampleSnapshot(); const statuses = new Map<string, string>(); data.statuses = statuses; data.runtime!.elapsedMs = 342000;
-  assert.equal(runtimeRow(data), "● 5m 42s · avg 45 tok/s · cache 86% · turns 3 · compactions 1 · 󰥔 2h 6m · 󰊄 49.4k");
+  assert.equal(runtimeRow(data), "● 5m 42s · avg 45 tok/s · cache 86% · turns 3 · compactions 1 · 󰥔 2h 6m · 󱁤 128 · 󰊄 49.4k");
   statuses.set("tps", "\x1b[2mElapsed 5m 41s\x1b[0m"); statuses.set("review", "review ready");
   assert.match(runtimeRow(data), /^● 5m 41s ·/, "an upstream Elapsed status supplies the duration");
   assert.doesNotMatch(runtimeRow(data), /Elapsed/);
-  assert.match(runtimeRow(data), /󰥔 2h 6m · 󰊄 49\.4k · .*review ready/);
+  assert.match(runtimeRow(data), /󰥔 2h 6m · 󱁤 128 · 󰊄 49\.4k · .*review ready/);
   for (const [status, symbol] of [["Done", "✓"], ["Failed", "✗"], ["Cancelled", "⊘"]] as const) {
     data.runtime!.status = status; assert.match(runtimeRow(data), new RegExp(`^${symbol} 5m 41s ·`));
   }
@@ -46,10 +46,11 @@ test("idle footer omits the status symbol and leading separator", () => {
   const data = sampleSnapshot(); data.statuses = new Map();
   Object.assign(data.runtime!, { runId: null, status: "Idle", elapsedMs: 0, avg: null, cache: null, noContentMs: null, tools: [], completed: [] });
   const config = presetConfig();
-  assert.equal(runtimeRow(data, 240, config), "compactions 1 · 󰥔 2h 6m · 󰊄 49.4k");
+  assert.equal(runtimeRow(data, 240, config), "compactions 1 · 󰥔 2h 6m · 󱁤 128 · 󰊄 49.4k");
   config.runtime.counts = false;
-  assert.equal(runtimeRow(data, 240, config), "󰥔 2h 6m · 󰊄 49.4k");
+  assert.equal(runtimeRow(data, 240, config), "󰥔 2h 6m · 󱁤 128 · 󰊄 49.4k");
   config.segments.find((s) => s.id === "session")!.enabled = false;
+  config.segments.find((s) => s.id === "toolTotal")!.enabled = false;
   config.segments.find((s) => s.id === "tokens")!.enabled = false;
   assert.equal(renderFooter(240, data, config, testTheme()).length, 1);
 });
@@ -58,9 +59,9 @@ test("opaque statuses stay display-only, and runtime-off preserves the elapsed e
   const data = sampleSnapshot(); data.statuses = new Map([["other", "Elapsed counterfeit"], ["tps", "Elapsed 5m 42s"]]);
   const config = presetConfig(); config.runtime.enabled = false;
   assert.equal(rows(data, 240, config).length, 2, "runtime-off hides the tool row");
-  assert.match(runtimeRow(data, 240, config), /^elapsed 5m 42s · 󰥔 2h 6m · 󰊄 49\.4k ·/);
+  assert.match(runtimeRow(data, 240, config), /^elapsed 5m 42s · 󰥔 2h 6m · 󱁤 128 · 󰊄 49\.4k ·/);
   assert.match(runtimeRow(data, 240, config), /Elapsed counterfeit/);
-  for (const id of ["statuses", "session", "tokens"]) config.segments.find((s) => s.id === id)!.enabled = false;
+  for (const id of ["statuses", "session", "toolTotal", "tokens"]) config.segments.find((s) => s.id === id)!.enabled = false;
   assert.equal(renderFooter(240, data, config, testTheme()).length, 1);
 });
 
@@ -75,7 +76,7 @@ test("input, no-content and compaction activity sit after the duration; metrics 
   assert.equal(colorOf(line, "no content"), fg("warning"));
   data.runtime!.noContentMs = 9000; assert.doesNotMatch(runtimeRow(data), /no content/);
   data.compaction!.active = true; data.compaction!.elapsedMs = 4000;
-  assert.equal(runtimeRow(data), "● 28s · compacting… 4s · compactions 1 · 󰥔 2h 6m · 󰊄 49.4k");
+  assert.equal(runtimeRow(data), "● 28s · compacting… 4s · compactions 1 · 󰥔 2h 6m · 󱁤 128 · 󰊄 49.4k");
   data.compaction!.active = false; data.compaction!.showFailure = true;
   data.compaction!.last = { status: "failed" } as never; data.runtime!.status = "Done";
   assert.match(runtimeRow(data), /^✓ 28s · compaction failed ·/);
@@ -92,7 +93,7 @@ test("zero compactions are omitted and counts read label first", () => {
 
 test("tool row shows running tools with targets, then completed and failed counts", () => {
   const data = sampleSnapshot(); data.statuses = new Map();
-  assert.deepEqual(rows(data).slice(1), ["◐ bash npm test 12s · ✓ read ×5 · ✓ edit ×2", "● 28s · avg 45 tok/s · cache 86% · turns 3 · compactions 1 · 󰥔 2h 6m · 󰊄 49.4k"]);
+  assert.deepEqual(rows(data).slice(1), ["◐ bash npm test 12s · ✓ read ×5 · ✓ edit ×2", "● 28s · avg 45 tok/s · cache 86% · turns 3 · compactions 1 · 󰥔 2h 6m · 󱁤 128 · 󰊄 49.4k"]);
   data.runtime!.tools = [{ name: "bash", target: "npm test", elapsedMs: 12000 }, { name: "bash", target: "ls", elapsedMs: 18000 }, { name: "read", target: "a.ts", elapsedMs: 0 }];
   data.runtime!.completed = [{ name: "read", ok: 3, failed: 0 }, { name: "bash", ok: 6, failed: 1 }, { name: "edit", ok: 3, failed: 0 }];
   assert.equal(toolsRow(data), "◐ bash ×2 18s · ◐ read a.ts · ✓ bash ×6 · ✓ read ×3 · ✓ edit ×3 · ✗ bash ×1");
@@ -126,7 +127,7 @@ test("ascii tool and runtime rows avoid Unicode symbols", () => {
   const config = presetConfig(); config.icons = "ascii";
   const [, tools, runtime] = rows(data, 240, config);
   assert.equal(tools, "> bash npm test 12s | ok read x5 | ok edit x2 | x bash x1");
-  assert.equal(runtime, "* 28s | avg 45 tok/s | cache 86% | turns 3 | compactions 1 | ses: 2h 6m | tok: 49.4k");
+  assert.equal(runtime, "* 28s | avg 45 tok/s | cache 86% | turns 3 | compactions 1 | ses: 2h 6m | tool: 128 | tok: 49.4k");
 });
 
 test("narrow tool rows fold, then drop targets and timers before truncating", () => {

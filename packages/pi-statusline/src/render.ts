@@ -13,9 +13,9 @@ export type RenderTheme = Pick<Theme, "style" | "colors" | "appearance">;
 // Keep rainbow hues independent of semantic theme colors, which can repeat.
 const THINKING_RAINBOW = ["#c084fc", "#f472b6", "#fb923c", "#facc15", "#4ade80", "#22d3ee", "#60a5fa"].map((value) => parseColor(value));
 const ICONS: Record<StatuslineConfig["icons"], Partial<Record<SegmentId, string>>> = {
-  unicode: { model: "", directory: "▸", git: "⑂", context: "◉", cost: "$", input: "↑", output: "↓", session: "◷", tokens: "Σ", cacheRead: "R", cacheWrite: "W" },
-  nerd: { model: "", directory: "󰉋", git: "", context: "󰆼", quota: "󰦖", cost: "$", input: "↑", output: "↓", session: "󰥔", tokens: "󰊄", cacheRead: "R", cacheWrite: "W" },
-  ascii: { model: "", directory: "", git: "git:", context: "ctx:", cost: "$", input: "in:", output: "out:", session: "ses:", tokens: "tok:", cacheRead: "R:", cacheWrite: "W:" },
+  unicode: { model: "", directory: "▸", git: "⑂", context: "◉", cost: "$", input: "↑", output: "↓", session: "◷", toolTotal: "⚒", tokens: "Σ", cacheRead: "R", cacheWrite: "W" },
+  nerd: { model: "", directory: "󰉋", git: "", context: "󰆼", quota: "󰦖", cost: "$", input: "↑", output: "↓", session: "󰥔", toolTotal: "󱁤", tokens: "󰊄", cacheRead: "R", cacheWrite: "W" },
+  ascii: { model: "", directory: "", git: "git:", context: "ctx:", cost: "$", input: "in:", output: "out:", session: "ses:", toolTotal: "tool:", tokens: "tok:", cacheRead: "R:", cacheWrite: "W:" },
 };
 const DROP_ORDER: SegmentId[] = ["cost", "cacheWrite", "cacheRead", "output", "input", "thinking", "git", "directory"];
 export function formatTokens(value: number): string {
@@ -79,6 +79,7 @@ function segmentText(id: SegmentId, data: StatuslineSnapshot, config: Statusline
     }
     case "quota": return renderQuota(data.quota, config.icons === "ascii");
     case "session": return data.sessionMinutes === null ? undefined : formatSessionAge(data.sessionMinutes);
+    case "toolTotal": return data.toolCalls > 0 ? String(data.toolCalls) : undefined;
     case "cost": return usage.cost.toFixed(3);
     case "input": return formatTokens(usage.input);
     case "output": return formatTokens(usage.output);
@@ -195,7 +196,7 @@ export function renderFooter(width: number, data: StatuslineSnapshot, config: St
   if (width === 0) return [];
   const parts: Part[] = [];
   let secondary: Part | undefined;
-  const sessionRow: Partial<Record<"session" | "tokens", string>> = {};
+  const sessionRow: Partial<Record<"session" | "toolTotal" | "tokens", string>> = {};
   // CLIProxyAPI's published `tps` status is display text only.
   const tps = cleanText(data.statuses.get("tps") ?? "");
   const elapsedStatus = config.segments.some((s) => s.id === "statuses" && s.enabled) && /^Elapsed \d+[dhms](?: \d+[hms])*$/.test(tps) ? tps : undefined;
@@ -203,7 +204,7 @@ export function renderFooter(width: number, data: StatuslineSnapshot, config: St
   const thinking = config.segments.find((segment) => segment.id === "thinking");
   for (const segment of config.segments) {
     if (!segment.enabled) continue;
-    if (segment.id === "session" || segment.id === "tokens") { sessionRow[segment.id] = sessionText(segment, data, config, theme); continue; }
+    if (segment.id === "session" || segment.id === "toolTotal" || segment.id === "tokens") { sessionRow[segment.id] = sessionText(segment, data, config, theme); continue; }
     const raw = segmentText(segment.id, segment.id === "statuses" ? { ...data, statuses } : data, config);
     if (raw === undefined) continue;
     let text = cleanText(raw);
@@ -278,7 +279,7 @@ export function sampleSnapshot(): StatuslineSnapshot {
     context: { tokens: 23800, contextWindow: 200000, percent: 11.9 },
     usage: { ...emptyUsage(), input: 32000, output: 5400, cacheRead: 12000, cost: 0.12 },
     git: { ...emptyGit("repository"), branch: "main", unstaged: 2, ahead: 2 },
-    statuses: new Map([["example", "Example extension status"]]), sessionMinutes: 126,
+    statuses: new Map([["example", "Example extension status"]]), sessionMinutes: 126, toolCalls: 128,
     runtime: {
       runId: "example", status: "Running", elapsedMs: 28000, turns: 3, toolCalls: 8, awaitingInput: false, noContentMs: null, usage: { ...emptyUsage(), output: 1260 }, avg: 45, cache: 0.86,
       tools: [{ name: "bash", target: "npm test", elapsedMs: 12000 }],

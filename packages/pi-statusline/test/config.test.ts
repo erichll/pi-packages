@@ -30,7 +30,7 @@ test("powerline defaults match the shipped example configuration", async () => {
   assert.equal(example.preset, "powerline"); assert.equal(example.icons, "nerd");
   assert.equal(example.separator, "powerline"); assert.equal(example.modelDisplay, "name");
   assert.equal(example.pathMode, "basename"); assert.equal(example.contextDisplay, "bar");
-  assert.deepEqual(example.segments.filter(s => s.enabled).map(s => s.id), ["model", "thinking", "context", "quota", "directory", "git", "session", "tokens", "statuses"]);
+  assert.deepEqual(example.segments.filter(s => s.enabled).map(s => s.id), ["model", "thinking", "context", "quota", "directory", "git", "session", "toolTotal", "tokens", "statuses"]);
 });
 
 test("removed presets are rejected without migration", () => {
@@ -118,7 +118,8 @@ test("obsolete configuration keys are ignored and not saved", async () => {
 test("session is enabled by default and added before tokens to older segment lists", () => {
   assert.equal(presetConfig().segments.find((segment) => segment.id === "session")?.enabled, true);
   const upgraded = parseConfig({ segments: [{ id: "model" }, { id: "tokens" }, { id: "statuses" }] });
-  assert.deepEqual(upgraded.segments.slice(0, 4).map((segment) => segment.id), ["model", "session", "tokens", "statuses"]);
+  assert.deepEqual(upgraded.segments.slice(0, 5).map((segment) => segment.id), ["model", "session", "toolTotal", "tokens", "statuses"]);
+  assert.equal(upgraded.segments.find((segment) => segment.id === "toolTotal")?.enabled, true);
   assert.equal(upgraded.segments.find((segment) => segment.id === "session")?.enabled, true);
   assert.deepEqual(parseConfig(upgraded), upgraded, "migration is idempotent");
   assert.equal(parseConfig({ segments: [{ id: "session", enabled: false }] }).segments[0]?.enabled, false);

@@ -1,6 +1,6 @@
 import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 
-export const SEGMENT_IDS = ["model", "thinking", "context", "quota", "directory", "git", "cost", "input", "output", "session", "tokens", "cacheRead", "cacheWrite", "statuses"] as const;
+export const SEGMENT_IDS = ["model", "thinking", "context", "quota", "directory", "git", "cost", "input", "output", "session", "toolTotal", "tokens", "cacheRead", "cacheWrite", "statuses"] as const;
 export type SegmentId = typeof SEGMENT_IDS[number];
 export type ColorValue = ThemeColor | `#${string}`;
 export type Preset = "powerline";
@@ -72,6 +72,8 @@ export interface StatuslineSnapshot {
   statuses: ReadonlyMap<string, string>;
   /** Whole minutes since the session file was created; null when unknown. */
   sessionMinutes: number | null;
+  /** Completed tool calls recorded in the session file, across all runs. */
+  toolCalls: number;
   runtime?: import("./runtime.ts").RuntimeSnapshot;
   compaction?: import("./compaction.ts").CompactionSnapshot;
 }

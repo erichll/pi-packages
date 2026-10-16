@@ -10,7 +10,7 @@ export function validColor(value: unknown): value is ColorValue {
   return typeof value === "string" && (/^#[\da-f]{6}$/i.test(value) || (COLORS as readonly string[]).includes(value));
 }
 export function presetConfig(): StatuslineConfig {
-  const enabled = new Set<string>(["model", "thinking", "directory", "git", "context", "quota", "session", "tokens", "statuses"]);
+  const enabled = new Set<string>(["model", "thinking", "directory", "git", "context", "quota", "session", "toolTotal", "tokens", "statuses"]);
   return {
     version: 1, enabled: true, preset: "powerline", icons: "nerd",
     separator: "powerline", pathMode: "basename", modelDisplay: "name", contextDisplay: "bar", spacing: 1,
@@ -80,7 +80,7 @@ export function parseConfig(raw: unknown): StatuslineConfig {
       return result;
     });
     // Upgrade older lists once with segments added later; an explicit entry (including disabled) wins.
-    const insert = (id: "quota" | "session", index: number) => {
+    const insert = (id: "quota" | "session" | "toolTotal", index: number) => {
       if (seen.has(id)) return;
       config.segments.splice(index < 0 ? config.segments.length : index, 0, { id, enabled: true });
       seen.add(id);
@@ -88,6 +88,7 @@ export function parseConfig(raw: unknown): StatuslineConfig {
     const contextIndex = config.segments.findIndex((segment) => segment.id === "context");
     insert("quota", contextIndex < 0 ? -1 : contextIndex + 1);
     insert("session", config.segments.findIndex((segment) => segment.id === "tokens"));
+    insert("toolTotal", config.segments.findIndex((segment) => segment.id === "tokens"));
     // All other omissions remain editable but disabled.
     for (const id of SEGMENT_IDS) if (!seen.has(id)) config.segments.push({ id, enabled: false });
   }

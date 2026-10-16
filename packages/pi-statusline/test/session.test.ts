@@ -187,6 +187,19 @@ test("unchanged refresh does not retraverse compaction history", () => {
   } finally { session.dispose(); }
 });
 
+test("tool total counts recorded tool results across runs and survives repaints", () => {
+  const f = fixture(); const session = new FooterSession(f.ctx, presetConfig(), async () => emptyGit("none"));
+  try {
+    session.install();
+    assert.equal(session.snapshot().toolCalls, 0);
+    for (const id of ["t1", "t2", "t3"]) f.append({ ...messageEntry(id), message: { role: "toolResult", toolName: "read", toolCallId: id, content: [], isError: false, timestamp: 1 } } as SessionEntry);
+    session.runtime.reset(); session.refresh();
+    assert.equal(session.snapshot().toolCalls, 3, "not cleared with the per-run summary");
+    session.refresh(true);
+    assert.equal(session.snapshot().toolCalls, 3);
+  } finally { session.dispose(); }
+});
+
 test("session age comes from the session header, survives repaints and hides unknown starts", async () => {
   const f = fixture(); const session = new FooterSession(f.ctx, presetConfig(), async () => emptyGit("none"));
   session.install(); await delay(0);
