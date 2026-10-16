@@ -254,7 +254,7 @@ test("rainbow thinking keeps distinct hues even when a theme uses one semantic c
 test("session age formats to the minute and sits before tokens on the runtime row", () => {
   for (const [minutes, text] of [[0, "<1m"], [35, "35m"], [126, "2h 6m"], [60, "1h 0m"], [4440, "3d 2h"]] as const) assert.equal(formatSessionAge(minutes), text);
   const config = presetConfig(); const data = sampleSnapshot(); data.statuses = new Map();
-  assert.match(stripTerminalSequences(renderFooter(240, data, config, testTheme()).at(-1)!), /1 compaction · 󰥔 2h 6m · 󰊄 49\.4k$/);
+  assert.match(stripTerminalSequences(renderFooter(240, data, config, testTheme()).at(-1)!), /compactions 1 · 󰥔 2h 6m · 󰊄 49\.4k$/);
   for (const [icons, icon] of [["unicode", "◷"], ["ascii", "ses:"]] as const) {
     assert.match(stripTerminalSequences(renderFooter(240, data, { ...config, icons }, testTheme()).at(-1)!), new RegExp(`${icon} 2h 6m`));
   }

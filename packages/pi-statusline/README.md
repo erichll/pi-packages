@@ -6,7 +6,7 @@ activity and live configuration preview. Leaves the editor intact.
 ```text
   Example model(high)  󰆼 █░░░░░░░░░ 11.9%  󰉋 pi-packages   main ● *2 ↑2
 ◐ bash npm test 12s · ✓ read ×5 · ✓ edit ×2
-● 5m 42s · avg 45 tok/s · cache 86% · 3 turns · 1 compaction · 󰥔 2h 6m · 󰊄 49.4k
+● 5m 42s · avg 45 tok/s · cache 86% · turns 3 · compactions 1 · 󰥔 2h 6m · 󰊄 49.4k
 ```
 
 Rows, top to bottom: the main segments, tool activity for the current run
@@ -144,9 +144,10 @@ or RPM/TPM rate limit.
 - The bottom row starts with the run status (`●` running, `✓` done, `✗` failed,
   `⊘` cancelled) and its duration, which spans retries, tools, UI waits and
   compaction. `avg` is assistant output tokens / total run seconds, **not
-  inference speed**; `cache` is cache-read / (input + cache-read + cache-write),
-  green from 80% and warning below 50%. `turns` counts Pi turns, not upstream
-  requests; `compactions` counts successful session entries.
+  inference speed**; `cache` is cache-read / (input + cache-read + cache-write).
+  `turns` counts Pi turns, not upstream requests; `compactions` counts
+  successful session entries. The row stays muted; only a failed run, waits,
+  compaction problems and cache below 50% are colored.
 - The run duration (to the second) covers one run, from your message until the
   agent settles, across all its turns. The session age (`󰥔 2h 6m`, to the
   minute) counts from the session header's creation time: it survives reloads

@@ -44,7 +44,7 @@ test("extension wiring spans agent_end/continuation, cancellation, UI/tools, com
     await fire("message_start", { message: first });
     await fire("message_update", { message: first, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "hello", partial: first } });
     await fire("message_end", { message: first }); await fire("turn_end", { message: first });
-    await fire("agent_end"); assert.match(row(), /● \d+s .*1 turn/);
+    await fire("agent_end"); assert.match(row(), /● \d+s .*turns 1/);
     await fire("agent_start"); await fire("turn_start");
     await fire("tool_execution_start", { toolCallId: "parent", toolName: "bash", args: { command: "cd /x && npm test" } });
     await fire("tool_execution_start", { toolCallId: "child", toolName: "read", args: { path: "/x/a.ts" }, parentToolCallId: "parent" });
@@ -55,16 +55,16 @@ test("extension wiring spans agent_end/continuation, cancellation, UI/tools, com
     assert.match(row(), /\n✓ read ×1 · ✓ bash ×1 · ✗ read ×1\n/);
     await fire("ui_prompt_start"); assert.match(row(), /awaiting input/); await fire("ui_prompt_end");
     await fire("agent_before_settle", { outcome: "completed" }); await fire("agent_settled");
-    assert.match(row(), /\n✓ \d+s .*2 turns/); assert.doesNotMatch(row(), /◐|awaiting input|no content/);
+    assert.match(row(), /\n✓ \d+s .*turns 2/); assert.doesNotMatch(row(), /◐|awaiting input|no content/);
     assert.match(row(), /✓ read ×1 · ✓ bash ×1 · ✗ read ×1/, "the run summary keeps tool counts");
     await fire("agent_start"); await fire("turn_start");
     await fire("message_end", { message: { ...assistant(2), stopReason: "aborted" } });
     await fire("agent_end"); await fire("agent_settled"); // Pi skips before-settle on abort
-    assert.match(row(), /⊘ \d+s .*1 turn/); assert.doesNotMatch(row(), /awaiting input|no content|✓ read/);
+    assert.match(row(), /⊘ \d+s .*turns 1/); assert.doesNotMatch(row(), /awaiting input|no content|✓ read/);
     await fire("session_before_compact"); assert.match(row(), /compacting/);
     await fire("session_compact_failed", { aborted: true }); assert.match(row(), /compaction cancelled/);
     await fire("session_before_compact"); await fire("session_compact", { compactionEntry: { id: "compact" } });
-    assert.doesNotMatch(row(), /compacting|compaction cancelled/); assert.match(row(), /1 compaction/);
+    assert.doesNotMatch(row(), /compacting|compaction cancelled/); assert.match(row(), /compactions 1/);
     await command("off", ctx); assert.equal(footer, undefined);
     const reads = contextReads; await fire("message_update", { message: assistant(), assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "", partial: assistant() } });
     await delay(120); assert.equal(contextReads, reads);

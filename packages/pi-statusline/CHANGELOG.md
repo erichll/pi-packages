@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.1 - 2026-10-16
+
+### Changed
+
+- Mute the runtime row so it no longer competes with the editor: the duration,
+  run metrics, session age and tokens use Pi's muted color, and the running
+  (`●`) and done (`✓`) symbols are muted too. Only problems stay colored: a
+  failed run (`✗`), `awaiting input`, `no content`, `compacting…`, compaction
+  failures and cache below 50%. Cache is no longer green from 80%. Explicit
+  `session`/`tokens` segment colors still apply.
+- Show run counts label first, like `avg` and `cache`: `turns 4` and
+  `compactions 1` instead of `4 turns` and `1 compaction`.
+
 ## 0.6.0 - 2026-10-16
 
 ### Added

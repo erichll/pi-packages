@@ -1,6 +1,6 @@
 {
   "name": "@erichll/pi-statusline",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Configurable Pi statusline with live preview, Git and session usage",
   "type": "module",
   "license": "MIT",

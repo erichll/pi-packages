@@ -18,7 +18,6 @@ function short(ms: number): string {
   const total = Math.floor(ms / 1000);
   return total < 60 ? `${total}s` : `${Math.floor(total / 60)}m${total % 60}s`;
 }
-function plural(count: number, word: string): string { return `${word}${count === 1 ? "" : "s"}`; }
 
 type Color = "text" | "muted" | "dim" | "accent" | "success" | "warning" | "error";
 type Span = [text: string, color: Color];
@@ -39,8 +38,8 @@ function fit(parts: Part[], dropOrder: string[], width: number, separator: strin
 }
 
 const STATUS: Partial<Record<RuntimeSnapshot["status"], { icon: string; ascii: string; color: Color }>> = {
-  Running: { icon: "●", ascii: "*", color: "accent" },
-  Done: { icon: "✓", ascii: "ok", color: "success" },
+  Running: { icon: "●", ascii: "*", color: "muted" },
+  Done: { icon: "✓", ascii: "ok", color: "muted" },
   Failed: { icon: "✗", ascii: "x", color: "error" },
   Cancelled: { icon: "⊘", ascii: "-", color: "muted" },
 };
@@ -56,17 +55,21 @@ export interface RuntimeExtras {
   elapsedStatus?: string;
 }
 
-/** The bottom row: run status and duration, run metrics, then session age, tokens and extension statuses. */
+/**
+ * The bottom row: run status and duration, run metrics, then session age, tokens and extension statuses.
+ * It stays muted so it does not compete with the editor; only problems (failure, waits, low cache) are colored.
+ */
 export function renderRuntime(width: number, data: StatuslineSnapshot, config: StatuslineConfig, theme: RenderTheme, extras: RuntimeExtras = {}): string | undefined {
   const parts: Part[] = [];
   const runtime = data.runtime, compact = data.compaction;
   const enabled = config.runtime.enabled, ascii = config.icons === "ascii";
   const add = (id: string, ...spans: Span[]) => parts.push({ id, spans });
-  const count = (id: string, value: number, word: string) => add(id, [String(value), "text"], [` ${plural(value, word)}`, "dim"]);
+  // Label first, like `avg` and `cache`: `turns 4`, `compactions 1`.
+  const count = (id: "turns" | "compactions", value: number) => add(id, [`${id} `, "dim"], [String(value), "muted"]);
   const duration = extras.elapsedStatus?.replace(/^Elapsed /, "") ?? (runtime?.runId ? elapsed(runtime.elapsedMs) : undefined);
   const state = enabled && config.runtime.status && runtime?.runId ? STATUS[runtime.status] : undefined;
-  if (state && duration) add("elapsed", [ascii ? state.ascii : state.icon, state.color], [` ${duration}`, "text"]);
-  else if (extras.elapsedStatus) add("elapsed", ["elapsed ", "dim"], [duration!, "text"]);
+  if (state && duration) add("elapsed", [ascii ? state.ascii : state.icon, state.color], [` ${duration}`, "muted"]);
+  else if (extras.elapsedStatus) add("elapsed", ["elapsed ", "dim"], [duration!, "muted"]);
   const compacting = enabled && !!compact?.active;
   if (compacting) {
     add("activity", [`${ascii ? "compacting..." : "compacting…"} ${seconds(compact!.elapsedMs)}`, "warning"]);
@@ -76,14 +79,14 @@ export function renderRuntime(width: number, data: StatuslineSnapshot, config: S
     else if (config.runtime.noContent && runtime.noContentMs !== null && runtime.noContentMs >= config.runtime.noContentSeconds * 1000) {
       add("activity", [`no content ${seconds(runtime.noContentMs)}`, "warning"]);
     }
-    if (config.runtime.avg && runtime.avg !== null) add("avg", ["avg ", "dim"], [`${Math.round(runtime.avg)} tok/s`, "text"]);
+    if (config.runtime.avg && runtime.avg !== null) add("avg", ["avg ", "dim"], [`${Math.round(runtime.avg)} tok/s`, "muted"]);
     if (config.runtime.cache && runtime.cache !== null) {
       const percent = Math.round(runtime.cache * 100);
-      add("cache", ["cache ", "dim"], [`${percent}%`, percent >= 80 ? "success" : percent >= 50 ? "text" : "warning"]);
+      add("cache", ["cache ", "dim"], [`${percent}%`, percent < 50 ? "warning" : "muted"]);
     }
-    if (config.runtime.counts && runtime.runId) count("turns", runtime.turns, "turn");
+    if (config.runtime.counts && runtime.runId) count("turns", runtime.turns);
   }
-  if (enabled && config.runtime.counts && compact && compact.count > 0) count("compactions", compact.count, "compaction");
+  if (enabled && config.runtime.counts && compact && compact.count > 0) count("compactions", compact.count);
   if (extras.session) parts.push({ id: "session", spans: [], styled: extras.session });
   if (extras.tokens) parts.push({ id: "tokens", spans: [], styled: extras.tokens });
   if (extras.statuses && !compacting) parts.push({ id: "statuses", spans: [], styled: extras.statuses });

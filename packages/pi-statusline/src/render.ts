@@ -180,12 +180,12 @@ function setQuota(part: Part, data: StatuslineSnapshot, config: StatuslineConfig
     }).join(paint(quotaSeparator(ascii), "dim"));
   };
 }
-/** Session-wide values for the runtime row: dim icon, plain value. */
+/** Session-wide values for the runtime row: dim icon, muted value. */
 function sessionText(segment: SegmentConfig, data: StatuslineSnapshot, config: StatuslineConfig, theme: RenderTheme): string | undefined {
   const icon = cleanText(segment.icon ?? ICONS[config.icons][segment.id] ?? "");
   const value = segmentText(segment.id, data, config);
   if (value === undefined) return undefined;
-  const styled = theme.style(value, { fg: color(segment.color ?? "text", theme) });
+  const styled = theme.style(value, { fg: color(segment.color ?? "muted", theme) });
   return icon ? `${theme.style(icon, { fg: color(segment.iconColor ?? "dim", theme) })} ${styled}` : styled;
 }
 

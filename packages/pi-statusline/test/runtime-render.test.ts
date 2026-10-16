@@ -15,7 +15,7 @@ const colorOf = (line: string, text: string) => line.slice(0, line.indexOf(text)
 
 test("runtime row leads with run status and duration, then metrics, tokens and statuses", () => {
   const data = sampleSnapshot(); const statuses = new Map<string, string>(); data.statuses = statuses; data.runtime!.elapsedMs = 342000;
-  assert.equal(runtimeRow(data), "● 5m 42s · avg 45 tok/s · cache 86% · 3 turns · 1 compaction · 󰥔 2h 6m · 󰊄 49.4k");
+  assert.equal(runtimeRow(data), "● 5m 42s · avg 45 tok/s · cache 86% · turns 3 · compactions 1 · 󰥔 2h 6m · 󰊄 49.4k");
   statuses.set("tps", "\x1b[2mElapsed 5m 41s\x1b[0m"); statuses.set("review", "review ready");
   assert.match(runtimeRow(data), /^● 5m 41s ·/, "an upstream Elapsed status supplies the duration");
   assert.doesNotMatch(runtimeRow(data), /Elapsed/);
@@ -28,23 +28,25 @@ test("runtime row leads with run status and duration, then metrics, tokens and s
   assert.equal(elapsed(0), "0s");
 });
 
-test("status symbols, labels and cache ratio carry their own colors", () => {
+test("the runtime row stays muted and colors only problems", () => {
   const data = sampleSnapshot(); data.statuses = new Map();
   const line = () => renderFooter(240, data, presetConfig(), testTheme()).at(-1)!;
-  assert.equal(colorOf(line(), "●"), fg("accent"));
-  assert.equal(colorOf(line(), "avg"), fg("dim")); assert.equal(colorOf(line(), "45 tok/s"), fg("text"));
-  assert.equal(colorOf(line(), "86%"), fg("success"));
-  data.runtime!.cache = 0.6; assert.equal(colorOf(line(), "60%"), fg("text"));
+  for (const text of ["●", "28s", "45 tok/s", "86%", "2h 6m", "49.4k"]) assert.equal(colorOf(line(), text), fg("muted"), text);
+  for (const text of ["avg", "cache", "turns", "compactions", "󰥔", "󰊄"]) assert.equal(colorOf(line(), text), fg("dim"), text);
+  assert.equal(colorOf(line(), "3 · compactions"), fg("muted"), "count values are muted");
+  data.runtime!.cache = 0.6; assert.equal(colorOf(line(), "60%"), fg("muted"));
   data.runtime!.cache = 0.3; assert.equal(colorOf(line(), "30%"), fg("warning"));
+  data.runtime!.status = "Done"; assert.equal(colorOf(line(), "✓"), fg("muted"));
   data.runtime!.status = "Failed"; assert.equal(colorOf(line(), "✗"), fg("error"));
-  assert.equal(colorOf(line(), "󰊄"), fg("dim")); assert.equal(colorOf(line(), "49.4k"), fg("text"));
+  const config = presetConfig(); config.segments.find((s) => s.id === "tokens")!.color = "accent";
+  assert.equal(colorOf(renderFooter(240, data, config, testTheme()).at(-1)!, "49.4k"), fg("accent"), "an explicit segment color still applies");
 });
 
 test("idle footer omits the status symbol and leading separator", () => {
   const data = sampleSnapshot(); data.statuses = new Map();
   Object.assign(data.runtime!, { runId: null, status: "Idle", elapsedMs: 0, avg: null, cache: null, noContentMs: null, tools: [], completed: [] });
   const config = presetConfig();
-  assert.equal(runtimeRow(data, 240, config), "1 compaction · 󰥔 2h 6m · 󰊄 49.4k");
+  assert.equal(runtimeRow(data, 240, config), "compactions 1 · 󰥔 2h 6m · 󰊄 49.4k");
   config.runtime.counts = false;
   assert.equal(runtimeRow(data, 240, config), "󰥔 2h 6m · 󰊄 49.4k");
   config.segments.find((s) => s.id === "session")!.enabled = false;
@@ -65,7 +67,7 @@ test("opaque statuses stay display-only, and runtime-off preserves the elapsed e
 test("input, no-content and compaction activity sit after the duration; metrics stay visible", () => {
   const data = sampleSnapshot(); data.statuses = new Map();
   data.runtime!.awaitingInput = true; data.runtime!.noContentMs = 10000;
-  assert.match(runtimeRow(data), /^● 28s · awaiting input · avg 45 tok\/s · cache 86% · 3 turns/);
+  assert.match(runtimeRow(data), /^● 28s · awaiting input · avg 45 tok\/s · cache 86% · turns 3/);
   assert.doesNotMatch(runtimeRow(data), /no content/);
   data.runtime!.awaitingInput = false;
   assert.match(runtimeRow(data), /^● 28s · no content 10s · avg/);
@@ -73,24 +75,24 @@ test("input, no-content and compaction activity sit after the duration; metrics 
   assert.equal(colorOf(line, "no content"), fg("warning"));
   data.runtime!.noContentMs = 9000; assert.doesNotMatch(runtimeRow(data), /no content/);
   data.compaction!.active = true; data.compaction!.elapsedMs = 4000;
-  assert.equal(runtimeRow(data), "● 28s · compacting… 4s · 1 compaction · 󰥔 2h 6m · 󰊄 49.4k");
+  assert.equal(runtimeRow(data), "● 28s · compacting… 4s · compactions 1 · 󰥔 2h 6m · 󰊄 49.4k");
   data.compaction!.active = false; data.compaction!.showFailure = true;
   data.compaction!.last = { status: "failed" } as never; data.runtime!.status = "Done";
   assert.match(runtimeRow(data), /^✓ 28s · compaction failed ·/);
 });
 
-test("zero compactions are omitted and counts use singular forms", () => {
+test("zero compactions are omitted and counts read label first", () => {
   const data = sampleSnapshot(); data.statuses = new Map(); data.compaction!.count = 0;
   assert.doesNotMatch(runtimeRow(data), /compaction/);
   data.compaction!.active = true; data.compaction!.elapsedMs = 4000;
-  assert.match(runtimeRow(data), /compacting… 4s/); assert.doesNotMatch(runtimeRow(data), /\d compaction/);
+  assert.match(runtimeRow(data), /compacting… 4s/); assert.doesNotMatch(runtimeRow(data), /compactions \d/);
   data.compaction!.active = false; data.compaction!.count = 2; data.runtime!.turns = 1;
-  assert.match(runtimeRow(data), /1 turn · 2 compactions/);
+  assert.match(runtimeRow(data), /turns 1 · compactions 2/);
 });
 
 test("tool row shows running tools with targets, then completed and failed counts", () => {
   const data = sampleSnapshot(); data.statuses = new Map();
-  assert.deepEqual(rows(data).slice(1), ["◐ bash npm test 12s · ✓ read ×5 · ✓ edit ×2", "● 28s · avg 45 tok/s · cache 86% · 3 turns · 1 compaction · 󰥔 2h 6m · 󰊄 49.4k"]);
+  assert.deepEqual(rows(data).slice(1), ["◐ bash npm test 12s · ✓ read ×5 · ✓ edit ×2", "● 28s · avg 45 tok/s · cache 86% · turns 3 · compactions 1 · 󰥔 2h 6m · 󰊄 49.4k"]);
   data.runtime!.tools = [{ name: "bash", target: "npm test", elapsedMs: 12000 }, { name: "bash", target: "ls", elapsedMs: 18000 }, { name: "read", target: "a.ts", elapsedMs: 0 }];
   data.runtime!.completed = [{ name: "read", ok: 3, failed: 0 }, { name: "bash", ok: 6, failed: 1 }, { name: "edit", ok: 3, failed: 0 }];
   assert.equal(toolsRow(data), "◐ bash ×2 18s · ◐ read a.ts · ✓ bash ×6 · ✓ read ×3 · ✓ edit ×3 · ✗ bash ×1");
@@ -124,7 +126,7 @@ test("ascii tool and runtime rows avoid Unicode symbols", () => {
   const config = presetConfig(); config.icons = "ascii";
   const [, tools, runtime] = rows(data, 240, config);
   assert.equal(tools, "> bash npm test 12s | ok read x5 | ok edit x2 | x bash x1");
-  assert.equal(runtime, "* 28s | avg 45 tok/s | cache 86% | 3 turns | 1 compaction | ses: 2h 6m | tok: 49.4k");
+  assert.equal(runtime, "* 28s | avg 45 tok/s | cache 86% | turns 3 | compactions 1 | ses: 2h 6m | tok: 49.4k");
 });
 
 test("narrow tool rows fold, then drop targets and timers before truncating", () => {
@@ -146,5 +148,5 @@ test("narrow widths keep the leading status and every line fits terminal cells",
       for (const line of renderFooter(width, data, config, testTheme())) assert.ok(visibleWidth(line) <= width);
     }
   }
-  assert.equal(runtimeRow(data, 24), "● 5m 42s · 3 turns");
+  assert.equal(runtimeRow(data, 24), "● 5m 42s · turns 3");
 });

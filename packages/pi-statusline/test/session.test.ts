@@ -96,7 +96,7 @@ test("compaction, tree navigation, model/thinking changes and live extension sta
     f.statuses.clear();
     assert.equal(f.footer!.render(120).length, 3);
     assert.equal(f.footer!.render(120)[0], "");
-    assert.equal(stripTerminalSequences(f.footer!.render(120)[2]!), "1 compaction · 󰥔 2h 6m · 󰊄 275");
+    assert.equal(stripTerminalSequences(f.footer!.render(120)[2]!), "compactions 1 · 󰥔 2h 6m · 󰊄 275");
     assert.doesNotMatch(stripTerminalSequences(f.footer!.render(120)[2]!), /Idle|^ ·/);
     const before = f.footer!.render(120)[1];
     const altered = testTheme("light") as Theme;
