@@ -91,6 +91,9 @@ test("runtime partial configuration inherits defaults and rejects invalid known 
   assert.deepEqual(parseConfig({ version: 1 }).runtime, presetConfig().runtime);
   for (const raw of [{ runtime: [] }, { runtime: { avg: "true" } }, ...[0, -1, 1.5, 3601, NaN, Infinity, "10"].map((n) => ({ runtime: { noContentSeconds: n } }))]) assert.throws(() => parseConfig(raw));
   assert.equal(parseConfig({ runtime: { noContentSeconds: 1 } }).runtime.noContentSeconds, 1);
+  assert.equal(config.runtime.skills, true); assert.equal(config.runtime.skillsMaxVisible, 4);
+  assert.equal(parseConfig({ runtime: { skills: false, skillsMaxVisible: 8 } }).runtime.skillsMaxVisible, 8);
+  for (const n of [0, 9, 1.5, "4"]) assert.throws(() => parseConfig({ runtime: { skillsMaxVisible: n } }), /runtime.skillsMaxVisible/);
   assert.equal(parseConfig({ runtime: { noContentSeconds: 3600 } }).runtime.noContentSeconds, 3600);
 });
 

@@ -24,6 +24,13 @@ test("file, search and listing targets are short and sanitized", () => {
   assert.ok(visibleWidth(toolTarget("read", { path: "/x/" + "中".repeat(40) })!) <= 24);
 });
 
+test("skill file reads name the skill directory and keep /SKILL.md whole", () => {
+  assert.equal(toolTarget("read", { path: "/home/u/.pi/agent/skills/pdf-tools/SKILL.md" }), "pdf-tools/SKILL.md");
+  assert.equal(toolTarget("read", { path: "SKILL.md" }), "SKILL.md");
+  assert.equal(toolTarget("read", { path: "/skills/a-very-long-skill-name/SKILL.md" }), "a-very-long-sk…/SKILL.md");
+  assert.equal(toolTarget("edit", { path: "/skills/pdf-tools/SKILL.md" }), "SKILL.md", "only reads load skills");
+});
+
 test("unknown tools and malformed arguments show no target", () => {
   assert.equal(toolTarget("web_search", { query: "x" }), undefined);
   for (const args of [undefined, null, "npm test", 1, { command: 42 }, { path: ["a"] }]) {

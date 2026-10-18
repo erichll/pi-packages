@@ -96,7 +96,7 @@ test("compaction, tree navigation, model/thinking changes and live extension sta
     f.statuses.clear();
     assert.equal(f.footer!.render(120).length, 3);
     assert.equal(f.footer!.render(120)[0], "");
-    assert.equal(stripTerminalSequences(f.footer!.render(120)[2]!), "compactions 1 · 󰥔 2h 6m · 󰊄 275");
+    assert.equal(stripTerminalSequences(f.footer!.render(120)[2]!), " 󰐰  compactions 1 · 󰥔 2h 6m · 󰊄 275");
     assert.doesNotMatch(stripTerminalSequences(f.footer!.render(120)[2]!), /Idle|^ ·/);
     const before = f.footer!.render(120)[1];
     const altered = testTheme("light") as Theme;
@@ -205,7 +205,7 @@ test("session age comes from the session header, survives repaints and hides unk
   session.install(); await delay(0);
   try {
     assert.equal(session.snapshot().sessionMinutes, 126);
-    assert.equal(f.footer!.render(200).map(stripTerminalSequences).at(-1)!, "󰥔 2h 6m · 󰊄 170");
+    assert.equal(f.footer!.render(200).map(stripTerminalSequences).at(-1)!, " 󰐰  󰥔 2h 6m · 󰊄 170");
     f.header({ type: "session", id: "new", cwd: "/example", timestamp: new Date().toISOString() }, "new");
     session.schedule(true); await delay(10);
     assert.equal(session.snapshot().sessionMinutes, 0, "a new session restarts the clock");
@@ -221,4 +221,17 @@ test("session start parsing rejects malformed and future timestamps", () => {
   assert.equal(sessionStart("2026-10-16T10:00:00Z", now), now - 7200000);
   assert.equal(sessionStart("2026-10-16T12:00:30Z", now), now + 30000, "small clock skew is tolerated");
   for (const invalid of [undefined, "", "yesterday", "2026-10-17T12:00:00Z"]) assert.equal(sessionStart(invalid, now), null);
+});
+
+test("session skills come from recorded reads of loaded skill files and survive run resets", () => {
+  const f = fixture();
+  const commands = () => [{ name: "skill:docx", source: "skill" as const, sourceInfo: { path: "/example/.agents/skills/docx/SKILL.md", source: "local", scope: "project" as const, origin: "top-level" as const } }];
+  const session = new FooterSession(f.ctx, presetConfig(), async () => emptyGit("none"), commands);
+  try {
+    session.install();
+    assert.deepEqual(session.snapshot().skills, []);
+    f.append(messageEntry("2", { ...assistant(2), content: [{ type: "toolCall", id: "c", name: "read", arguments: { path: ".agents/skills/docx/SKILL.md" } }] }));
+    session.runtime.reset(); session.refresh();
+    assert.deepEqual(session.snapshot().skills, ["docx"]);
+  } finally { session.dispose(); }
 });

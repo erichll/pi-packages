@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.8.0 - 2026-10-18
+
+### Added
+
+- Add a skills row, enabled by default, between the tool row and the runtime
+  row: the loaded skills used in the session, in first-use order
+  (`󰗚  pdf-tools · docx +1`; `❖` in Unicode and `skills` in ASCII icon modes).
+  It counts `/skill:name` invocations and model reads of a loaded skill's file,
+  is read from session entries so it survives reloads and resuming, and is
+  hidden until a skill is used. `runtime.skills` toggles it and
+  `runtime.skillsMaxVisible` (1–8, default 4) sets how many names show before
+  `+N`; narrow rows fold names, then show only the count.
+- Show the skill directory for reads of a skill file on the tool row
+  (`read pdf-tools/SKILL.md` instead of `read SKILL.md`).
+
+### Changed
+
+- Give the lower rows dim row icons aligned with the main row: each starts with
+  a space, so its icon sits under the model icon, and two spaces set the icon
+  off from the row contents (one in ASCII mode). The tool row leads with the
+  tool total's icon (`󱁤`; `⚒` in Unicode and `tools` in ASCII icon modes) and
+  the runtime row with a pulse (`󰐰  ● 5m 42s`; `∿` and `run`).
+- Quiet the tool row like the runtime row: running tools (`◐ bash`) use the
+  text color instead of warning and accent, and completed calls (`✓`) are dim
+  instead of success. Only a tool running 30s or longer (its `◐` and timer turn
+  warning) and failures (`✗`, error) stay colored.
+
 ## 0.7.0 - 2026-10-17
 
 ### Added

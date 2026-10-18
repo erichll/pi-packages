@@ -36,6 +36,15 @@ function fit(parts: Part[], dropOrder: string[], width: number, separator: strin
   }
   return parts.length ? truncateToWidth(line, width, ellipsis) : undefined;
 }
+/**
+ * Lower rows start with a space so their labels (`󱁤`, `󰗚`, `󰐰`) sit under the main row's
+ * model icon. Two spaces then set the label off from the contents; ASCII labels are words and take one.
+ */
+function labeled(label: Span, ascii: boolean, width: number, theme: RenderTheme, render: (width: number) => string | undefined): string | undefined {
+  const prefix = ` ${theme.style(label[0], { fg: theme.colors[label[1]] })}${ascii ? " " : "  "}`;
+  const line = render(Math.max(1, width - visibleWidth(prefix)));
+  return line ? truncateToWidth(prefix + line, width, ascii ? "..." : "…") : undefined;
+}
 
 const STATUS: Partial<Record<RuntimeSnapshot["status"], { icon: string; ascii: string; color: Color }>> = {
   Running: { icon: "●", ascii: "*", color: "muted" },
@@ -58,7 +67,8 @@ export interface RuntimeExtras {
 }
 
 /**
- * The bottom row: run status and duration, run metrics, then session age, tool calls, tokens and extension statuses.
+ * The bottom row (` 󰐰  ● 5m 42s · …`): run status and duration, run metrics, then session age, tool calls, tokens
+ * and extension statuses.
  * It stays muted so it does not compete with the editor; only problems (failure, waits, low cache) are colored.
  */
 export function renderRuntime(width: number, data: StatuslineSnapshot, config: StatuslineConfig, theme: RenderTheme, extras: RuntimeExtras = {}): string | undefined {
@@ -93,10 +103,42 @@ export function renderRuntime(width: number, data: StatuslineSnapshot, config: S
   if (extras.toolTotal) parts.push({ id: "toolTotal", spans: [], styled: extras.toolTotal });
   if (extras.tokens) parts.push({ id: "tokens", spans: [], styled: extras.tokens });
   if (extras.statuses && !compacting) parts.push({ id: "statuses", spans: [], styled: extras.statuses });
-  return fit(parts, ["statuses", "cache", "avg", "compactions", "toolTotal", "session", "tokens", "turns", "activity", "failure"], width, ascii ? " | " : " · ", theme, ascii ? "..." : "…");
+  // A pulse: the run's status and vitals, then the session's.
+  const label: Span = [{ nerd: "\u{F0430}", unicode: "∿", ascii: "run" }[config.icons], "dim"];
+  return labeled(label, ascii, width, theme, (available) =>
+    fit(parts, ["statuses", "cache", "avg", "compactions", "toolTotal", "session", "tokens", "turns", "activity", "failure"], available, ascii ? " | " : " · ", theme, ascii ? "..." : "…"));
 }
 
-/** `◐ bash npm test 12s · ✓ read ×5 · ✗ bash ×1 · +2`: present while the run has used tools. */
+/** ` 󰗚  pdf-tools · docx +1`: the session's skills in first-use order, present once one is used. */
+export function renderSkills(width: number, data: StatuslineSnapshot, config: StatuslineConfig, theme: RenderTheme): string | undefined {
+  if (!config.runtime.enabled || !config.runtime.skills || !data.skills.length) return undefined;
+  const ascii = config.icons === "ascii", ellipsis = ascii ? "..." : "…", separator = ascii ? " | " : " · ";
+  const names = data.skills.map((name) => truncateToWidth(name, 24, ellipsis));
+  // An open book: a skill is a set of instructions. ASCII keeps the word.
+  const label: Span = [{ nerd: "\u{F05DA}", unicode: "❖", ascii: "skills" }[config.icons], "dim"];
+  const build = (visible: number): Part[] => {
+    if (!visible) return [{ id: "skills", spans: [[String(names.length), "muted"]] }];
+    const spans: Span[] = [];
+    names.slice(0, visible).forEach((name, index) => { if (index) spans.push([separator, "dim"]); spans.push([name, "muted"]); });
+    if (names.length > visible) spans.push([` +${names.length - visible}`, "dim"]);
+    return [{ id: "skills", spans }];
+  };
+  // Narrowing order: fold names into `+N`, then show only the count.
+  return labeled(label, ascii, width, theme, (available) => {
+    let parts: Part[] = [];
+    for (let visible = Math.min(config.runtime.skillsMaxVisible, names.length); visible >= 0; visible--) {
+      parts = build(visible);
+      if (visibleWidth(draw(parts, separator, theme)) <= available) break;
+    }
+    return fit(parts, [], available, separator, theme, ellipsis);
+  });
+}
+
+/**
+ * ` 󱁤  ◐ bash npm test 12s · ✓ read ×5 · ✗ bash ×1 · +2`: present while the run has used tools.
+ * Like the runtime row it stays quiet: running tools (`◐ bash`) are the brightest text, completed
+ * ones recede, and only problems (a tool running 30s or longer, a failure) are colored.
+ */
 export function renderTools(width: number, data: StatuslineSnapshot, config: StatuslineConfig, theme: RenderTheme): string | undefined {
   const runtime = data.runtime;
   if (!config.runtime.enabled || !config.runtime.tools || !runtime || (!runtime.tools.length && !runtime.completed.length)) return undefined;
@@ -112,15 +154,17 @@ export function renderTools(width: number, data: StatuslineSnapshot, config: Sta
   const failed = runtime.completed.filter((tool) => tool.failed).sort((a, b) => b.failed - a.failed);
   const build = (visible: number, targets: boolean, timers: boolean): Part[] => {
     const parts: Part[] = running.slice(0, 2).map((group) => {
-      const spans: Span[] = [[sym.run, "warning"], [` ${group.name}`, "accent"]];
+      // A tool running 30s or longer is the one problem a running call can show.
+      const slow = group.elapsedMs >= 30000;
+      const spans: Span[] = [[sym.run, slow ? "warning" : "text"], [` ${group.name}`, "text"]];
       if (group.count > 1) spans.push([` ${sym.times}${group.count}`, "dim"]);
       else if (targets && group.target) spans.push([` ${group.target}`, "muted"]);
-      if (timers && group.elapsedMs >= 1000) spans.push([` ${short(group.elapsedMs)}`, group.elapsedMs >= 30000 ? "warning" : "muted"]);
+      if (timers && group.elapsedMs >= 1000) spans.push([` ${short(group.elapsedMs)}`, slow ? "warning" : "muted"]);
       return { id: "running", spans };
     });
     const moreRunning = running.slice(2).reduce((total, group) => total + group.count, 0);
-    if (moreRunning) parts.push({ id: "running", spans: [[sym.run, "warning"], [` +${moreRunning}`, "dim"]] });
-    for (const tool of ok.slice(0, visible)) parts.push({ id: "ok", spans: [[sym.ok, "success"], [` ${tool.name}`, "muted"], [` ${sym.times}${tool.ok}`, "dim"]] });
+    if (moreRunning) parts.push({ id: "running", spans: [[sym.run, "text"], [` +${moreRunning}`, "dim"]] });
+    for (const tool of ok.slice(0, visible)) parts.push({ id: "ok", spans: [[sym.ok, "dim"], [` ${tool.name}`, "muted"], [` ${sym.times}${tool.ok}`, "dim"]] });
     for (const tool of failed) parts.push({ id: "failed", spans: [[sym.fail, "error"], [` ${tool.name}`, "muted"], [` ${sym.times}${tool.failed}`, "error"]] });
     const hidden = ok.length - Math.min(visible, ok.length);
     if (hidden) parts.push({ id: "more", spans: [[`+${hidden}`, "dim"]] });
@@ -132,10 +176,14 @@ export function renderTools(width: number, data: StatuslineSnapshot, config: Sta
   for (let visible = max; visible >= 1; visible--) attempts.push([visible, true, true]);
   attempts.push([1, false, true], [0, false, true], [0, false, false]);
   const separator = ascii ? " | " : " · ";
-  let parts: Part[] = [];
-  for (const [visible, targets, timers] of attempts) {
-    parts = build(visible, targets, timers);
-    if (visibleWidth(draw(parts, separator, theme)) <= width) break;
-  }
-  return fit(parts, [], width, separator, theme, ascii ? "..." : "…");
+  // The same icon as the session's tool total: this row is the current run's share.
+  const label: Span = [{ nerd: "\u{F1064}", unicode: "⚒", ascii: "tools" }[config.icons], "dim"];
+  return labeled(label, ascii, width, theme, (available) => {
+    let parts: Part[] = [];
+    for (const [visible, targets, timers] of attempts) {
+      parts = build(visible, targets, timers);
+      if (visibleWidth(draw(parts, separator, theme)) <= available) break;
+    }
+    return fit(parts, [], available, separator, theme, ascii ? "..." : "…");
+  });
 }

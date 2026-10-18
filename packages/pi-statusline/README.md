@@ -5,13 +5,17 @@ activity and live configuration preview. Leaves the editor intact.
 
 ```text
   Example model(high)  󰆼 █░░░░░░░░░ 11.9%  󰉋 pi-packages   main ● *2 ↑2
-◐ bash npm test 12s · ✓ read ×5 · ✓ edit ×2
-● 5m 42s · avg 45 tok/s · cache 86% · turns 3 · compactions 1 · 󰥔 2h 6m · 󱁤 128 · 󰊄 49.4k
+ 󱁤  ◐ bash npm test 12s · ✓ read ×5 · ✓ edit ×2
+ 󰗚  pdf-tools · docx
+ 󰐰  ● 5m 42s · avg 45 tok/s · cache 86% · turns 3 · compactions 1 · 󰥔 2h 6m · 󱁤 128 · 󰊄 49.4k
 ```
 
 Rows, top to bottom: the main segments, tool activity for the current run
-(only once it has used tools), then run status, run metrics, session age,
-tool calls and tokens, and other extensions' statuses.
+(only once it has used tools), the skills used in the session (only once one
+is used), then run status, run metrics, session age, tool calls and tokens,
+and other extensions' statuses. The last three rows start with a space, so their
+labels (`󱁤`, `󰗚`, `󰐰`) sit under the main row's model icon, and two
+spaces set each label off from the row contents (one in ASCII mode).
 
 ## Install
 
@@ -114,8 +118,8 @@ Bars show **used** percentages for the primary and secondary windows, with live
 reset countdowns. Labels come from the reported window length (`5h`, `1d`,
 `7d`, `30d` within 5%, otherwise exact such as `1h30m`); without one, the
 window is unlabeled rather than guessed. Each window is colored on its own:
-Pi's accent, warning above 70% and error above 90%; a segment `color` overrides
-both. Narrow terminals omit countdowns, then bars, then the segment rather than
+Pi's accent, warning above 70% and error above 90%; the segment icon follows
+the higher of the two. A segment `color` overrides both. Narrow terminals omit countdowns, then bars, then the segment rather than
 truncate a window; an unlabeled window keeps its countdown instead of its bar.
 
 Data is observed passively through Pi's provider events:
@@ -142,9 +146,9 @@ or RPM/TPM rate limit.
 - Context is Pi's current estimate, not cumulative consumption; unknown values
   show `?`. Session totals include recorded usage across the whole session file,
   including compaction and abandoned branches. Cost is Pi-reported, not an invoice.
-- The bottom row starts with the run status (`●` running, `✓` done, `✗` failed,
-  `⊘` cancelled) and its duration, which spans retries, tools, UI waits and
-  compaction. `avg` is assistant output tokens / total run seconds, **not
+- The bottom row (`󰐰`, `∿` in Unicode and `run` in ASCII icon modes) starts
+  with the run status (`●` running, `✓` done, `✗` failed, `⊘` cancelled) and its
+  duration, which spans retries, tools, UI waits and compaction. `avg` is assistant output tokens / total run seconds, **not
   inference speed**; `cache` is cache-read / (input + cache-read + cache-write).
   `turns` counts Pi turns, not upstream requests; `compactions` counts
   successful session entries. The row stays muted; only a failed run, waits,
@@ -157,16 +161,28 @@ or RPM/TPM rate limit.
 - `awaiting input` and `no content 10s` follow the duration while active. No
   content means no non-empty text, reasoning or tool-call delta was observed; it
   is not a server timeout and is suppressed during tools, UI waits and compaction.
-- The tool row shows up to two running tools with what they work on (a shell
-  command without `cd`/env prefixes, a file name or a search pattern), merging
+- The tool row (`󱁤`, `⚒` in Unicode and `tools` in ASCII icon modes, like the
+  session tool total) shows up to two running tools with what they work on (a
+  shell command without `cd`/env prefixes, a file name or a search pattern), merging
   same-name calls as `×N`, then this run's completed (`✓`) and failed (`✗`)
   counts. `toolsMaxVisible` (1–8, default 4) completed kinds show before `+N`.
   Nested calls count but are represented by their parent while running; calls
   ended by a cancellation are not failures. Narrow rows fold kinds, then drop
-  targets, then timers.
+  targets, then timers. The row stays quiet: running tools (`◐ bash`) use the
+  text color, completed ones (`✓`) are dim, and only a tool running 30s or
+  longer (its `◐` and timer turn warning) and failures (error) are colored. A read of a skill file shows its directory
+  (`read pdf-tools/SKILL.md`).
+- The skills row (`󰗚`, `❖` in Unicode and `skills` in ASCII icon modes) lists
+  the loaded skills used in the session, in first-use order: `/skill:name`
+  invocations and model reads of a loaded skill's file.
+  Reads of skill files Pi did not load are ignored; a skill read only for
+  reference, such as while writing another skill, still counts. Like tool calls,
+  it is read from session entries, so it survives reloads and resuming.
+  `skillsMaxVisible` (1–8, default 4) names show before `+N`; narrow rows fold
+  names, then show only the count.
 
 All runtime options default to enabled; `noContentSeconds` accepts 1–3600
-(default 10). `tools: false` hides the tool row. `retainSummary` keeps the last run until the next one;
+(default 10). `tools: false` hides the tool row and `skills: false` the skills row. `retainSummary` keeps the last run until the next one;
 `runtime.enabled: false` hides local runtime metrics. Reload/new session resets
 in-memory runtime summaries, not persisted session totals.
 

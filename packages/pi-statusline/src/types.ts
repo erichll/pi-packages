@@ -17,6 +17,10 @@ export interface RuntimeConfig {
   retainSummary: boolean;
   /** Completed tool kinds shown before folding into `+N` (1–8). */
   toolsMaxVisible: number;
+  /** The session's skills row. */
+  skills: boolean;
+  /** Skill names shown before folding into `+N` (1–8). */
+  skillsMaxVisible: number;
 }
 export interface SegmentConfig {
   id: SegmentId;
@@ -74,6 +78,8 @@ export interface StatuslineSnapshot {
   sessionMinutes: number | null;
   /** Completed tool calls recorded in the session file, across all runs. */
   toolCalls: number;
+  /** Loaded skills used in the session, in first-use order. */
+  skills: string[];
   runtime?: import("./runtime.ts").RuntimeSnapshot;
   compaction?: import("./compaction.ts").CompactionSnapshot;
 }

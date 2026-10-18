@@ -80,6 +80,8 @@
     "cache": true,
     "counts": true,
     "retainSummary": true,
-    "toolsMaxVisible": 4
+    "toolsMaxVisible": 4,
+    "skills": true,
+    "skillsMaxVisible": 4
   }
 }

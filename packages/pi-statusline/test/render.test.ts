@@ -80,7 +80,7 @@ test("unknown context, non-repositories and hidden extension statuses are unambi
   const config = presetConfig();
   config.contextDisplay = "text";
   const output = renderFooter(150, data, config, testTheme());
-  assert.equal(output.length, 3); // main, tools, runtime
+  assert.equal(output.length, 4); // main, tools, skills, runtime
   assert.ok(!output.map(stripTerminalSequences).join("\n").includes("Example extension status"));
   assert.match(stripTerminalSequences(output[0]!), /\?\/200k\(\?%\)/);
   assert.ok(!stripTerminalSequences(output[0]!).includes("main"));

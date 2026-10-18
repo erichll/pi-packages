@@ -6,7 +6,7 @@ export { cleanText } from "./text.ts";
 import type { ColorValue, SegmentConfig, SegmentId, StatuslineConfig, StatuslineSnapshot } from "./types.ts";
 import { emptyGit } from "./git.ts";
 import { emptyUsage } from "./usage.ts";
-import { renderRuntime, renderTools } from "./runtime-render.ts";
+import { renderRuntime, renderSkills, renderTools } from "./runtime-render.ts";
 import { quotaPieces, quotaSeparator, renderQuota, type QuotaDetail } from "./quota.ts";
 
 export type RenderTheme = Pick<Theme, "style" | "colors" | "appearance">;
@@ -258,6 +258,8 @@ export function renderFooter(width: number, data: StatuslineSnapshot, config: St
   if (parts.length) lines.push(truncateToWidth(line, width, ellipsis));
   const tools = renderTools(width, data, config, theme);
   if (tools) lines.push(tools);
+  const skills = renderSkills(width, data, config, theme);
+  if (skills) lines.push(skills);
   const runtime = renderRuntime(width, data, config, theme, { statuses: secondary ? renderPart(secondary, theme) : undefined, ...sessionRow, elapsedStatus });
   if (runtime) lines.push(runtime);
   return lines;
@@ -279,7 +281,7 @@ export function sampleSnapshot(): StatuslineSnapshot {
     context: { tokens: 23800, contextWindow: 200000, percent: 11.9 },
     usage: { ...emptyUsage(), input: 32000, output: 5400, cacheRead: 12000, cost: 0.12 },
     git: { ...emptyGit("repository"), branch: "main", unstaged: 2, ahead: 2 },
-    statuses: new Map([["example", "Example extension status"]]), sessionMinutes: 126, toolCalls: 128,
+    statuses: new Map([["example", "Example extension status"]]), sessionMinutes: 126, toolCalls: 128, skills: ["pdf-tools", "docx"],
     runtime: {
       runId: "example", status: "Running", elapsedMs: 28000, turns: 3, toolCalls: 8, awaitingInput: false, noContentMs: null, usage: { ...emptyUsage(), output: 1260 }, avg: 45, cache: 0.86,
       tools: [{ name: "bash", target: "npm test", elapsedMs: 12000 }],

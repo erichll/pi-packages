@@ -10,6 +10,7 @@ export default function statusline(pi: ExtensionAPI): void {
   let config = presetConfig();
   let session: FooterSession | undefined;
   let generation = 0;
+  const commands = () => pi.getCommands();
 
   pi.on("session_start", async (_event, ctx) => {
     const token = ++generation;
@@ -19,7 +20,7 @@ export default function statusline(pi: ExtensionAPI): void {
     if (token !== generation) return;
     config = loaded.config;
     if (loaded.warning) ctx.ui.notify(loaded.warning, "warning");
-    session = new FooterSession(ctx, config);
+    session = new FooterSession(ctx, config, undefined, commands);
     session.refresh(true);
     session.install();
   });
@@ -89,7 +90,7 @@ export default function statusline(pi: ExtensionAPI): void {
         config = loaded.config;
         if (loaded.warning) ctx.ui.notify(loaded.warning, "warning");
         current.dispose();
-        session = new FooterSession(ctx, config);
+        session = new FooterSession(ctx, config, undefined, commands);
         session.refresh(true); session.install();
         return;
       }

@@ -15,7 +15,7 @@ export function presetConfig(): StatuslineConfig {
     version: 1, enabled: true, preset: "powerline", icons: "nerd",
     separator: "powerline", pathMode: "basename", modelDisplay: "name", contextDisplay: "bar", spacing: 1,
     segments: SEGMENT_IDS.map((id) => ({ id, enabled: enabled.has(id) })),
-    runtime: { enabled: true, status: true, tools: true, noContent: true, noContentSeconds: 10, avg: true, cache: true, counts: true, retainSummary: true, toolsMaxVisible: 4 },
+    runtime: { enabled: true, status: true, tools: true, noContent: true, noContentSeconds: 10, avg: true, cache: true, counts: true, retainSummary: true, toolsMaxVisible: 4, skills: true, skillsMaxVisible: 4 },
   };
 }
 function record(value: unknown): value is Record<string, unknown> {
@@ -54,7 +54,7 @@ export function parseConfig(raw: unknown): StatuslineConfig {
       if (key === "noContentSeconds") {
         if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 3600) throw new Error("Invalid runtime.noContentSeconds (1–3600)");
         config.runtime.noContentSeconds = value;
-      } else if (key === "toolsMaxVisible") config.runtime.toolsMaxVisible = integer(value, 1, 8, "runtime.toolsMaxVisible");
+      } else if (key === "toolsMaxVisible" || key === "skillsMaxVisible") config.runtime[key] = integer(value, 1, 8, `runtime.${key}`);
       else (config[group] as unknown as Record<string, unknown>)[key] = boolean(value, `${group}.${key}`);
     }
   }

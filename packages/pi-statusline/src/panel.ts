@@ -41,7 +41,7 @@ export class StatuslinePanel implements Component, Focusable {
   }
   private items(): SelectItem[] {
     if (this.section) {
-      const labels: Record<string, string> = { enabled: "Runtime metrics", status: "Run status, elapsed and compaction status", tools: "Tool activity row", noContent: "No content warning", noContentSeconds: "No content threshold (seconds)", avg: "Average output speed", cache: "Cache read ratio", counts: "Turns and compactions", retainSummary: "Retain last run summary", toolsMaxVisible: "Completed tool kinds shown" };
+      const labels: Record<string, string> = { enabled: "Runtime metrics", status: "Run status, elapsed and compaction status", tools: "Tool activity row", noContent: "No content warning", noContentSeconds: "No content threshold (seconds)", avg: "Average output speed", cache: "Cache read ratio", counts: "Turns and compactions", retainSummary: "Retain last run summary", toolsMaxVisible: "Completed tool kinds shown", skills: "Skills row", skillsMaxVisible: "Skill names shown" };
       return [...Object.entries(this.draft[this.section]).map(([key, value]) => ({ value: `option:${key}`, label: `${labels[key] ?? key}: ${value}` })), { value: "back", label: "Back to settings" }];
     }
     if (this.editing) {
@@ -93,9 +93,9 @@ export class StatuslinePanel implements Component, Focusable {
     if (this.section) {
       if (value === "back") { this.cancel(); return; }
       const key = value.slice("option:".length);
-      if (key === "noContentSeconds" || key === "toolsMaxVisible") {
+      if (key === "noContentSeconds" || key === "toolsMaxVisible" || key === "skillsMaxVisible") {
         this.input = new Input(); this.input.focused = this.hasFocus; this.input.setValue(String(this.draft.runtime[key]));
-        this.inputLabel = key === "noContentSeconds" ? "No content threshold (1–3600 seconds)" : "Completed tool kinds shown before +N (1–8)";
+        this.inputLabel = key === "noContentSeconds" ? "No content threshold (1–3600 seconds)" : key === "toolsMaxVisible" ? "Completed tool kinds shown before +N (1–8)" : "Skill names shown before +N (1–8)";
         this.input.onEscape = () => this.cancel();
         this.input.onSubmit = (text) => {
           try { this.draft = parseConfig({ ...this.draft, runtime: { ...this.draft.runtime, [key]: Number(text) } }); this.input = undefined; this.error = ""; this.rebuild(value); }

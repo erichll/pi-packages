@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type { ExtensionContext, ReadonlyFooterDataProvider } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, ReadonlyFooterDataProvider, SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import { emptyGit, GitPoller, type GitReader } from "./git.ts";
 import { renderFooter, withSpacing } from "./render.ts";
@@ -9,6 +9,7 @@ import { UsageCache } from "./usage.ts";
 import { RuntimeState } from "./runtime.ts";
 import { CompactionState } from "./compaction.ts";
 import { QuotaState } from "./quota.ts";
+import { sessionSkills } from "./skills.ts";
 
 /** The header's creation time; hidden rather than guessed when missing, malformed or in the future. */
 export function sessionStart(timestamp: string | undefined, now = Date.now()): number | null {
@@ -37,12 +38,14 @@ export class FooterSession {
   private context: StatuslineSnapshot["context"] = { tokens: null, contextWindow: 0, percent: null };
   private sessionStartMs: number | null = null;
   private toolCalls = 0;
+  private skills: string[] = [];
   private readonly gitReader: GitReader | undefined;
+  private readonly commands: () => readonly SlashCommandInfo[];
   private signal: AbortSignal | undefined;
   private readonly onAbort = () => { this.runtime.observeAbort(); this.schedule(true); };
 
-  constructor(ctx: ExtensionContext, config: StatuslineConfig, gitReader?: GitReader) {
-    this.ctx = ctx; this.config = config; this.gitReader = gitReader;
+  constructor(ctx: ExtensionContext, config: StatuslineConfig, gitReader?: GitReader, commands: () => readonly SlashCommandInfo[] = () => []) {
+    this.ctx = ctx; this.config = config; this.gitReader = gitReader; this.commands = commands;
   }
   get active(): boolean { return this.ownsFooter && !this.closed; }
   setContext(ctx: ExtensionContext): void { this.ctx = ctx; this.quota.select(ctx.model); this.watchSignal(); }
@@ -132,6 +135,7 @@ export class FooterSession {
       this.usage.update(entries);
       this.compaction.update(entries);
       this.toolCalls = entries.reduce((total, entry) => total + (entry.type === "message" && entry.message.role === "toolResult" ? 1 : 0), 0);
+      this.skills = sessionSkills(entries, this.ctx.cwd, this.commands);
       this.sessionStartMs = sessionStart(manager.getHeader()?.timestamp);
       const context = this.ctx.getContextUsage();
       this.context = context ?? { tokens: null, contextWindow: this.ctx.model?.contextWindow ?? 0, percent: null };
@@ -154,7 +158,7 @@ export class FooterSession {
       statuses: this.provider?.getExtensionStatuses() ?? new Map(),
       // Minute resolution keeps an idle footer from repainting every second.
       sessionMinutes: this.sessionStartMs === null ? null : Math.floor(Math.max(0, Date.now() - this.sessionStartMs) / 60000),
-      toolCalls: this.toolCalls,
+      toolCalls: this.toolCalls, skills: this.skills,
       runtime: this.runtime.snapshot(this.config.runtime.retainSummary), compaction: this.compaction.snapshot(),
     };
   }

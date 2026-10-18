@@ -52,10 +52,10 @@ test("extension wiring spans agent_end/continuation, cancellation, UI/tools, com
     assert.match(row(), /◐ bash npm test · ◐ read b\.ts\n/, "nested calls are represented by their parent");
     await fire("tool_execution_end", { toolCallId: "child", isError: false }); await fire("tool_execution_end", { toolCallId: "other", isError: true });
     await fire("tool_execution_end", { toolCallId: "parent", isError: false });
-    assert.match(row(), /\n✓ read ×1 · ✓ bash ×1 · ✗ read ×1\n/);
+    assert.match(row(), /\n 󱁤  ✓ read ×1 · ✓ bash ×1 · ✗ read ×1\n/);
     await fire("ui_prompt_start"); assert.match(row(), /awaiting input/); await fire("ui_prompt_end");
     await fire("agent_before_settle", { outcome: "completed" }); await fire("agent_settled");
-    assert.match(row(), /\n✓ \d+s .*turns 2/); assert.doesNotMatch(row(), /◐|awaiting input|no content/);
+    assert.match(row(), /\n 󰐰  ✓ \d+s .*turns 2/); assert.doesNotMatch(row(), /◐|awaiting input|no content/);
     assert.match(row(), /✓ read ×1 · ✓ bash ×1 · ✗ read ×1/, "the run summary keeps tool counts");
     await fire("agent_start"); await fire("turn_start");
     await fire("message_end", { message: { ...assistant(2), stopReason: "aborted" } });
