@@ -38,7 +38,7 @@ test("protected call guard admits only explicit async direct launches", () => {
   for (const action of ["schedule.list", "schedule.run", "create", "update", "delete", "eject", "enable", "disable", "reset", "refine", "resume"]) {
     assert.ok(nativeSubagentCallBlockReason({ action }), action);
   }
-  for (const action of ["list", "get", "status", "debug.run", "stop", "interrupt", "steer", "dismiss", "validate"]) {
+  for (const action of ["list", "get", "status", "debug.run", "models", "guide", "stop", "interrupt", "dismiss", "validate"]) {
     assert.equal(nativeSubagentCallBlockReason({ action }), undefined, action);
   }
 });
@@ -61,15 +61,15 @@ test("acknowledgement proof is found in nested child results", () => {
   }] }), true);
 });
 
-test("version gate accepts 0.66.0 and above and fails closed below it", () => {
-  assert.equal(isCompatiblePiSubagentsVersion("0.66.0"), true);
-  assert.equal(isCompatiblePiSubagentsVersion("0.66.1"), true);
-  assert.equal(isCompatiblePiSubagentsVersion("0.66.2-beta.1"), true);
-  assert.equal(isCompatiblePiSubagentsVersion("0.67.0"), true);
-  assert.equal(isCompatiblePiSubagentsVersion("0.69.0"), true);
-  assert.equal(isCompatiblePiSubagentsVersion("1.66.0"), false);
-  assert.equal(isCompatiblePiSubagentsVersion("0.65.9"), false);
-  assert.equal(isCompatiblePiSubagentsVersion("0.66"), false);
+test("version gate matches the stable 0.79.0 peer floor", () => {
+  assert.equal(isCompatiblePiSubagentsVersion("0.79.0"), true);
+  assert.equal(isCompatiblePiSubagentsVersion("0.79.1"), true);
+  assert.equal(isCompatiblePiSubagentsVersion("0.80.0"), true);
+  assert.equal(isCompatiblePiSubagentsVersion("0.79.0+build.1"), true);
+  assert.equal(isCompatiblePiSubagentsVersion("0.79.0-beta.1"), false);
+  assert.equal(isCompatiblePiSubagentsVersion("1.79.0"), false);
+  assert.equal(isCompatiblePiSubagentsVersion("0.78.9"), false);
+  assert.equal(isCompatiblePiSubagentsVersion("0.79"), false);
   assert.equal(isCompatiblePiSubagentsVersion("unknown"), false);
   assert.equal(isCompatiblePiSubagentsVersion(undefined), false);
   assert.equal(isCompatiblePiSubagentsVersion(42), false);

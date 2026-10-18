@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 // These deep imports reach pi-permission-system internals that its public
-// entry (".") does not export. They are verified against the 40.1.1 source layout:
+// entry (".") does not export. They are verified against the 41.0.0 source layout:
 // 31.1.1 moved path-normalizer.ts, 33.0.0 changed MCP target derivation and
 // rule evaluation (see test/mcp-rule-semantics.test.ts). When upgrading across
 // minor/major lines, re-verify every path below.
@@ -370,7 +370,7 @@ function harness(
       assert.ok(registered, "pi-auto-review registered through the service");
       let terminalCalls = 0;
       const chain = composeAuthorizerChain(
-        [{ authorize: encloseInDelegationEnvelope(registered) }],
+        [{ authorize: encloseInDelegationEnvelope("pi-auto-review", registered) }],
         {
           async authorize(details) {
             terminalCalls++;
@@ -2408,6 +2408,43 @@ test("real permission-system authorizer chain integration", async (t) => {
       assert.equal(instance.reviews.at(-1)?.data.allowCapped, true);
     } finally {
       instance.dispose();
+    }
+  });
+
+  await t.test("41.0 licensed direct and forwarded asks retain the local cap and UI opt-out", async () => {
+    for (const interactiveTui of [false, true]) {
+      for (const enabled of [false, true]) {
+        for (const forwarded of [false, true]) {
+          const instance = harness(allow, {
+            interactiveTui,
+            config: config({ autoConfirmBoundedAllows: enabled ? ["external_directory"] : [] }),
+          });
+          try {
+            const decidingPath = { path: "/Sheet1/B1", effect: "unproven", effectSource: "declared-project" };
+            const result = await instance.authorize("external_directory", {
+              source: "tool_call", toolName: "bash",
+              command: "officecli set data.xlsx /Sheet1/B1", path: "/Sheet1/B1",
+              accessIntent: {
+                surface: "external_directory", matchValues: ["/Sheet1/B1"], boundaryValue: "/Sheet1/B1",
+                delegationLicense: "nothing-on-disk",
+              },
+              payload: { request: { decidingPath } },
+              ...(forwarded ? { forwarding: { requesterAgentName: "worker", requesterSessionId: "child" } } : {}),
+            });
+            assert.equal(result.terminalCalls, 1, "the authorizer itself must still defer");
+            assert.equal(result.decision.approved, interactiveTui && enabled);
+            const own = instance.reviews.findLast((entry) => entry.event === "pi_auto_review_decision")!;
+            assert.equal(own.data.allowCapped, true);
+            assert.equal(own.data.autoConfirmQueued, interactiveTui && enabled);
+            assert.deepEqual(own.data.decidingPath, decidingPath);
+            assert.equal((own.data.accessIntent as { delegationLicense?: string }).delegationLicense, "nothing-on-disk");
+            assert.equal(instance.reviews.some((entry) => entry.event === "authorizer_allow_licensed"), false);
+            const rendered = JSON.stringify(instance.modelContexts.at(-1));
+            assert.match(rendered, /declared-project/);
+            assert.match(rendered, /nothing-on-disk/);
+          } finally { instance.dispose(); }
+        }
+      }
     }
   });
 

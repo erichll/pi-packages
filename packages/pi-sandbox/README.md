@@ -91,15 +91,16 @@ Supported modes:
 
 - `builtin` (default): register the process-backed `subagent` tool and sandbox
   each complete worker process tree.
-- `pi-subagents`: let `pi-subagents >=0.76.1` own orchestration under the required
+- `pi-subagents`: let `pi-subagents >=0.79.0` own orchestration under the required
   native-background tool boundary described below.
 - `off`: protect Bash only.
 
 ### `pi-subagents` native-background tool boundary
 
-This provider requires `pi-subagents >=0.76.1` (deterministically validated on
-0.76.1) and fails closed if its public ceiling API, module layout, or internal
-discovery layout drifts. The peer dependency is a floor with no upper pin; the
+This provider requires Pi 1.3.0, `typebox >=1.4.2` and
+`pi-subagents >=0.79.0` (deterministically validated on 0.79.0), and fails closed
+if its public ceiling API, module layout, discovery, ownership or runtime-path
+seams drift. The peer dependency is a floor with no upper pin; the
 loader's explicit export and layout checks are the real gate. On Node, the
 loader aliases the `@earendil-works/pi-tui` host peer to the running Pi package.
 On Bun, including compiled Pi, it passes Pi's `pi-tui` and `typebox` module
@@ -123,7 +124,23 @@ The `pi-subagents` config at
 `async: true`. Only direct single-agent launches are supported. Public
 `workflowScript` / `workflowScriptPath` children disable ambient
 extensions upstream, so both are rejected along with named workflows, schedules,
-configuration mutations, resume, nested subagents, and external runners.
+configuration mutations, resume, chain appends, nested subagents, and external
+runners. Unknown management actions are rejected rather than trusted by default.
+
+Steering is restricted to a running direct native child and must explicitly set
+`options: { "steeringRecovery": false }` (the legacy top-level spelling also
+works). Use the complete run ID, not a prefix or `dir`. Before steering, the
+adapter revalidates the agent whitelist and reads the host-owned run status:
+ownership alone is not protection. The target needs a sandbox-origin ceiling
+and its own child-runtime acknowledgement, including after same-process session
+succession. Missing/invalid proof, linked paths, or an agent no longer allowed
+blocks steering; inspect or stop the run instead. This does not retrofit a
+sandbox onto an already-running unprotected child. Status/stop remain available.
+This status-file check is best-effort, not attestation: a host-side writer with
+access to the async runtime directory can forge the JSON proof, including a
+parent tool allowed to write there. No process-local launch-receipt registry is
+required, so recovery compatibility is retained; separately protect that runtime
+directory if hostile writers are in scope.
 
 Every child is constrained by the upstream capability ceiling to `bash`,
 `read`, `grep`, `find`, and `ls`. The child loads ambient extensions and must
@@ -343,9 +360,10 @@ capability ceiling, and protected launch policy in an isolated temporary agent
 directory. It never reads or updates production Pi configuration. Model-backed
 acceptance requires `PI_SUBAGENTS_GATE_MODEL` and an already-exported matching
 credential; missing prerequisites are reported as `SKIP`. The current peer
-floor and development baseline are Pi 1.1.0, with pi-subagents 0.76.1 and
-`typebox >=1.3.36`. The deterministic and model-backed native-baseline /
-protected-child gates pass on this baseline.
+floor and development baseline are Pi 1.3.0, with pi-subagents 0.79.0 and
+`typebox >=1.4.2`. `pi-tui >=1.3.0` is an explicit host peer, not a bundled
+runtime dependency. See `docs/compat-notes.md` for the recorded deterministic
+and model-backed validation results.
 
 The test suite covers real Linux Sandbox Runtime enforcement when its native
 dependencies are installed, plus deterministic broker, network approval,

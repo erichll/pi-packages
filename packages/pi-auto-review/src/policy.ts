@@ -1,5 +1,11 @@
 import { isPathSurface } from "./path-surfaces.ts";
 import {
+  normalizeDecidingPath,
+  normalizeDelegationLicense,
+  type DecidingPath,
+  type PermissionAccessFacts,
+} from "./permission-facts.ts";
+import {
   shellExpansionLimitExceeded,
   structuralScanText,
 } from "./review/shell-text.ts";
@@ -48,14 +54,11 @@ export type NormalizedPermissionEvidence = {
    * decided.
    */
   matchedSpelling?: string;
+  decidingPath?: DecidingPath;
   path?: string;
   resolvedPath?: string;
   destination?: string;
-  accessIntent?: {
-    surface: string;
-    matchValues: readonly string[];
-    boundaryValue?: string;
-  };
+  accessIntent?: PermissionAccessFacts;
   requester?: {
     agentName?: string;
     sessionId?: string;
@@ -361,11 +364,13 @@ export function normalizePermissionEvidence(
     rawMatchValues.every((item) => Boolean(nonEmptyString(item)))
       ? rawMatchValues as string[]
       : undefined;
+  const delegationLicense = normalizeDelegationLicense(rawIntent);
   const accessIntent = intentSurface && matchValues
     ? {
         surface: intentSurface,
         matchValues: Object.freeze([...matchValues]),
         boundaryValue: nonEmptyString(rawIntent?.boundaryValue),
+        ...(delegationLicense ? { delegationLicense } : {}),
       }
     : undefined;
   const surface =
@@ -396,6 +401,11 @@ export function normalizePermissionEvidence(
   const sessionId = nonEmptyString(forwarding?.requesterSessionId);
   const payload = record(details.payload);
   const payloadRequest = record(payload?.request);
+  // Attribution is evidence, not independent permission or user consent.
+  // It comes only from the structured gate payload, never previews/transcripts.
+  const decidingPath = isPathSurface(surface)
+    ? normalizeDecidingPath(payloadRequest?.decidingPath)
+    : undefined;
   const matchedPattern =
     nonEmptyString(payloadRequest?.matchedPattern) ??
     nonEmptyString(details.matchedPattern);
@@ -425,6 +435,7 @@ export function normalizePermissionEvidence(
     ...(fullCommand ? { fullCommand } : {}),
     ...(matchedPattern ? { matchedPattern } : {}),
     ...(matchedSpelling ? { matchedSpelling } : {}),
+    ...(decidingPath ? { decidingPath } : {}),
     path,
     resolvedPath: accessIntent?.boundaryValue,
     destination,

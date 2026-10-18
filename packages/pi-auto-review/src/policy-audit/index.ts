@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
-import { classifyPermission } from "./classifier.ts";
+import { classifyPermission, type PolicyAuditCommandFeature } from "./classifier.ts";
+import { normalizeDecidingPath, normalizeDelegationLicense } from "../permission-facts.ts";
 import { buildPolicyAuditReport, renderPolicyAuditMarkdown, type PolicyAuditReport } from "./report.ts";
 import { defaultPolicyAuditDirectory, PolicyAuditStore, type PolicyAuditStoreOptions } from "./store.ts";
 
@@ -40,7 +41,12 @@ const PERMISSION_RESOLUTIONS = new Set([
 ]);
 
 /** Upper bound on remembered ask spellings awaiting their decision event. */
-const PROMPT_SPELLING_CACHE_LIMIT = 256;
+const REQUEST_FACTS_CACHE_LIMIT = 256;
+
+type AuditRequestFacts = {
+  matchedSpelling?: string;
+  features: readonly PolicyAuditCommandFeature[];
+};
 
 export function parsePolicyAuditArguments(raw: string, retentionDays: number): PolicyAuditArguments {
   const result: PolicyAuditArguments = { days: Math.min(30, retentionDays), top: 20, minCount: 5, scope: "current" };
@@ -81,14 +87,11 @@ export class PolicyAuditController {
   private warned = false;
   private queue = Promise.resolve();
   /**
-   * Ask spelling captured at authorizer entry or from `permissions:ui_prompt`,
-   * keyed by request id. Automatic allow/deny decisions never open a UI prompt.
-   * The `permissions:decision` event still carries only `matchedPattern`, so
-   * the #910 spelling has to be joined by request id at record time. The map
-   * is bounded FIFO: spellings for asks whose decision never arrives are
-   * dropped oldest-first, and the spelling is display-only anyway.
+   * Bounded request-id join for facts absent from `permissions:decision`.
+   * Only spelling (digested at record time) and finite provenance labels are
+   * retained. The deciding path itself never enters SQLite or the async queue.
    */
-  private readonly promptSpellings = new Map<string, string>();
+  private readonly requestFacts = new Map<string, AuditRequestFacts>();
 
   constructor(private readonly options: PolicyAuditControllerOptions) {}
 
@@ -98,15 +101,27 @@ export class PolicyAuditController {
     const request = rawRequest && typeof rawRequest === "object" && !Array.isArray(rawRequest)
       ? rawRequest as Record<string, unknown>
       : undefined;
+    if (typeof requestId !== "string" || !requestId) return;
+    const previous = this.requestFacts.get(requestId);
     const spelling = request?.matchedSpelling;
-    if (typeof requestId !== "string" || !requestId || typeof spelling !== "string" || spelling.length === 0) return;
-    // A deferred authorizer and its eventual UI prompt describe the same ask.
-    // Updating that entry must not evict an unrelated outstanding request.
-    if (!this.promptSpellings.has(requestId) && this.promptSpellings.size >= PROMPT_SPELLING_CACHE_LIMIT) {
-      const oldest = this.promptSpellings.keys().next().value;
-      if (oldest !== undefined) this.promptSpellings.delete(oldest);
+    const decidingPath = normalizeDecidingPath(request?.decidingPath);
+    const rawIntent = request?.accessIntent;
+    const intent = rawIntent && typeof rawIntent === "object" && !Array.isArray(rawIntent)
+      ? rawIntent as Record<string, unknown> : undefined;
+    const license = normalizeDelegationLicense(intent);
+    const features: PolicyAuditCommandFeature[] = [...(previous?.features ?? [])];
+    if (decidingPath) features.push(`effect:${decidingPath.effect}`, `effect_source:${decidingPath.effectSource}`);
+    if (license) features.push("delegation_license:nothing-on-disk");
+    const matchedSpelling = typeof spelling === "string" && spelling.length > 0
+      ? spelling : previous?.matchedSpelling;
+    if (!matchedSpelling && features.length === 0) return;
+    // A deferred authorizer and its UI prompt describe the same ask; the UI
+    // projection omitting a license must not erase the earlier gate evidence.
+    if (!this.requestFacts.has(requestId) && this.requestFacts.size >= REQUEST_FACTS_CACHE_LIMIT) {
+      const oldest = this.requestFacts.keys().next().value;
+      if (oldest !== undefined) this.requestFacts.delete(oldest);
     }
-    this.promptSpellings.set(requestId, spelling);
+    this.requestFacts.set(requestId, { matchedSpelling, features: [...new Set(features)].sort() });
   }
 
   /** Capture human prompts, including asks that bypass our authorizer. */
@@ -165,8 +180,12 @@ export class PolicyAuditController {
         : rawOrigin.includes("default") || rawOrigin.includes("package")
           ? "default"
           : rawOrigin ? "other" : "none";
+    const facts = this.requestFacts.get(event.requestId);
     const sanitized = {
       ...classified,
+      // Observational only: effect declarations never lower risk or make a
+      // previously ineligible configuration recommendation eligible.
+      features: [...new Set([...classified.features, ...(facts?.features ?? [])])].sort(),
       requestId: digest("request", event.requestId),
       result,
       resolution: PERMISSION_RESOLUTIONS.has(event.resolution) ? event.resolution : "unknown",
@@ -177,11 +196,11 @@ export class PolicyAuditController {
         : undefined,
       matchedSpelling: typeof event.matchedSpelling === "string" && event.matchedSpelling.length > 0
         ? digest("spelling", event.matchedSpelling)
-        : this.promptSpellings.has(event.requestId)
-          ? digest("spelling", this.promptSpellings.get(event.requestId)!)
+        : facts?.matchedSpelling
+          ? digest("spelling", facts.matchedSpelling)
         : undefined,
     };
-    this.promptSpellings.delete(event.requestId);
+    this.requestFacts.delete(event.requestId);
     this.queue = this.queue
       .then(async () => (await this.getStore()).record(cwd, sanitized))
       .then(() => undefined)
@@ -209,7 +228,7 @@ export class PolicyAuditController {
   }
 
   async close(): Promise<void> {
-    this.promptSpellings.clear();
+    this.requestFacts.clear();
     await this.queue;
     // Detach before awaiting so concurrent shutdowns cannot double-close.
     const storePromise = this.storePromise;

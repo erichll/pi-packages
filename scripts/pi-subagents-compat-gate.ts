@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { copyFile, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   loadPiSubagentsNativeRuntime,
   nativeSubagentCallBlockReason,
+  nativeSteeringStatusBlockReason,
   NATIVE_CHILD_TOOLS,
   PI_SANDBOX_ACKNOWLEDGEMENT,
   isCompatiblePiSubagentsVersion,
@@ -239,6 +240,17 @@ async function runModelProbe(options: {
         state?: unknown;
         steps?: Array<{ status?: unknown; error?: unknown; recentOutput?: unknown }>;
       };
+      if (options.protectedMode) {
+        // Validate real emitted provenance, independently of the completion
+        // state. This is a metadata-shape check, not a live steering test.
+        const steeringShape = {
+          ...status, state: "running",
+          steps: status.steps?.map((step) => ({ ...step, status: "running" })),
+        };
+        const runId = basename(asyncDir);
+        const reason = nativeSteeringStatusBlockReason(steeringShape, runId, ["gate-probe"], () => true);
+        if (reason) throw new Error(`protected child steering-proof shape changed: ${reason}`);
+      }
       if (status.state !== "complete" || status.steps?.some((step) => step.status !== "complete")) {
         throw new Error(`model probe child did not complete successfully: ${String(status.steps?.find((step) => step.error)?.error ?? status.state)}`);
       }
@@ -295,6 +307,8 @@ const internal = (relative: string): string =>
 for (const relative of [
   "src/agents/agents",
   "src/extension/config",
+  "src/runs/shared/run-ownership",
+  "src/shared/types",
   "src/runs/shared/child-tool-plan",
   "src/runs/foreground/subagent-executor",
 ]) await readFile(internal(relative), "utf8");
@@ -306,7 +320,7 @@ const executor = await readFile(internal("src/runs/foreground/subagent-executor"
 assert.match(executor, /publicExecutions = new WeakSet/);
 assert.match(executor, /publicExecution \? undefined : runHostCommand/);
 
-const tempHome = await mkdtemp(join(tmpdir(), "pi-subagents-065-gate-"));
+const tempHome = await mkdtemp(join(tmpdir(), "pi-subagents-079-gate-"));
 const agentDir = join(tempHome, ".pi", "agent");
 const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 process.env.PI_CODING_AGENT_DIR = agentDir;
@@ -330,6 +344,11 @@ try {
   assert.match(nativeSubagentCallBlockReason({ workflow: "owned", async: true }) ?? "", /named workflows/);
   assert.match(nativeSubagentCallBlockReason({ action: "schedule.run" }) ?? "", /scheduled/);
   assert.match(nativeSubagentCallBlockReason({ action: "update" }) ?? "", /management/);
+  assert.match(nativeSubagentCallBlockReason({ action: "append-step" }) ?? "", /management/);
+  assert.match(nativeSubagentCallBlockReason({ action: "future.action" }) ?? "", /management/);
+  assert.match(nativeSubagentCallBlockReason({ action: "steer", id: "compat-child" }) ?? "", /steeringRecovery: false/);
+  assert.equal(nativeSubagentCallBlockReason({ action: "steer", id: "compat-child", options: { steeringRecovery: false } }), undefined);
+  assert.equal(typeof runtime.steeringTargetBlockReason, "function");
 
   console.log(JSON.stringify({
     status: "PASS",

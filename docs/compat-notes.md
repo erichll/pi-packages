@@ -1,14 +1,13 @@
 # Compatibility seams with `pi-subagents`
 
 `@erichll/pi-sandbox` supports protected external orchestration on the
-`pi-subagents >=0.76.1` line: the peer dependency is a floor with no upper pin,
-and the development dependency is pinned to `^0.76.1` (deterministically
-validated on 0.76.1). The structural loader retains its historical 0.66.0
-minimum and source-layout support; published installs must meet the newer
-peer floor. The real gates are the
-`./capability-ceiling` export and the capability-ceiling API version, which the
-loader checks at load time; the version range only rejects old lines and guards
-against blind accept-on-drift. Any mismatch disables the whole mode rather than
+`pi-subagents >=0.79.0` line: the peer dependency has no upper pin, and the
+development dependency is `^0.79.0` (deterministically validated on 0.79.0).
+The structural loader now shares that stable-version floor because it uses the
+0.79 session-succession ownership seam. Source and compiled layouts remain
+recognized, but old versions and prereleases are rejected. The loader validates
+the `./capability-ceiling` export, API version, discovery/config functions,
+run ownership and runtime paths; the version range alone is not proof of safety. Any mismatch disables the whole mode rather than
 reducing protection.
 
 ## Security contract
@@ -19,7 +18,7 @@ process sandbox. The trusted configuration must select
 `allowedNativeAgents`, and set `scheduledRuns.enabled=false` in the upstream
 pi-subagents config.
 
-At session start and before every launch, pi-sandbox uses the internal
+At session start and before every launch or steering operation, pi-sandbox uses the internal
 `src/agents/agents.ts` discovery API to require that each name resolves uniquely
 to the same canonical name, is enabled, uses the default or `pi` runner, keeps
 ambient extensions enabled, and does not allow nested subagents. The public
@@ -32,7 +31,25 @@ and are therefore rejected: since pi-subagents 0.73.0 the inline
 `workflow: true` script, a `workflow` path, and a named workflow all arrive in
 the single `workflow` parameter, and the loader rejects any call that sets it.
 External runners, schedules, resume, and agent/workflow management mutations are
-rejected too.
+rejected too. Management uses an explicit allowlist: list/get/status/debug.run,
+models/guide/validate, stop/interrupt/dismiss, and restricted steer. Unknown
+future actions and append-step are denied.
+
+Steer must explicitly disable `steeringRecovery` in `options` or its legacy
+top-level field; otherwise upstream can internally resume a child. It requires
+a complete run ID (no prefixes or caller-selected directory) and a host-owned,
+non-symlinked status record for a running direct single-child run. Ownership
+uses upstream same-process succession, but is checked separately from the
+sandbox-origin five-tool ceiling and the child's own runtime acknowledgement.
+An inherited unprotected child cannot be retroactively sandboxed: steering is
+blocked, while read-only inspection and stop remain available. This is a
+best-effort runtime evidence check, not cryptographic attestation. Any host-side
+writer allowed to modify the upstream async directory (including a parent tool
+with that filesystem access) can forge these JSON records. We retain
+status-file-based recovery compatibility rather than requiring a process-local
+launch-receipt registry; protect the runtime directory separately when that
+stronger threat model matters.
+
 Child runtimes emit the upstream-safe stable `subagent:acknowledge-extension` ID
 `@erichll:pi-sandbox`; terminal child records returned by status/debug fail
 closed without that proof.
@@ -43,14 +60,16 @@ default `builtin` provider for complete worker-process-tree isolation.
 
 ## Versioned seams
 
-| Seam | Status on the `>=0.76.1` peer line (validated on 0.76.1) | Verification |
+| Seam | Status on the `>=0.79.0` peer line (validated on 0.79.0) | Verification |
 | --- | --- | --- |
-| package version | peer requires `>=0.76.1`; structural loader retains the historical 0.66.0 minimum | npm peer + runtime loader + deterministic gate |
+| package version | peer and structural loader require stable `>=0.79.0` on the 0.x line | npm peer + runtime loader + deterministic gate |
 | `./capability-ceiling` export | public; expected path and API v1 | runtime loader + tests |
 | module layout | `.ts` source (0.66.0-0.69.0) or compiled `.js`/`.d.ts` (0.70.0+) under `src/`, same relative paths | runtime loader + tests |
 | host peer `@earendil-works/pi-tui` | supplied by Pi; filesystem alias on Node, host module object on Bun | runtime loader + isolated Node/Bun/compiled-Bun tests |
 | `src/agents/agents.<ext>` | internal discovery and canonical resolution; 0.72.0 adds an optional `options.globalNpmRoot` argument and leaves the 3-argument form unchanged | runtime loader + tests |
 | `src/extension/config.<ext>` | internal config loader | runtime loader + tests |
+| `src/runs/shared/run-ownership.<ext>` | `ownsRun` includes in-process predecessor sessions | runtime loader + real succession tests |
+| `src/shared/types.<ext>` | `DIRS.async` supplies the host-owned run root | runtime loader + path/symlink/malformed-status tests |
 | child acknowledgement | event `subagent:acknowledge-extension` | unit/model gate |
 | `bg_wait` completion details | must carry runtime acknowledgement | result guard/model gate |
 
@@ -77,9 +96,9 @@ mode requires `async: true` children (detached runners), so forwarded-permission
 routing is unaffected; `scripts/pi-subagents-parent-forwarding-adapter.ts`
 remains only as a no-op shim for the 0.69.0-and-earlier line.
 
-Host requirement: these packages require Pi 1.1.0 or newer (the
-`peerDependencies` floor, validated 2026-10-08). Historically the floor was
-1.0.0, before that 0.87.1, 0.86.0, and 0.85.1: Pi 0.85.0
+Host requirement: these packages now require Pi 1.3.0 or newer, with
+permission-system 41.0.0 and typebox 1.4.2 development/peer baselines.
+Historically the Pi floor was 1.1.0 (then 1.2.0 was tested), 1.0.0, before that 0.87.1, 0.86.0, and 0.85.1: Pi 0.85.0
 does not ship `@earendil-works/pi-server`, which 0.68.0 stopped bundling, so
 background children fail to launch there with an explicit error. The `builtin`
 provider is unaffected.
@@ -156,10 +175,36 @@ object described above. Node retains ordinary package resolution for these
 imports. The importing module set is unchanged
 from 0.71.0, in a global `~/.pi/agent/npm` install the hoisted copy comes from
 Pi's own `@earendil-works/pi-ai`. The current sandbox peer floor is
-`typebox >=1.3.36`; install that version separately when the host's embedded
-or hoisted copy is older. The development workspace installs 1.3.36, while
-Pi 1.1.0 itself pins 1.3.27 internally; the host-peer tests cover the loader
-with those host-provided modules.
+`typebox >=1.4.2`; install that version separately when the host's embedded
+or hoisted copy is older. The development workspace uses 1.4.2 and Pi 1.3.0.
+The isolated host-peer tests cover Node, Bun and compiled-Bun loading.
+
+## 2026-10-18 latest-baseline verification
+
+The security packages now use Pi 1.3.0, permission-system 41.0.0,
+pi-subagents 0.79.0, typebox 1.4.2, Node types 26.6.5 and TypeScript 7.0.2
+as their development/peer baselines. The upstream ceiling, discovery and config
+implementations are unchanged from 0.78.0; ownership now includes same-process
+session succession, so steering separately verifies live protection provenance.
+
+`npm run check` passes. The complete workspace suite reports auto-review
+256/256, sandbox 118 passed plus one native-runtime temp-environment skip, and
+statusline 99/99. New deterministic tests exercise upstream's real succession
+registry, protected versus unprotected inherited targets, aliases, disabled
+recovery, missing/corrupt status and symlink rejection.
+
+The deterministic gate and model-backed native baseline/protected-child gate
+both pass with parent `cliproxyapi/codex-auto-review` and child
+`cliproxyapi/gpt-6-luna`: `baseline: native-host-readable`,
+`protected: sandboxed-bash-blocked-host-read`,
+`acknowledgement: @erichll:pi-sandbox`. The model gate also validates that real
+emitted child metadata has the shape required by the steering-proof checker;
+this metadata-shape check is not an end-to-end live steering test.
+
+The install audit separately reports a high-severity advisory in node-forge,
+via the unchanged sandbox-runtime dependency. npm's proposed remediation is a
+runtime downgrade, not a fixed compatible release; no forced downgrade or
+automatic audit fix is applied as part of the dev/peer upgrade.
 
 ## Upgrade procedure
 

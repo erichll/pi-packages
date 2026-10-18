@@ -31,9 +31,8 @@ that dependency is a hard prerequisite (see [Install and enable](#install-and-en
 > **Prerequisite:** pi-auto-review is an authorizer inside
 > `@gotgenes/pi-permission-system`. Pi does not auto-install peer packages, so
 > install the permission system separately (once per machine) before this
-> extension. This release line requires Pi 1.1.0 or later and
-> permission-system 40.1.1 or later, including the bash-chain session-grant
-> security fix:
+> extension. The current development/peer baseline requires Pi 1.3.0 or later
+> and permission-system 41.0.0 or later:
 
 Node-based Pi requires Node.js 22.19.0 or newer. Permission auditing uses the
 host runtime's built-in SQLite: `node:sqlite` on Node and `bun:sqlite` on Bun,
@@ -72,8 +71,13 @@ adapters must consume the exact grant before retrying an operation. Changing
 the command, path, resolved path, destination, cwd, agent, or tool input
 invalidates that grant.
 
-Permission-system downgrades authorizer allows on `path` and
-`external_directory` to `defer`. In an interactive TUI,
+This authorizer itself downgrades model allows on the `path` and
+`external_directory` families to `defer`. Permission-system 41 can honor a
+native authorizer allow on a narrowly licensed bash ask, but this package
+intentionally retains its local cap even when
+`accessIntent.delegationLicense: "nothing-on-disk"` is present. No new
+headless/RPC path grant is enabled, and disabling UI auto-confirm still leaves
+the decision to the terminal. In an interactive TUI,
 `autoConfirmBoundedAllows` can bind the exact model allow to the immediately
 following recognized permission dialog. The bridge is request-ID-bound,
 expires after ten seconds, and is consumed once. Mode, component, request, or
@@ -115,6 +119,18 @@ The reviewer sees this as explanatory evidence; it does not replace the actual
 command or enter the grant/retry hash. Absolute-path Bash rules now also reach
 relative spellings of that path, so review existing allow/ask/deny rules when
 upgrading from 39.x.
+
+The reviewer also receives the gate's validated `decidingPath` (path, effect,
+and effect source), plus any `accessIntent.delegationLicense`. A
+`declared-global` or `declared-project` effect is a configuration claim, not an
+independent proof of read-only behavior or user consent. These facts are bound
+into exact retry/grant hashes; they do not weaken hard denies or change the
+bounded-allow cap. Raw preview text cannot supply either fact.
+
+Permission-system's optional `commandEffects` is not enabled by this package.
+In particular, `effects: []` withdraws a command's operands from path gates,
+including path denies; do not use broad declarations for general interpreters
+or package managers merely to reduce prompts.
 
 Nested interpreter expansion is limited to 32 payloads and 32 KiB of cumulative
 payload text per command fact, across all recursion levels. Exceeding either
@@ -421,7 +437,11 @@ HMACed. Spelling facts are captured at authorizer entry as well as human prompts
 so automatic allow/deny decisions are included; 39.x requests simply lack the
 field. Reports expose only anonymous spelling fingerprints. Syntactically valid
 custom tool names are also retained in plaintext; invalid names stay anonymous
-as `<custom-tool>`. The database never stores raw commands, raw paths,
+as `<custom-tool>`. Path effect/source and delegation-license labels are joined
+by request ID and stored as finite observational features in the existing v3
+schema; the deciding path itself is not stored. Reports show path attribution
+when present, without treating declarations or machine allows as new approval
+evidence for configuration suggestions. The database never stores raw commands, raw paths,
 URLs, credentials, or non-Bash tool arguments and inputs. Because safe bare Bash
 words are retained, command templates can contain non-secret filenames or
 project-specific labels; inspect suggestions before copying them.

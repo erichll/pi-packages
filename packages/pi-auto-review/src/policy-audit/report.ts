@@ -36,6 +36,8 @@ export type PolicyAuditReport = {
   keepAskRecommendations: PolicyAuditReportItem[];
   ruleFingerprints: Array<{ fingerprint: string; count: number }>;
   spellingFingerprints: Array<{ fingerprint: string; count: number }>;
+  /** Finite effect/source/license labels only; never raw deciding paths. */
+  pathAttributions?: PolicyAuditReportItem[];
   warnings: string[];
 };
 
@@ -222,7 +224,12 @@ export function buildPolicyAuditReport(
     if (row.spellingFingerprint === "none") continue;
     spellingCounts.set(row.spellingFingerprint, (spellingCounts.get(row.spellingFingerprint) ?? 0) + row.count);
   }
+  const attribution = (row: PolicyAuditAggregateRow) => row.features.split(",")
+    .filter((feature) => /^(?:effect:(?:read|write|unproven)|effect_source:(?:syntax|core|declared-global|declared-project|retracted|unproven)|delegation_license:nothing-on-disk)$/u.test(feature))
+    .sort().join(" / ");
+  const pathAttributions = rank(result.rows.filter((row) => attribution(row)), attribution, options.top, options.minCount);
   const warnings = [
+    ...(pathAttributions.length ? ["Declared path effects and delegation licenses are gate evidence, not independent safety proofs or user authorization."] : []),
     "Counts begin at first successful enablement; no historical logs are imported.",
     "Suggestions are evidence-based decision aids and never modify permission configuration.",
     "Migrated pre-v2 counts remain in statistics but cannot contribute recommendation evidence.",
@@ -265,6 +272,7 @@ export function buildPolicyAuditReport(
       .filter((item) => item.count >= options.minCount)
       .sort((a, b) => b.count - a.count || a.fingerprint.localeCompare(b.fingerprint))
       .slice(0, options.top),
+    ...(pathAttributions.length ? { pathAttributions } : {}),
     warnings,
   };
 }
@@ -312,6 +320,9 @@ function renderHotspotSections(report: PolicyAuditReport): string[] {
   if (report.ruleFingerprints.length > 0) {
     groups.push({ title: "Anonymous rule-hit fingerprints",
       items: report.ruleFingerprints.map((f) => ({ name: f.fingerprint, count: f.count, denied: 0, denialRate: 0 })) });
+  }
+  if (report.pathAttributions?.length) {
+    groups.push({ title: "Path effect attribution (observational)", items: report.pathAttributions });
   }
   if (report.spellingFingerprints.length > 0) {
     groups.push({ title: "Anonymous alternate-spelling fingerprints",

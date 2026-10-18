@@ -122,6 +122,7 @@ export function boundaryRequest(
     ...(evidence.matchedSpelling
       ? { matchedSpelling: evidence.matchedSpelling }
       : {}),
+    ...(evidence.decidingPath ? { decidingPath: evidence.decidingPath } : {}),
     path: evidence.path,
     resolvedPath: evidence.resolvedPath,
     destination: evidence.destination,

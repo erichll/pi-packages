@@ -839,6 +839,7 @@ export function createPiAutoReviewExtension(
               result?.transcript.relevantResultCharacters,
             transcriptTruncated: result?.transcript.truncated,
             command: request.command,
+            decidingPath: request.decidingPath,
             path: request.path,
             resolvedPath: request.resolvedPath,
             destination: request.destination,
@@ -851,6 +852,9 @@ export function createPiAutoReviewExtension(
                 : undefined,
           });
 
+          // Deliberately preserve our local cap even when upstream supplies a
+          // nothing-on-disk license. That evidence does not opt this package
+          // into native/headless path authorization or bypass UI settings.
           if (allowCapped || decision.kind === "defer") {
             return { kind: "defer" };
           }

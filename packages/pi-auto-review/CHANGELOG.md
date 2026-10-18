@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.27.0 - 2026-10-18
+
+- Raise all development/peer baselines to the latest stable registry releases:
+  Pi (`pi-ai` / `pi-coding-agent`) 1.3.0, permission-system 41.0.0,
+  Node types 26.6.5 and TypeScript 7.0.2. Peer minimums now match the tested
+  baseline rather than continuing to advertise older hosts.
+- Adapt the real-chain integration harness to permission-system 41's named
+  delegation-envelope signature. Runtime authorizer registration still uses
+  the public service API.
+- Validate and forward structured deciding-path effect/provenance and the
+  nothing-on-disk license to the reviewer and review log; bind those facts into
+  exact retry/grant hashes. Declared effects remain configuration claims, not
+  independent safety proofs or authorization. Keep the reviewer prompt bounded.
+- Preserve the local path-family allow-to-defer cap, including licensed local
+  and forwarded asks in TUI/RPC modes; UI auto-confirm opt-out still applies.
+  No native/headless licensed allow or commandEffects declaration is enabled.
+- Join finite effect/source/license labels into policy audit's existing schema
+  v3 features and optional report section without storing raw deciding paths
+  or promoting machine approvals into configuration recommendation evidence.
+
 ## 0.26.1 - 2026-10-13
 
 - Fix Pi 1.2.0 compatibility: pass an explicit `{ deliverAs: "followUp" }` to both

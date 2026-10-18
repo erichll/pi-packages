@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.27.0 - 2026-10-18
+
+- Raise all development/peer baselines to the latest stable registry releases:
+  Pi 1.3.0, pi-subagents 0.79.0, typebox 1.4.2, Node types 26.6.5 and
+  TypeScript 7.0.2. Declare the already-imported pi-tui host peer explicitly
+  at 1.3.0. Keep pi-subagents optional and do not bundle host peers.
+- Align the structural loader with the stable 0.79.0 floor and validate its
+  ownership/runtime-root seams as well as discovery/config/ceiling exports.
+- Replace protected management's blacklist with an explicit allowlist. Reject
+  unknown future actions and chain appends; workflows and resume remain off.
+- Require steeringRecovery=false, a complete direct-run ID, current canonical
+  agent validation, and host-owned status proof before steering. Ownership of
+  an inherited run is not sandbox proof: verify its sandbox-origin ceiling
+  and its own child-runtime acknowledgement, and fail closed on missing proof,
+  malformed status or linked paths. Inspection/stop remain available. Keep
+  status-file-based recovery compatibility; explicitly document that these
+  JSON facts are not attestation against writers with runtime-directory access.
+- Add real same-process session-succession, input-alias, action-drift and
+  runtime-file regression coverage; refresh compatibility documentation.
+
 ## 0.26.1 - 2026-10-13
 
 - Upgrade the Pi 1.2.0 development baseline (`pi-coding-agent`, `pi-ai`,

@@ -1,4 +1,4 @@
-import { readFile, realpath } from "node:fs/promises";
+import { lstat, readFile, realpath } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -7,52 +7,13 @@ import * as hostPiTui from "@earendil-works/pi-tui";
 import * as hostTypebox from "typebox";
 
 /**
- * Structural loader compatibility: 0.66.0 and above; the package peer floor
- * is >=0.76.1 (no upper pin). Any new minor
- * is accepted, so the exports/ceiling checks below are the real compatibility
- * gate; this range only rejects old lines and guards against blind
- * accept-on-drift. Revalidated against 0.70.0: ceiling registry
- * (`SUBAGENT_CAPABILITY_CEILING_VERSION` 1), the `./capability-ceiling` export,
- * discovery/canonical resolution, and the config loader with `scheduledRuns`
- * are unchanged since 0.66.0, and the published package now ships compiled
- * `.js`/`.d.ts` modules instead of the TypeScript source layout (revalidated
- * 2026-09-23 against the published 0.71.0 package: the ceiling implementation
- * and the config loader are byte-identical to 0.70.0, `discoverAgents` and
- * `resolveAgentName` keep their signatures, and the `./capability-ceiling`
- * export still resolves to `.js`), and revalidated 2026-09-27 against the
- * published 0.72.1 package: the ceiling implementation and the config loader
- * are still byte-identical to 0.70.0, `discoverAgents` and `resolveAgentName`
- * keep their signatures, `src/agents/agents` only gains an optional
- * `options.globalNpmRoot` argument, `typebox` moved from a hard dependency to
- * an optional host peer, and the `./capability-ceiling` export still resolves
- * to `.js`), and revalidated 2026-10-03 against the published 0.75.0 package:
- * the capability-ceiling implementation is still byte-identical to 0.70.0 with
- * `SUBAGENT_CAPABILITY_CEILING_VERSION` 1, the `exports` map and the
- * dependency/peer sets are unchanged from 0.72.1, `discoverAgents` and
- * `resolveAgentName` keep their signatures, `src/extension/config` only adds
- * fail-closed field validation (including `scheduledRuns.enabled`), and
- * `src/agents/agents` changes stay in settings persistence and
- * builtin-override handling away from the seams the loader reads. Protected
- * mode needs Pi 0.86.0 or newer
- * (the pi-subagents 0.68.0+ floor): 0.85.0 does not ship
- * `@earendil-works/pi-server`, so background children fail to launch there.
- * Revalidated 2026-10-08 against 0.76.1 / Pi 1.1.0: capability-ceiling and
- * config modules are byte-identical to 0.75.0; discovery changes add settings
- * write leases without changing the loader seams. The deterministic gate and
- * isolated Node/Bun/compiled-Bun host-peer tests pass. Model-backed native
- * baseline / protected child acceptance also passes, with the host read
- * blocked by sandboxed Bash and the runtime acknowledgement verified. This
- * package's own peer floor is Pi 1.1.0.
- * Revalidated 2026-10-13 against 0.78.0 / Pi 1.2.0: pi-subagents 0.77.0
- * required chord aliases for every host from Pi 0.85 onward, which broke
- * background children on Pi 1.2.0 (chord removed upstream); 0.78.0 requires
- * chord only when the host manifest declares it, so no host-side workaround
- * is needed. The subagent tool schema moved management fields into `options`
- * in 0.77.0 (top-level aliases keep working) and the loader seams are
- * unchanged. The deterministic gate and model-backed native baseline /
- * protected child acceptance pass.
+ * Tested on pi-subagents 0.79.0 / Pi 1.3.0. Accept newer 0.x minors only
+ * after validating the ceiling API, discovery, config, ownership and runtime
+ * paths exports below. The ownership seam includes same-process session
+ * succession; ownership alone is never proof that a worker was protected.
+ * See docs/compat-notes.md for the compatibility and acceptance history.
  */
-export const PI_SUBAGENTS_COMPAT_RANGE = ">=0.66.0";
+export const PI_SUBAGENTS_COMPAT_RANGE = ">=0.79.0";
 export const NATIVE_CHILD_TOOLS = ["bash", "read", "grep", "find", "ls"] as const;
 export const PI_SANDBOX_ACKNOWLEDGEMENT = "@erichll:pi-sandbox";
 
@@ -92,6 +53,12 @@ type ConfigModule = {
   loadConfig(): { scheduledRuns?: { enabled?: boolean } };
 };
 
+type RunOwnershipModule = {
+  ownsRun(sessionId: string, ownerSessionId: string | undefined): boolean;
+};
+
+type RuntimePathsModule = { DIRS: { async: string } };
+
 export type CapabilityCeilingHandle = { dispose(): void };
 type CeilingModule = {
   SUBAGENT_CAPABILITY_CEILING_VERSION: unknown;
@@ -111,6 +78,12 @@ export type PiSubagentsNativeRuntime = {
     preferredProvider?: string,
   ): string[];
   registerCeiling(sessionId: string, allowedAgents: readonly string[]): CapabilityCeilingHandle;
+  /** Inspect runtime files, not model text; assumes their directory is trusted. */
+  steeringTargetBlockReason(
+    sessionId: string,
+    runId: string,
+    allowedAgents: readonly string[],
+  ): Promise<string | undefined>;
 };
 
 function requiredFunction(
@@ -123,15 +96,14 @@ function requiredFunction(
 }
 
 /**
- * Accept only versions at or above PI_SUBAGENTS_COMPAT_RANGE (>= 0.66.0,
- * including prerelease suffixes like 0.66.1-beta.1) without pulling in a
- * semver runtime.
+ * Accept stable 0.x releases at or above the tested peer floor without
+ * pulling in a semver runtime. Prereleases require explicit revalidation.
  */
 export function isCompatiblePiSubagentsVersion(version: unknown): boolean {
   if (typeof version !== "string") return false;
-  const match = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(version);
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:\+[0-9A-Za-z.-]+)?$/.exec(version);
   if (!match) return false;
-  return Number(match[1] ?? "") === 0 && Number(match[2] ?? "") >= 66;
+  return Number(match[1]) === 0 && Number(match[2]) >= 79;
 }
 
 function capabilityCeilingExportTarget(value: unknown): string | undefined {
@@ -299,10 +271,12 @@ export async function loadPiSubagentsNativeRuntime(
   });
   const internal = (relative: string): string =>
     pathToFileURL(join(root, piSubagentsInternalModulePath(relative, extension))).href;
-  const [ceiling, discovery, config] = await Promise.all([
+  const [ceiling, discovery, config, ownership, paths] = await Promise.all([
     jiti.import(internal("src/api/capability-ceiling")) as Promise<CeilingModule>,
     jiti.import(internal("src/agents/agents")) as Promise<DiscoveryModule>,
     jiti.import(internal("src/extension/config")) as Promise<ConfigModule>,
+    jiti.import(internal("src/runs/shared/run-ownership")) as Promise<RunOwnershipModule>,
+    jiti.import(internal("src/shared/types")) as Promise<RuntimePathsModule>,
   ]).catch((error) => {
     throw new Error(
       `pi-subagents compatibility failure: ${error instanceof Error ? error.message : String(error)}`,
@@ -315,6 +289,10 @@ export async function loadPiSubagentsNativeRuntime(
   requiredFunction(discovery.discoverAgents, "discoverAgents");
   requiredFunction(discovery.resolveAgentName, "resolveAgentName");
   requiredFunction(config.loadConfig, "loadConfig");
+  requiredFunction(ownership.ownsRun, "ownsRun");
+  if (typeof paths.DIRS?.async !== "string" || !paths.DIRS.async) {
+    throw new Error("pi-subagents compatibility failure: missing async runtime root");
+  }
 
   const validateAllowedAgents = (
     cwd: string,
@@ -376,31 +354,82 @@ export async function loadPiSubagentsNativeRuntime(
         ceiling: { allowedAgents, allowedTools: NATIVE_CHILD_TOOLS },
       });
     },
+    async steeringTargetBlockReason(sessionId, runId, allowedAgents) {
+      try {
+        // A complete id only: never accept prefixes, caller-selected directories,
+        // symlinks, or a path outside the upstream runtime's async root.
+        if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u.test(runId)) {
+          return "protected steering requires a complete native run id";
+        }
+        const root = await realpath(paths.DIRS.async);
+        const runDir = join(root, runId);
+        if (!(await lstat(runDir)).isDirectory() || await realpath(runDir) !== runDir) {
+          return "protected steering rejects a linked or invalid run directory";
+        }
+        const statusPath = join(runDir, "status.json");
+        if (!(await lstat(statusPath)).isFile()) {
+          return "protected steering rejects a linked or invalid status file";
+        }
+        const status: unknown = JSON.parse(await readFile(statusPath, "utf8"));
+        return nativeSteeringStatusBlockReason(status, runId, allowedAgents, (owner) =>
+          ownership.ownsRun(sessionId, owner),
+        );
+      } catch {
+        return "protected steering cannot verify the target's sandbox runtime proof; inspect or stop it instead";
+      }
+    },
   };
 }
 
 export function nativeSubagentCallBlockReason(
   input: Record<string, unknown>,
 ): string | undefined {
+  if (input.action !== undefined && typeof input.action !== "string") {
+    return "protected mode requires a string action";
+  }
   const action = typeof input.action === "string" ? input.action.trim() : undefined;
   if (action?.startsWith("schedule.")) {
     return "scheduled subagent operations are disabled in protected mode";
   }
-  const forbiddenActions = new Set([
-    "create", "update", "delete", "eject", "enable", "disable", "reset",
-    "refine", "refine.rollback", "watchdog.configure", "grant-spawn-budget",
-    "mission.create", "mission.update", "mission.resolve-decision",
-    "mission.attach-run", "mission.close", "inspector.open", "inspector.close",
-    "project.open", "project.close", "worktree.discard", "worktree.cleanup",
-    "lane.recordMerge", "lane.recordSupersession",
-  ]);
-  if (action && forbiddenActions.has(action)) {
-    return `subagent management action '${action}' is disabled in protected mode`;
-  }
   if (action === "resume") {
     return "subagent resume may launch a child and is disabled in protected mode";
   }
-  if (action !== undefined) return undefined;
+  if (action !== undefined) {
+    // New upstream actions must be reviewed explicitly, not admitted by default.
+    const allowedActions = new Set([
+      "list", "get", "status", "debug.run", "models", "guide", "validate",
+      "stop", "interrupt", "dismiss", "steer",
+    ]);
+    if (!allowedActions.has(action)) {
+      return `subagent management action '${action}' is disabled in protected mode`;
+    }
+    if (action === "steer") {
+      const options = input.options;
+      if (options !== undefined && (!options || typeof options !== "object" || Array.isArray(options))) {
+        return "protected steering requires an options object";
+      }
+      const nested = (options ?? {}) as Record<string, unknown>;
+      if ((input.steeringRecovery ?? nested.steeringRecovery) !== false ||
+          input.steeringRecovery === true || nested.steeringRecovery === true) {
+        return "protected steering requires steeringRecovery: false; implicit resume is disabled";
+      }
+      if (input.dir !== undefined || nested.dir !== undefined) {
+        return "protected steering requires a complete run id, not dir";
+      }
+      if (input.id !== undefined && input.runId !== undefined && input.id !== input.runId) {
+        return "protected steering rejects conflicting id and runId";
+      }
+      const id = input.id ?? input.runId;
+      if (typeof id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u.test(id)) {
+        return "protected steering requires a complete native run id";
+      }
+      if ((input.index !== undefined && input.index !== 0) ||
+          (nested.index !== undefined && nested.index !== 0)) {
+        return "protected steering supports only the direct run's single child";
+      }
+    }
+    return undefined;
+  }
   if (input.workflow !== undefined) {
     return "extension-owned named workflows are disabled in protected mode";
   }
@@ -413,6 +442,49 @@ export function nativeSubagentCallBlockReason(
   }
   if (input.async !== true) {
     return "protected mode requires every child launch to set async: true explicitly";
+  }
+  return undefined;
+}
+
+/**
+ * Cross-check current/inherited run metadata. This is best-effort evidence,
+ * not attestation against host-side writers that can forge the status file.
+ */
+export function nativeSteeringStatusBlockReason(
+  value: unknown,
+  runId: string,
+  allowedAgents: readonly string[],
+  ownsRun: (ownerSessionId: string) => boolean,
+): string | undefined {
+  const record = (candidate: unknown): Record<string, unknown> | undefined =>
+    candidate && typeof candidate === "object" && !Array.isArray(candidate)
+      ? candidate as Record<string, unknown>
+      : undefined;
+  const status = record(value);
+  if (!status || status.runId !== runId || typeof status.sessionId !== "string" ||
+      !ownsRun(status.sessionId)) {
+    return "protected steering target is not owned by this session or its in-process predecessors";
+  }
+  if (status.mode !== "single" || status.state !== "running" ||
+      !Array.isArray(status.steps) || status.steps.length !== 1) {
+    return "protected steering requires a running direct single-child run";
+  }
+  const step = record(status.steps[0]);
+  if (!step || step.status !== "running" || typeof step.agent !== "string" ||
+      !allowedAgents.includes(step.agent)) {
+    return "protected steering target is not a currently allowed running native agent";
+  }
+  const ceiling = record(status.capabilityCeiling);
+  const acknowledgement = record(step.runtimeAcknowledgedExtensions);
+  if (!ceiling || ceiling.version !== 1 || ceiling.denyExtensions !== false ||
+      !Array.isArray(ceiling.sources) || !ceiling.sources.includes(PI_SANDBOX_ACKNOWLEDGEMENT) ||
+      !Array.isArray(ceiling.allowedTools) || ceiling.allowedTools.length === 0 ||
+      !ceiling.allowedTools.every((tool) => (NATIVE_CHILD_TOOLS as readonly unknown[]).includes(tool)) ||
+      !Array.isArray(ceiling.allowedAgents) || !ceiling.allowedAgents.includes(step.agent) ||
+      !acknowledgement || acknowledgement.version !== 1 ||
+      acknowledgement.source !== "child-runtime" || !Array.isArray(acknowledgement.ids) ||
+      !acknowledgement.ids.includes(PI_SANDBOX_ACKNOWLEDGEMENT)) {
+    return "protected steering target lacks its own sandbox ceiling and runtime acknowledgement; inspect or stop it instead";
   }
   return undefined;
 }

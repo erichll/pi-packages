@@ -7,6 +7,8 @@ export type BoundarySurface =
   | "skill"
   | (string & {});
 
+import type { DecidingPath, PermissionAccessFacts } from "../permission-facts.ts";
+
 export type BoundarySource =
   | "permission-system"
   | "sandbox-runtime"
@@ -31,6 +33,8 @@ export type BoundaryRequest = {
    * (permission-system #910). Display-only: never bound into request hashes.
    */
   matchedSpelling?: string;
+  /** Gate-attributed path/effect/provenance; not a grant or proof of user consent. */
+  decidingPath?: DecidingPath;
   /**
    * Set only on the bounded reviewer view when a command fact was truncated;
    * never set on the stored request used for hashing or hard denies.
@@ -48,11 +52,7 @@ export type BoundaryRequest = {
   toolInputPreview?: string;
   agentName?: string;
   requesterSessionId?: string;
-  accessIntent?: {
-    surface: string;
-    matchValues: readonly string[];
-    boundaryValue?: string;
-  };
+  accessIntent?: PermissionAccessFacts;
   matchedPolicy?: {
     decision: "ask";
     rule?: string;

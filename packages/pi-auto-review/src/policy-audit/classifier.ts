@@ -1,6 +1,7 @@
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
 import { pathSurfaceInfo } from "../path-surfaces.ts";
+import type { DecidingPath } from "../permission-facts.ts";
 
 export type PolicyAuditRisk =
   | "read_only"
@@ -24,7 +25,10 @@ export type PolicyAuditCommandFeature =
   | "compound"
   | "pipeline"
   | "redirection"
-  | "relative_executable";
+  | "relative_executable"
+  | `effect:${DecidingPath["effect"]}`
+  | `effect_source:${DecidingPath["effectSource"]}`
+  | "delegation_license:nothing-on-disk";
 
 export type PolicyConfigCandidate = {
   surface: string;

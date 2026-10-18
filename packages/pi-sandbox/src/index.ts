@@ -528,13 +528,14 @@ async function performRegistration(
     currentTurn = event.turnIndex;
   });
 
-  pi.on("tool_call", (event, ctx) => {
+  pi.on("tool_call", async (event, ctx) => {
     if (event.toolName === "subagent" && protectExternalOrchestration) {
       const reason = nativeSubagentCallBlockReason(event.input);
       if (reason) {
         return { block: true, reason: `${EXTENSION_NAME}: ${reason}` };
       }
-      if (event.input.action === undefined) {
+      const action = typeof event.input.action === "string" ? event.input.action.trim() : undefined;
+      if (action === undefined || action === "steer") {
         try {
           validatedNativeAgents = nativeRuntime!.validateAllowedAgents(
             ctx.cwd,
@@ -545,6 +546,14 @@ async function performRegistration(
             piSubagentsSessionId(ctx),
             validatedNativeAgents,
           );
+          if (action === "steer") {
+            const targetReason = await nativeRuntime!.steeringTargetBlockReason(
+              piSubagentsSessionId(ctx),
+              String(event.input.id ?? event.input.runId),
+              validatedNativeAgents,
+            );
+            if (targetReason) return { block: true, reason: `${EXTENSION_NAME}: ${targetReason}` };
+          }
         } catch (error) {
           return {
             block: true,
