@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -1302,6 +1302,125 @@ test("real permission-system authorizer chain integration", async (t) => {
         "transient_connection",
         "transient_connection",
       ]);
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  await t.test("provider failures expose httpStatus and failureStage, with sanitized detail only in the audit file", async () => {
+    const auditDir = mkdtempSync(join(tmpdir(), "pi-auto-review-audit-"));
+    const auditFile = join(auditDir, "audit.jsonl");
+    const previous = process.env.PI_AUTO_REVIEW_AUDIT_FILE;
+    process.env.PI_AUTO_REVIEW_AUDIT_FILE = auditFile;
+    const instance = harness({
+      stopReason: "error",
+      errorMessage:
+        "401 IDE token expired: Authorization: Bearer ghu_auditSecret123 https://api.example.test/v1?sig=query-secret",
+      providerResponse: { status: 401 },
+    }, { config: config({ retries: 1 }) });
+    try {
+      const result = await instance.authorize("bash_escalated", {
+        requestId: "auth-detail",
+      });
+      assert.equal(result.decision.approved, false);
+      const attempt = instance.telemetry.find(
+        (event) => event.type === "review_attempt",
+      );
+      assert.equal(attempt?.errorClass, "authentication");
+      assert.equal(attempt?.httpStatus, 401);
+      assert.equal("errorDetail" in (attempt ?? {}), false);
+      const completion = instance.telemetry.find(
+        (event) => event.type === "review_complete",
+      );
+      assert.equal(completion?.failureStage, "provider_response");
+      assert.equal("errorDetail" in (completion ?? {}), false);
+      assert.doesNotMatch(JSON.stringify(instance.telemetry), /IDE token expired/);
+
+      const fileEvents = readFileSync(auditFile, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      const fileAttempt = fileEvents.find(
+        (event) => event.type === "review_attempt",
+      );
+      assert.equal(fileAttempt?.httpStatus, 401);
+      assert.match(String(fileAttempt?.errorDetail), /IDE token expired/);
+      const fileText = JSON.stringify(fileEvents);
+      assert.doesNotMatch(fileText, /auditSecret|query-secret/);
+      assert.match(fileText, /\[REDACTED\]/);
+    } finally {
+      instance.dispose();
+      if (previous === undefined) delete process.env.PI_AUTO_REVIEW_AUDIT_FILE;
+      else process.env.PI_AUTO_REVIEW_AUDIT_FILE = previous;
+      rmSync(auditDir, { recursive: true, force: true });
+    }
+  });
+
+  await t.test("credential resolution failures are staged and detailed only in the audit file", async () => {
+    const auditDir = mkdtempSync(join(tmpdir(), "pi-auto-review-audit-"));
+    const auditFile = join(auditDir, "audit.jsonl");
+    const previous = process.env.PI_AUTO_REVIEW_AUDIT_FILE;
+    process.env.PI_AUTO_REVIEW_AUDIT_FILE = auditFile;
+    const instance = harness(allow, {
+      authBehavior: async () => ({
+        ok: false,
+        error: "No API key for provider: github-copilot (api_key=cred-secret)",
+      }),
+    });
+    try {
+      const result = await instance.authorize("bash_escalated", {
+        requestId: "credential-detail",
+      });
+      assert.equal(result.decision.approved, false);
+      assert.equal(
+        instance.telemetry.filter((event) => event.type === "review_attempt").length,
+        0,
+      );
+      const completion = instance.telemetry.find(
+        (event) => event.type === "review_complete",
+      );
+      assert.equal(completion?.failureStage, "credential_resolution");
+      assert.deepEqual(completion?.errorCounts, { authentication: 1 });
+      assert.equal("errorDetail" in (completion ?? {}), false);
+
+      const fileCompletion = readFileSync(auditFile, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .find((event) => event.type === "review_complete");
+      assert.equal(fileCompletion?.failureStage, "credential_resolution");
+      assert.match(
+        String(fileCompletion?.errorDetail),
+        /model authentication failed: No API key for provider: github-copilot/,
+      );
+      assert.doesNotMatch(String(fileCompletion?.errorDetail), /cred-secret/);
+    } finally {
+      instance.dispose();
+      if (previous === undefined) delete process.env.PI_AUTO_REVIEW_AUDIT_FILE;
+      else process.env.PI_AUTO_REVIEW_AUDIT_FILE = previous;
+      rmSync(auditDir, { recursive: true, force: true });
+    }
+  });
+
+  await t.test("successful reviews carry no failureStage even after a failed attempt", async () => {
+    const responses: ModelBehavior[] = [new Error("ECONNRESET"), allow];
+    const instance = harness(async () => {
+      const response = responses.shift();
+      if (response instanceof Error) {
+        throw Object.assign(response, { code: "ECONNRESET" });
+      }
+      return response as string;
+    }, { config: config({ retries: 1 }) });
+    try {
+      const result = await instance.authorize("network", {
+        requestId: "retry-then-success",
+      });
+      assert.equal(result.decision.approved, true);
+      const completion = instance.telemetry.find(
+        (event) => event.type === "review_complete",
+      );
+      assert.equal(completion?.outcome, "allow");
+      assert.equal("failureStage" in (completion ?? {}), false);
     } finally {
       instance.dispose();
     }

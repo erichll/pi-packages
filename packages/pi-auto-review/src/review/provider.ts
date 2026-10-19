@@ -357,6 +357,12 @@ export function completeTelemetry(
     reasoning: config.reasoning,
     outcome,
     ...(failureMode ? { failureMode } : {}),
+    ...(failureMode && summary.failureStage
+      ? { failureStage: summary.failureStage }
+      : {}),
+    ...(failureMode && summary.failureDetail
+      ? { errorDetail: summary.failureDetail }
+      : {}),
     attempts: summary.attempts.length,
     errorCounts: { ...summary.errorCounts },
     durationMs: summary.durationMs,

@@ -13,7 +13,11 @@ export {
   type LoadTrustedConfigOptions,
 } from "./config.ts";
 export { EXTENSION_NAME, PACKAGE_ROOT } from "./consts.ts";
-export { writeOptionalAuditFile } from "./audit.ts";
+export {
+  sanitizeErrorDetail,
+  withoutFileOnlyFields,
+  writeOptionalAuditFile,
+} from "./audit.ts";
 export {
   LOCAL_HARD_DENY_AGENT_INSTRUCTION,
   REVIEWER_CRITICAL_DENY_AGENT_INSTRUCTION,

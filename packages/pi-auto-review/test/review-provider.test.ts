@@ -5,6 +5,11 @@ import {
   classifyProviderFailure,
   isRetryableError,
 } from "../src/review/provider.ts";
+import {
+  MAX_ERROR_DETAIL_CHARACTERS,
+  sanitizeErrorDetail,
+  withoutFileOnlyFields,
+} from "../src/review/audit.ts";
 import type { ReviewErrorClass } from "../src/review/types.ts";
 
 test("busy codes and server-busy details are retryable transient failures", () => {
@@ -119,4 +124,41 @@ test("real completeSimple exposes Mistral finish_reason error through the compat
   } finally {
     globalThis.fetch = previousFetch;
   }
+});
+
+test("sanitizeErrorDetail redacts credentials, signed URLs, and bounds length", () => {
+  const raw = [
+    "401 Unauthorized",
+    "Authorization: Bearer abc.def-ghi",
+    "Basic dXNlcjpwYXNz",
+    '{"api_key": "plain-secret-1", "x-api-key":"plain-secret-2"}',
+    "token=plain-secret-3; refresh_token: plain-secret-4",
+    "sk-ant-api03-plainsecret5 ghu_plainsecret6 github_pat_plain_secret7",
+    "tid=plain-secret-8;exp=1;sku=x",
+    "eyJhbGciOi.eyJzdWIiOi.c2lnbmF0dXJl",
+    "https://copilot.example.test/chat?sig=plain-secret-9&x=1",
+  ].join("\n");
+  const detail = sanitizeErrorDetail(raw);
+  assert.ok(detail);
+  assert.match(detail, /^401 Unauthorized /);
+  assert.doesNotMatch(detail, /plain-?secret|abc\.def|dXNlcjpwYXNz|eyJ|\n/);
+  assert.match(detail, /Bearer \[REDACTED\]/);
+  assert.match(detail, /https:\/\/copilot\.example\.test\/chat\?\[REDACTED\]/);
+  // Ordinary words that merely mention tokens survive.
+  assert.equal(sanitizeErrorDetail("IDE token expired"), "IDE token expired");
+
+  const long = sanitizeErrorDetail("x".repeat(MAX_ERROR_DETAIL_CHARACTERS + 50));
+  assert.equal(long?.length, MAX_ERROR_DETAIL_CHARACTERS + 1);
+  assert.ok(long?.endsWith("…"));
+  assert.equal(sanitizeErrorDetail("   "), undefined);
+  assert.equal(sanitizeErrorDetail(undefined), undefined);
+});
+
+test("withoutFileOnlyFields strips errorDetail without mutating the event", () => {
+  const event = { type: "review_attempt", httpStatus: 401, errorDetail: "x" };
+  const stripped = withoutFileOnlyFields(event);
+  assert.deepEqual(stripped, { type: "review_attempt", httpStatus: 401 });
+  assert.equal(event.errorDetail, "x");
+  const clean = { type: "review_complete" };
+  assert.equal(withoutFileOnlyFields(clean), clean);
 });

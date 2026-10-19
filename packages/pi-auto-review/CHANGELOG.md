@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.27.1 - 2026-10-20
+
+- Make reviewer failures diagnosable (#10). `review_attempt` now records the
+  provider's numeric `httpStatus`, and failed `review_complete` events record
+  `failureStage` (`credential_resolution` or `provider_response`) so
+  "Pi could not supply credentials" is distinguishable from "the provider
+  rejected the request".
+- The opt-in `PI_AUTO_REVIEW_AUDIT_FILE` sink additionally records a redacted,
+  500-character-capped `errorDetail` for failed attempts and for credential
+  resolution failures. `errorDetail` is stripped before `pi-auto-review:audit`
+  broadcast, so listeners still receive no provider error text.
+
 ## 0.27.0 - 2026-10-18
 
 - Raise all development/peer baselines to the latest stable registry releases:

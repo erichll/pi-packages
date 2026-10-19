@@ -506,10 +506,29 @@ an input to this audit and supplies no RTK token or parsing metrics.
 
 Every actual model call emits an internal `review_attempt`; each approval emits
 one `review_complete`. Events contain stable status/error classes, timings,
-usage counters, evidence metadata, and prompt-part counts. They do not contain
-prompt or response text, provider errors, credentials, headers, or URL query
-values. Usage is marked `unknown_provenance` when pi-ai cannot distinguish
-provider counters from initialized values, and `unavailable` when absent.
+usage counters, evidence metadata, and prompt-part counts. A `review_attempt`
+also carries the provider's numeric `httpStatus` when a response was received,
+and a failed `review_complete` carries `failureStage`: `credential_resolution`
+(Pi could not supply model credentials/headers, so no model call was made) or
+`provider_response` (the last failure came from a model call). Events broadcast
+on `pi-auto-review:audit` do not contain prompt or response text, provider
+errors, credentials, headers, or URL query values. Usage is marked
+`unknown_provenance` when pi-ai cannot distinguish provider counters from
+initialized values, and `unavailable` when absent.
+
+When the opt-in `PI_AUTO_REVIEW_AUDIT_FILE` sink is set, its copy of a failed
+`review_attempt` (and of a `review_complete` that failed during credential
+resolution) additionally includes `errorDetail`: the provider or credential
+error text after best-effort redaction of authorization values, API keys and
+tokens, well-known credential prefixes, JWTs, and URL query strings, collapsed
+to one line and capped at 500 characters. `errorDetail` is never broadcast.
+Treat the file as sensitive and review it before sharing; redaction is
+pattern-based and cannot recognize every secret format. To diagnose reviewer
+failures, run Pi with, for example:
+
+```bash
+PI_AUTO_REVIEW_AUDIT_FILE=/tmp/pi-auto-review-audit.jsonl pi
+```
 
 ## Real-model smoke test
 

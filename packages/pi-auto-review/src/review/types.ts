@@ -104,7 +104,13 @@ export type ReviewAttemptObservation = {
   willRetry: boolean;
   usageAvailability: UsageAvailability;
   usage: ReviewUsage;
+  // HTTP status reported by the provider response, when one was received.
+  httpStatus?: number;
 };
+
+// Where a failed review last failed: acquiring model credentials/headers, or
+// the model call itself.
+export type ReviewFailureStage = "credential_resolution" | "provider_response";
 
 export type PreflightPart = { characters: number; estimatedTokens: number };
 
@@ -128,6 +134,9 @@ export type ReviewExecutionSummary = {
   durationMs: number;
   transcript: TranscriptResult;
   preflight: ReviewPreflight;
+  failureStage?: ReviewFailureStage;
+  // Sanitized credential-resolution error. File-audit only; never broadcast.
+  failureDetail?: string;
 };
 
 export type ReviewerTelemetryEvent =
@@ -135,6 +144,9 @@ export type ReviewerTelemetryEvent =
       type: "review_attempt";
       requestId: string;
       surface: string;
+      // Sanitized provider error. Written only to PI_AUTO_REVIEW_AUDIT_FILE;
+      // stripped before pi.events broadcast.
+      errorDetail?: string;
     } & ReviewAttemptObservation)
   | {
       type: "review_complete";
@@ -144,6 +156,9 @@ export type ReviewerTelemetryEvent =
       reasoning: ReasoningLevel;
       outcome: "allow" | "deny" | "defer";
       failureMode?: "deny" | "defer";
+      failureStage?: ReviewFailureStage;
+      // Sanitized error detail. File-audit only; stripped before broadcast.
+      errorDetail?: string;
       attempts: number;
       errorCounts: ReviewExecutionSummary["errorCounts"];
       durationMs: number;

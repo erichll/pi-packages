@@ -78,6 +78,7 @@ import {
   userReviewMetaFromResult,
   userConfigPath,
   validateConfig,
+  withoutFileOnlyFields,
   writeOptionalAuditFile,
   LOCAL_HARD_DENY_AGENT_INSTRUCTION,
   REVIEWER_CRITICAL_DENY_AGENT_INSTRUCTION,
@@ -281,7 +282,11 @@ export function createPiAutoReviewExtension(
   const emitTelemetry = (event: ReviewerTelemetryEvent): void => {
     writeOptionalAuditFile(event);
     try {
-      pi.events.emit("pi-auto-review:audit", structuredClone(event));
+      // Sanitized provider error text stays in the opt-in audit file only.
+      pi.events.emit(
+        "pi-auto-review:audit",
+        structuredClone(withoutFileOnlyFields(event)),
+      );
     } catch {
       // Telemetry is observational and must never affect authorization.
     }

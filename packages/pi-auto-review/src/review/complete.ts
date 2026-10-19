@@ -21,12 +21,14 @@ import type {
   ReviewAttemptStatus,
   ReviewErrorClass,
   ReviewExecutionSummary,
+  ReviewFailureStage,
   ReviewResult,
   ReviewerMeta,
   ReviewerRuntime,
   ReviewerTelemetryEvent,
 } from "./types.ts";
 import { FORMAT_RETRY_INSTRUCTION } from "./consts.ts";
+import { sanitizeErrorDetail } from "./audit.ts";
 import {
   applyReviewerInputBudget,
   preflightPart,
@@ -171,6 +173,8 @@ export async function complete(
     }
     let lastError: unknown;
     let lastErrorClass: ReviewErrorClass = "unknown";
+    let failureStage: ReviewFailureStage | undefined;
+    let failureDetail: string | undefined;
     const retryErrors: ReviewErrorClass[] = [];
     const maxAttempts = Math.min(config.retries + 1, 2);
     const formatRetryFitsBudget =
@@ -195,6 +199,12 @@ export async function complete(
         lastErrorClass = controller.signal.aborted
           ? timeoutFired ? "timeout" : "abort"
           : "authentication";
+        failureStage = "credential_resolution";
+        failureDetail = lastErrorClass === "authentication"
+          ? sanitizeErrorDetail(
+              error instanceof Error ? error.message : String(error),
+            )
+          : undefined;
         retryErrors.push(lastErrorClass);
         incrementError(errorCounts, lastErrorClass);
         break;
@@ -211,6 +221,7 @@ export async function complete(
       let status: ReviewAttemptStatus = "transport_failure";
       let errorClass: ReviewErrorClass = "unknown";
       let decision: ModelDecision | undefined;
+      let attemptError: unknown;
       const providerMetadata: ProviderAttemptMetadata = {};
       try {
         const remainingMs = deadlineAt - Date.now();
@@ -262,6 +273,7 @@ export async function complete(
         errorClass = "none";
       } catch (error) {
         lastError = error;
+        attemptError = error;
         if (controller.signal.aborted) {
           status = timeoutFired ? "timeout" : "abort";
           errorClass = timeoutFired ? "timeout" : "abort";
@@ -292,13 +304,29 @@ export async function complete(
         willRetry,
         usageAvailability: usage.availability,
         usage: usage.usage,
+        ...(providerMetadata.status !== undefined
+          ? { httpStatus: providerMetadata.status }
+          : {}),
       };
       attempts.push(observation);
+      // Provider error text is only meaningful for provider failures, not for
+      // our own format/stop checks or local timeouts. A provider error message
+      // wins; a thrown error is used only when no message came back.
+      const errorDetail = status === "transport_failure"
+        ? sanitizeErrorDetail(
+            message
+              ? message.errorMessage
+              : attemptError instanceof Error
+                ? attemptError.message
+                : undefined,
+          )
+        : undefined;
       observe?.({
         type: "review_attempt",
         requestId: request.id,
         surface: request.surface,
         ...observation,
+        ...(errorDetail ? { errorDetail } : {}),
       });
       if (decision) {
         return {
@@ -311,6 +339,8 @@ export async function complete(
         };
       }
       lastErrorClass = errorClass;
+      failureStage = "provider_response";
+      failureDetail = undefined;
       retryErrors.push(errorClass);
       incrementError(errorCounts, errorClass);
       if (controller.signal.aborted) break;
@@ -325,7 +355,11 @@ export async function complete(
       }
     }
     void lastError;
-    throw new ReviewExecutionError(lastErrorClass, summary());
+    throw new ReviewExecutionError(lastErrorClass, {
+      ...summary(),
+      ...(failureStage ? { failureStage } : {}),
+      ...(failureDetail ? { failureDetail } : {}),
+    });
   } finally {
     clearTimeout(timeout);
     ctx.signal?.removeEventListener("abort", onSessionAbort);
