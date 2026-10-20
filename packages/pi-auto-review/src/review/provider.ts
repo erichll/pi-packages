@@ -556,6 +556,28 @@ export async function resolveApiKeyAndHeaders(
   return auth;
 }
 
+// Pi's agent and ModelRuntime.prepareRequest send the request to
+// auth.baseUrl when credentials carry one. The catalog model keeps a
+// static endpoint (for GitHub Copilot, api.individual.githubcopilot.com);
+// a Business or Enterprise token is rejected with 401 on that host.
+export function requestModelForAuth<T extends { baseUrl?: string }>(
+  model: T,
+  auth: ReviewerRuntime["auth"],
+): T {
+  return auth.baseUrl ? { ...model, baseUrl: auth.baseUrl } : model;
+}
+
+// Host (and port) only, so the audit file never records a path, query, or
+// userinfo from a configured endpoint.
+export function endpointHost(baseUrl: string | undefined): string | undefined {
+  if (!baseUrl) return undefined;
+  try {
+    return new URL(baseUrl).host || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function modelCall(
   runtime: ReviewerRuntime,
   config: Config,

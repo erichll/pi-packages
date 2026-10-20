@@ -131,6 +131,7 @@ function harness(
           ok: true;
           apiKey?: string;
           headers?: Record<string, string | null>;
+          baseUrl?: string;
           env?: Record<string, string>;
         }
       | { ok: false; error: string }
@@ -254,6 +255,7 @@ function harness(
   let currentAuth: {
     apiKey?: string;
     headers?: Record<string, string | null>;
+    baseUrl?: string;
     env?: Record<string, string>;
   } = { apiKey: "test" };
   const seenModels: Record<string, unknown>[] = [];
@@ -3490,6 +3492,126 @@ test("real permission-system authorizer chain integration", async (t) => {
       assert.ok(
         (secondSessionId as string).length <= 64,
         "the endpoint fingerprint must survive pi-ai's prompt-cache-key clamp",
+      );
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  await t.test("credential baseUrl overrides the catalog endpoint without mutating the registry model", async () => {
+    const auditDir = mkdtempSync(join(tmpdir(), "pi-auto-review-audit-"));
+    const auditFile = join(auditDir, "audit.jsonl");
+    const previous = process.env.PI_AUTO_REVIEW_AUDIT_FILE;
+    process.env.PI_AUTO_REVIEW_AUDIT_FILE = auditFile;
+    const instance = harness(deny, {
+      config: config({ model: "github-copilot/gpt-6-luna" }),
+    });
+    try {
+      instance.setRegistry({
+        model: {
+          id: "gpt-6-luna",
+          name: "gpt-6-luna",
+          provider: "github-copilot",
+          api: "test-api",
+          baseUrl: "https://api.individual.githubcopilot.com",
+        },
+      });
+      instance.setAuth({
+        apiKey: "copilot-token",
+        baseUrl: "https://api.business.githubcopilot.com",
+      });
+      assert.equal((await instance.authorize("bash_escalated")).decision.approved, false);
+      const registryModel = instance.seenModels[0];
+      const called = instance.calledModels[0] as Record<string, unknown>;
+      assert.equal(registryModel?.baseUrl, "https://api.individual.githubcopilot.com");
+      assert.equal(called.baseUrl, "https://api.business.githubcopilot.com");
+      assert.notEqual(called, registryModel);
+
+      instance.setAuth({
+        apiKey: "copilot-token",
+        baseUrl: "https://copilot-api.company.ghe.com",
+      });
+      assert.equal((await instance.authorize("bash_escalated")).decision.approved, false);
+      assert.equal(
+        (instance.calledModels[1] as Record<string, unknown>).baseUrl,
+        "https://copilot-api.company.ghe.com",
+      );
+      assert.equal(registryModel?.baseUrl, "https://api.individual.githubcopilot.com");
+      assert.notEqual(
+        instance.modelCallOptions[1]?.sessionId,
+        instance.modelCallOptions[0]?.sessionId,
+        "a credential endpoint change must not reuse the previous cache identity",
+      );
+
+      instance.setAuth({ apiKey: "copilot-token" });
+      assert.equal((await instance.authorize("bash_escalated")).decision.approved, false);
+      assert.equal(instance.calledModels[2], instance.seenModels[2]);
+
+      const broadcast = instance.telemetry.filter((event) => event.type === "review_attempt");
+      assert.deepEqual(
+        broadcast.map((event) => event.endpointSource),
+        ["credential", "credential", "catalog"],
+      );
+      assert.ok(broadcast.every((event) => !("endpointHost" in event)));
+      assert.doesNotMatch(JSON.stringify(instance.telemetry), /githubcopilot|ghe\.com/);
+      const fileAttempts = readFileSync(auditFile, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .filter((event) => event.type === "review_attempt");
+      assert.deepEqual(
+        fileAttempts.map((event) => [event.endpointSource, event.endpointHost]),
+        [
+          ["credential", "api.business.githubcopilot.com"],
+          ["credential", "copilot-api.company.ghe.com"],
+          ["catalog", "api.individual.githubcopilot.com"],
+        ],
+      );
+    } finally {
+      instance.dispose();
+      if (previous === undefined) delete process.env.PI_AUTO_REVIEW_AUDIT_FILE;
+      else process.env.PI_AUTO_REVIEW_AUDIT_FILE = previous;
+      rmSync(auditDir, { recursive: true, force: true });
+    }
+  });
+
+  await t.test("each attempt applies its own credential baseUrl to the current session model", async () => {
+    const hosts = [
+      "https://api.business.githubcopilot.com",
+      "https://api.enterprise.githubcopilot.com",
+    ];
+    let authCalls = 0;
+    let modelCalls = 0;
+    const instance = harness(async () => modelCalls++ === 0 ? "not json" : deny, {
+      config: config({ model: "current", retries: 1 }),
+      authBehavior: async () => ({
+        ok: true,
+        apiKey: "copilot-token",
+        baseUrl: hosts[authCalls++],
+      }),
+    });
+    try {
+      const sessionModel = {
+        id: "gpt-6-luna",
+        name: "gpt-6-luna",
+        provider: "github-copilot",
+        api: "test-api",
+        baseUrl: "https://api.individual.githubcopilot.com",
+      };
+      instance.setSessionModel(sessionModel);
+      assert.equal((await instance.authorize("bash_escalated")).decision.approved, false);
+      assert.equal(instance.calledModels.length, 2);
+      // Authentication is always resolved for the session model itself, so an
+      // overlaid endpoint cannot stick across attempts.
+      assert.deepEqual(instance.seenModels.map((model) => model === sessionModel), [true, true]);
+      assert.deepEqual(
+        instance.calledModels.map((model) => (model as Record<string, unknown>).baseUrl),
+        hosts,
+      );
+      assert.equal(sessionModel.baseUrl, "https://api.individual.githubcopilot.com");
+      assert.notEqual(
+        instance.modelCallOptions[0]?.sessionId,
+        instance.modelCallOptions[1]?.sessionId,
       );
     } finally {
       instance.dispose();

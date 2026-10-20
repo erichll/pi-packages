@@ -3,8 +3,12 @@ import test from "node:test";
 import { completeSimple, getModels } from "@earendil-works/pi-ai/compat";
 import {
   classifyProviderFailure,
+  endpointHost,
   isRetryableError,
+  modelCall,
+  requestModelForAuth,
 } from "../src/review/provider.ts";
+import { DEFAULT_CONFIG } from "../src/review/config.ts";
 import {
   MAX_ERROR_DETAIL_CHARACTERS,
   sanitizeErrorDetail,
@@ -154,11 +158,92 @@ test("sanitizeErrorDetail redacts credentials, signed URLs, and bounds length", 
   assert.equal(sanitizeErrorDetail(undefined), undefined);
 });
 
-test("withoutFileOnlyFields strips errorDetail without mutating the event", () => {
-  const event = { type: "review_attempt", httpStatus: 401, errorDetail: "x" };
+test("requestModelForAuth overlays only a credential endpoint", () => {
+  const catalog = {
+    id: "gpt-6-luna",
+    baseUrl: "https://api.individual.githubcopilot.com",
+    headers: { "Copilot-Integration-Id": "vscode-chat" },
+  };
+  assert.equal(requestModelForAuth(catalog, { apiKey: "token" }), catalog);
+  const request = requestModelForAuth(catalog, {
+    apiKey: "token",
+    baseUrl: "https://api.business.githubcopilot.com",
+  });
+  assert.equal(request.baseUrl, "https://api.business.githubcopilot.com");
+  assert.equal(request.headers["Copilot-Integration-Id"], "vscode-chat");
+  assert.equal(catalog.baseUrl, "https://api.individual.githubcopilot.com");
+  assert.notEqual(request, catalog);
+  assert.equal(requestModelForAuth(catalog, { apiKey: "token", baseUrl: "" }), catalog);
+});
+
+test("real pi-ai sends a Copilot reviewer request to the credential host", async () => {
+  const catalog = getModels("github-copilot").find((model) => model.id === "gpt-6-luna");
+  assert.ok(catalog, "pi-ai catalog must still ship github-copilot/gpt-6-luna");
+  assert.equal(catalog.api, "openai-responses");
+  assert.equal(catalog.baseUrl, "https://api.individual.githubcopilot.com");
+  const previousFetch = globalThis.fetch;
+  const requests: Array<{ url: string; headers: Headers }> = [];
+  globalThis.fetch = async (input, init) => {
+    const request = new Request(input, init);
+    requests.push({ url: request.url, headers: request.headers });
+    return new Response("Unauthorized", { status: 401 });
+  };
+  try {
+    const auth = {
+      apiKey: "tid=test;proxy-ep=proxy.business.githubcopilot.com",
+      baseUrl: "https://api.business.githubcopilot.com",
+    };
+    const metadata = {};
+    const message = await modelCall(
+      { model: requestModelForAuth(catalog, auth), auth, sessionId: "pi-auto-review-test" },
+      DEFAULT_CONFIG,
+      new AbortController(),
+      "synthetic review request",
+      64,
+      5_000,
+      false,
+      metadata,
+    );
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0]!.url, "https://api.business.githubcopilot.com/responses");
+    assert.equal(requests[0]!.headers.get("authorization"), `Bearer ${auth.apiKey}`);
+    assert.equal(requests[0]!.headers.get("copilot-integration-id"), "vscode-chat");
+    assert.equal(requests[0]!.headers.get("x-initiator"), "user");
+    assert.equal(message.stopReason, "error");
+    assert.match(message.errorMessage ?? "", /^github-copilot API error \(401\)/);
+    assert.equal(catalog.baseUrl, "https://api.individual.githubcopilot.com");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("endpointHost keeps only the host and port", () => {
+  assert.equal(endpointHost("https://api.business.githubcopilot.com"), "api.business.githubcopilot.com");
+  assert.equal(
+    endpointHost("https://user:secret@proxy.example.test:8443/v1/path?sig=query-secret"),
+    "proxy.example.test:8443",
+  );
+  assert.equal(endpointHost("not a url"), undefined);
+  assert.equal(endpointHost(""), undefined);
+  assert.equal(endpointHost(undefined), undefined);
+});
+
+test("withoutFileOnlyFields strips errorDetail and endpointHost without mutating the event", () => {
+  const event = {
+    type: "review_attempt",
+    httpStatus: 401,
+    endpointSource: "credential",
+    errorDetail: "x",
+    endpointHost: "api.business.githubcopilot.com",
+  };
   const stripped = withoutFileOnlyFields(event);
-  assert.deepEqual(stripped, { type: "review_attempt", httpStatus: 401 });
+  assert.deepEqual(stripped, {
+    type: "review_attempt",
+    httpStatus: 401,
+    endpointSource: "credential",
+  });
   assert.equal(event.errorDetail, "x");
+  assert.equal(event.endpointHost, "api.business.githubcopilot.com");
   const clean = { type: "review_complete" };
   assert.equal(withoutFileOnlyFields(clean), clean);
 });

@@ -13,9 +13,10 @@ export function writeOptionalAuditFile(event: unknown): void {
   }
 }
 
-// Fields that may carry (sanitized) provider text. They are written only to
-// the opt-in PI_AUTO_REVIEW_AUDIT_FILE sink and never broadcast on pi.events.
-const FILE_ONLY_FIELDS = ["errorDetail"] as const;
+// Fields that may carry (sanitized) provider text or the request host. They
+// are written only to the opt-in PI_AUTO_REVIEW_AUDIT_FILE sink and never
+// broadcast on pi.events.
+const FILE_ONLY_FIELDS = ["errorDetail", "endpointHost"] as const;
 
 export function withoutFileOnlyFields<T extends object>(event: T): T {
   if (!FILE_ONLY_FIELDS.some((field) => field in event)) return event;

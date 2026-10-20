@@ -170,9 +170,12 @@ one review use the same selected model. Reviewer reasoning, token limits, and
 timeouts still come from this extension's configuration.
 
 The reviewer makes a separate provider request without tools and uses Pi's
-authentication resolution. If no session model is selected, authentication
-fails, or the provider cannot serve this auxiliary request, the existing
-`failureMode` applies (`"deny"` by default, or `"defer"` to the human terminal).
+authentication resolution, including a credential-specific `baseUrl` when Pi
+supplies one. GitHub Copilot tokens are valid only for the host embedded in
+the token, which is not always the catalog default. If no session model is
+selected, authentication fails, or the provider cannot serve this auxiliary
+request, the existing `failureMode` applies (`"deny"` by default, or `"defer"`
+to the human terminal).
 The default remains `"codex-auto-review"`; explicit model IDs and
 `"provider/reviewer-model"` values continue to select a dedicated reviewer.
 The bare value `"current"` is reserved for this mode; use `"provider/current"`
@@ -507,9 +510,12 @@ an input to this audit and supplies no RTK token or parsing metrics.
 Every actual model call emits an internal `review_attempt`; each approval emits
 one `review_complete`. Events contain stable status/error classes, timings,
 usage counters, evidence metadata, and prompt-part counts. A `review_attempt`
-also carries the provider's numeric `httpStatus` when a response was received,
-and a failed `review_complete` carries `failureStage`: `credential_resolution`
-(Pi could not supply model credentials/headers, so no model call was made) or
+also carries the provider's numeric `httpStatus` when a response was received
+and `endpointSource`: `credential` when the request used the endpoint supplied
+with Pi's credentials (for GitHub Copilot, the host in the token) or `catalog`
+when it used the model's own `baseUrl`. A failed `review_complete` carries
+`failureStage`: `credential_resolution` (Pi could not supply model
+credentials/headers, so no model call was made) or
 `provider_response` (the last failure came from a model call). Events broadcast
 on `pi-auto-review:audit` do not contain prompt or response text, provider
 errors, credentials, headers, or URL query values. Usage is marked
@@ -521,7 +527,9 @@ When the opt-in `PI_AUTO_REVIEW_AUDIT_FILE` sink is set, its copy of a failed
 resolution) additionally includes `errorDetail`: the provider or credential
 error text after best-effort redaction of authorization values, API keys and
 tokens, well-known credential prefixes, JWTs, and URL query strings, collapsed
-to one line and capped at 500 characters. `errorDetail` is never broadcast.
+to one line and capped at 500 characters. Every `review_attempt` in the file
+also includes `endpointHost`, the request host without path or query.
+`errorDetail` and `endpointHost` are never broadcast.
 Treat the file as sensitive and review it before sharing; redaction is
 pattern-based and cannot recognize every secret format. To diagnose reviewer
 failures, run Pi with, for example:

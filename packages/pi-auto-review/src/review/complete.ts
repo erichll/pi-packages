@@ -41,6 +41,7 @@ import {
   abortableDelay,
   abortableOperation,
   classifyProviderFailure,
+  endpointHost,
   incrementError,
   isFormatError,
   isRetryableError,
@@ -48,6 +49,7 @@ import {
   normalizedStopReason,
   observedUsage,
   parseErrorClass,
+  requestModelForAuth,
   resolveApiKeyAndHeaders,
   resolveReviewerMeta,
   retryDelayMs,
@@ -189,10 +191,12 @@ export async function complete(
           resolveApiKeyAndHeaders(ctx, meta.model),
           controller.signal,
         );
+        const model = requestModelForAuth(meta.model, auth);
         runtime = {
           ...meta,
+          model,
           auth,
-          sessionId: reviewerSessionId(ctx, config, meta.model, auth),
+          sessionId: reviewerSessionId(ctx, config, model, auth),
         };
       } catch (error) {
         lastError = error;
@@ -307,6 +311,7 @@ export async function complete(
         ...(providerMetadata.status !== undefined
           ? { httpStatus: providerMetadata.status }
           : {}),
+        endpointSource: runtime.auth.baseUrl ? "credential" : "catalog",
       };
       attempts.push(observation);
       // Provider error text is only meaningful for provider failures, not for
@@ -321,12 +326,14 @@ export async function complete(
                 : undefined,
           )
         : undefined;
+      const host = endpointHost(runtime.model.baseUrl);
       observe?.({
         type: "review_attempt",
         requestId: request.id,
         surface: request.surface,
         ...observation,
         ...(errorDetail ? { errorDetail } : {}),
+        ...(host ? { endpointHost: host } : {}),
       });
       if (decision) {
         return {

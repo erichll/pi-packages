@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.27.2 - 2026-10-20
+
+- Apply Pi's credential `baseUrl` to reviewer requests. GitHub Copilot
+  tokens are only accepted by the `proxy-ep` host in the token; calling the
+  catalog's default individual endpoint returned 401 while the main session,
+  which does apply that host, succeeded (#10).
+- Record which endpoint each reviewer request used. `review_attempt` now
+  carries `endpointSource` (`credential` or `catalog`), and the opt-in audit
+  file copy adds `endpointHost` (host only, never broadcast).
+
 ## 0.27.1 - 2026-10-20
 
 - Make reviewer failures diagnosable (#10). `review_attempt` now records the

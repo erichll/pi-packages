@@ -106,6 +106,9 @@ export type ReviewAttemptObservation = {
   usage: ReviewUsage;
   // HTTP status reported by the provider response, when one was received.
   httpStatus?: number;
+  // Whether the request went to the credential's baseUrl (for example the
+  // GitHub Copilot proxy-ep host) or to the catalog model's own endpoint.
+  endpointSource: "credential" | "catalog";
 };
 
 // Where a failed review last failed: acquiring model credentials/headers, or
@@ -147,6 +150,8 @@ export type ReviewerTelemetryEvent =
       // Sanitized provider error. Written only to PI_AUTO_REVIEW_AUDIT_FILE;
       // stripped before pi.events broadcast.
       errorDetail?: string;
+      // Request host only (no path or query). File-audit only, like errorDetail.
+      endpointHost?: string;
     } & ReviewAttemptObservation)
   | {
       type: "review_complete";
@@ -185,6 +190,10 @@ export type ReviewerRuntime = {
     apiKey?: string;
     // ProviderHeaders allows null values (e.g. "clear" directives) in 0.84.x.
     headers?: Record<string, string | null>;
+    // Credential-specific endpoint. GitHub Copilot's short-lived token is
+    // only valid for the proxy-ep host Pi resolves here, which can differ
+    // from the catalog model's baseUrl.
+    baseUrl?: string;
     env?: Record<string, string>;
   };
   streamSimple?: ApiStreamSimpleFunction;
@@ -198,7 +207,8 @@ export type ReviewerRuntime = {
 // calling a stale endpoint. Authentication is also deliberately excluded
 // because pi resolves models.json auth and headers dynamically on every
 // request (including OAuth refresh); it is reacquired per model call in
-// complete().
+// complete(), which also overlays a credential baseUrl onto that call the
+// same way Pi's own request path does.
 export type ReviewerMeta = Omit<ReviewerRuntime, "auth" | "sessionId">;
 
 export type ReviewResult = {
