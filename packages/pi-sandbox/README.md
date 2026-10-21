@@ -98,7 +98,8 @@ Supported modes:
 ### `pi-subagents` native-background tool boundary
 
 This provider requires Pi 1.3.0, `typebox >=1.4.2` and
-`pi-subagents >=0.79.0` (deterministically validated on 0.79.0), and fails closed
+`pi-subagents >=0.80.0` (deterministically validated on 0.79.0 and 0.80.0), and
+fails closed
 if its public ceiling API, module layout, discovery, ownership or runtime-path
 seams drift. The peer dependency is a floor with no upper pin; the
 loader's explicit export and layout checks are the real gate. On Node, the
@@ -360,7 +361,7 @@ capability ceiling, and protected launch policy in an isolated temporary agent
 directory. It never reads or updates production Pi configuration. Model-backed
 acceptance requires `PI_SUBAGENTS_GATE_MODEL` and an already-exported matching
 credential; missing prerequisites are reported as `SKIP`. The current peer
-floor and development baseline are Pi 1.3.0, with pi-subagents 0.79.0 and
+floor and development baseline are Pi 1.3.0, with pi-subagents 0.80.0 and
 `typebox >=1.4.2`. `pi-tui >=1.3.0` is an explicit host peer, not a bundled
 runtime dependency. See `docs/compat-notes.md` for the recorded deterministic
 and model-backed validation results.

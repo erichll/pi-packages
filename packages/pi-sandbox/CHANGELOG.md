@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.28.0 - 2026-10-21
+
+- Raise the pi-subagents npm peer dependency to `>=0.80.0` and the development
+  pin to `^0.80.0`. The structural loader floor stays at `>=0.79.0`. Verified
+  against 0.80.0: type check, full sandbox suite, and both deterministic and
+  model-backed compat gate phases (native baseline and protected
+  native-background whitelist). See `docs/compat-notes.md`.
+
 ## 0.27.0 - 2026-10-18
 
 - Raise all development/peer baselines to the latest stable registry releases:

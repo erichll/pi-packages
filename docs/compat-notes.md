@@ -1,8 +1,9 @@
 # Compatibility seams with `pi-subagents`
 
 `@erichll/pi-sandbox` supports protected external orchestration on the
-`pi-subagents >=0.79.0` line: the peer dependency has no upper pin, and the
-development dependency is `^0.79.0` (deterministically validated on 0.79.0).
+`pi-subagents >=0.79.0` line: the structural loader floor has no upper pin, and the
+npm peer dependency is `>=0.80.0` (deterministically validated on 0.79.0 and
+0.80.0).
 The structural loader now shares that stable-version floor because it uses the
 0.79 session-succession ownership seam. Source and compiled layouts remain
 recognized, but old versions and prereleases are rejected. The loader validates
@@ -60,9 +61,9 @@ default `builtin` provider for complete worker-process-tree isolation.
 
 ## Versioned seams
 
-| Seam | Status on the `>=0.79.0` peer line (validated on 0.79.0) | Verification |
+| Seam | Status on the `>=0.79.0` loader floor (validated on 0.79.0 and 0.80.0) | Verification |
 | --- | --- | --- |
-| package version | peer and structural loader require stable `>=0.79.0` on the 0.x line | npm peer + runtime loader + deterministic gate |
+| package version | npm peer requires stable `>=0.80.0`; structural loader requires stable `>=0.79.0` on the 0.x line | npm peer + runtime loader + deterministic gate |
 | `./capability-ceiling` export | public; expected path and API v1 | runtime loader + tests |
 | module layout | `.ts` source (0.66.0-0.69.0) or compiled `.js`/`.d.ts` (0.70.0+) under `src/`, same relative paths | runtime loader + tests |
 | host peer `@earendil-works/pi-tui` | supplied by Pi; filesystem alias on Node, host module object on Bun | runtime loader + isolated Node/Bun/compiled-Bun tests |
@@ -179,7 +180,24 @@ Pi's own `@earendil-works/pi-ai`. The current sandbox peer floor is
 or hoisted copy is older. The development workspace uses 1.4.2 and Pi 1.3.0.
 The isolated host-peer tests cover Node, Bun and compiled-Bun loading.
 
-## 2026-10-18 latest-baseline verification
+## 2026-10-21 pi-subagents 0.80.0 verification
+
+The sandbox peer dependency is raised to `pi-subagents >=0.80.0` and the
+development pin to `^0.80.0`; the structural loader floor stays at
+`>=0.79.0`. Upstream 0.80.0 keeps the `./capability-ceiling` export, agent
+discovery, ownership and runtime-path seams unchanged from 0.79.x (its changes
+are the Pi 1.2.0 floor, per-child `cwd`/`model` in workflow args,
+`enableSlashCommands`, dropped source maps and the `*-codex-responses`
+tool-call-id fix, none of which touch the validated seams).
+
+`npm run check` passes, the sandbox suite reports 118 passed plus the same
+native-runtime temp-environment skip, and both gate phases pass against
+0.80.0 with parent `cliproxyapi/codex-auto-review` and child
+`cliproxyapi/gpt-5.6-luna`: `baseline: native-host-readable`,
+`protected: sandboxed-bash-blocked-host-read`,
+`acknowledgement: @erichll:pi-sandbox`.
+
+## 2026-10-18 baseline verification
 
 The security packages now use Pi 1.3.0, permission-system 41.0.0,
 pi-subagents 0.79.0, typebox 1.4.2, Node types 26.6.5 and TypeScript 7.0.2
