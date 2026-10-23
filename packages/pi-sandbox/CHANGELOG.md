@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.28.1 - 2026-10-23
+
+- Support the pi-subagents 0.81.0 bundle layout: the `./capability-ceiling`
+  export check accepts `./bundle/` targets in addition to `./src/api/`.
+- Locate the pi-subagents package root by walking up from the resolved entry
+  to the package manifest, rather than assuming `dirname(entry)` (which sits in
+  `bundle/index.js` in 0.81.0).
+- Raise development pin to `pi-subagents ^0.81.0`. The npm peer dependency
+  (`>=0.80.0`) and structural loader floor (`>=0.79.0`) remain unchanged.
+  Verified against 0.81.0: workspace type check, full test suite, and the
+  deterministic compatibility gate. See `docs/compat-notes.md`.
+
 ## 0.28.0 - 2026-10-21
 
 - Raise the pi-subagents npm peer dependency to `>=0.80.0` and the development

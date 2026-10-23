@@ -361,7 +361,7 @@ capability ceiling, and protected launch policy in an isolated temporary agent
 directory. It never reads or updates production Pi configuration. Model-backed
 acceptance requires `PI_SUBAGENTS_GATE_MODEL` and an already-exported matching
 credential; missing prerequisites are reported as `SKIP`. The current peer
-floor and development baseline are Pi 1.3.0, with pi-subagents 0.80.0 and
+floor and development baseline are Pi 1.3.0, with pi-subagents 0.81.0 and
 `typebox >=1.4.2`. `pi-tui >=1.3.0` is an explicit host peer, not a bundled
 runtime dependency. See `docs/compat-notes.md` for the recorded deterministic
 and model-backed validation results.

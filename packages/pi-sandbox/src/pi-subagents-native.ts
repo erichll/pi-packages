@@ -7,7 +7,7 @@ import * as hostPiTui from "@earendil-works/pi-tui";
 import * as hostTypebox from "typebox";
 
 /**
- * Tested on pi-subagents 0.79.0 and 0.80.0 / Pi 1.3.0. Accept newer 0.x minors only
+ * Tested on pi-subagents 0.79.0, 0.80.0 and 0.81.0 / Pi 1.3.0. Accept newer 0.x minors only
  * after validating the ceiling API, discovery, config, ownership and runtime
  * paths exports below. The ownership seam includes same-process session
  * succession; ownership alone is never proof that a worker was protected.
@@ -120,16 +120,17 @@ function capabilityCeilingExportTarget(value: unknown): string | undefined {
 /**
  * Resolve the installed module extension from the `./capability-ceiling`
  * export, which every supported line publishes: a bare `.ts`/`.js` path before
- * 0.70.0, a `{ types, default }` condition map from 0.70.0 on. Only the known
- * `./src/api/capability-ceiling.<ext>` target is accepted; anything else fails
- * closed instead of guessing a layout.
+ * 0.70.0, a `{ types, default }` condition map from 0.70.0 on (0.81.0 points
+ * `default` at the `./bundle/` build; the internal `src/**` modules still ship).
+ * Only the known `./src/api/` or `./bundle/` `capability-ceiling.<ext>` targets
+ * are accepted; anything else fails closed instead of guessing a layout.
  */
 export function resolvePiSubagentsModuleExtension(
   exportsField: Record<string, unknown> | undefined,
 ): PiSubagentsModuleExtension {
   const target = capabilityCeilingExportTarget(exportsField?.["./capability-ceiling"]);
   const match = typeof target === "string"
-    ? /^\.\/src\/api\/capability-ceiling(?:\.d)?\.(ts|js)$/u.exec(target)
+    ? /^\.\/(?:src\/api|bundle)\/capability-ceiling(?:\.d)?\.(ts|js)$/u.exec(target)
     : null;
   if (!match) {
     throw new Error(
@@ -233,6 +234,24 @@ export async function resolvePiSubagentsHostAliases(
   return {};
 }
 
+/**
+ * Walk up from the resolved `pi-subagents` entry to the package root. The entry
+ * sits at the root before 0.81.0 and under `bundle/` from 0.81.0 on.
+ */
+export async function findPiSubagentsPackageRoot(entry: string): Promise<string> {
+  let dir = dirname(entry);
+  for (;;) {
+    if ((await readPackageName(dir)) === "pi-subagents") return dir;
+    const parent = dirname(dir);
+    if (parent === dir) {
+      throw new Error(
+        "pi-subagents compatibility failure: package root not found",
+      );
+    }
+    dir = parent;
+  }
+}
+
 /** Load the public ceiling API and the discovery/config internals.
  * This intentionally fails closed on package version, export, or layout drift.
  */
@@ -240,7 +259,7 @@ export async function loadPiSubagentsNativeRuntime(
   configuredAgents: readonly string[],
 ): Promise<PiSubagentsNativeRuntime> {
   const entry = fileURLToPath(import.meta.resolve("pi-subagents"));
-  const root = dirname(entry);
+  const root = await findPiSubagentsPackageRoot(entry);
   const packageJson = JSON.parse(
     await readFile(join(root, "package.json"), "utf8"),
   ) as { version?: unknown; exports?: Record<string, unknown> };

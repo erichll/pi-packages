@@ -180,6 +180,26 @@ Pi's own `@earendil-works/pi-ai`. The current sandbox peer floor is
 or hoisted copy is older. The development workspace uses 1.4.2 and Pi 1.3.0.
 The isolated host-peer tests cover Node, Bun and compiled-Bun loading.
 
+## 2026-10-23 pi-subagents 0.81.0 verification
+
+The development pin is raised to `^0.81.0`; the npm peer stays `>=0.80.0` and
+the structural loader floor stays `>=0.79.0`. Upstream 0.81.0 bundles the
+runtime for faster Windows startup: `.` and `./capability-ceiling` now publish
+`default` targets under `./bundle/` (for example `./bundle/capability-ceiling.js`)
+with `types` still at `./src/api/*.d.ts`. The internal `src/**/*.js` modules
+(agents, config, run-ownership, shared types, session-succession) still ship, so
+the jiti internal loads are unchanged.
+
+Two loader assumptions broke and were fixed: the `./capability-ceiling` target
+check now accepts `./src/api/` and `./bundle/`, and the package root is found by
+walking up from the resolved entry to the `pi-subagents` manifest instead of
+taking `dirname(entry)` (the entry now sits in `bundle/`). Tests and the gate
+use the same helper.
+
+`npm run check` and `npm test` pass; `npm run gate:pi-subagents` passes the
+deterministic phase against 0.81.0. The model-backed phase was not run here
+(no `PI_SUBAGENTS_GATE_MODEL`/credential).
+
 ## 2026-10-21 pi-subagents 0.80.0 verification
 
 The sandbox peer dependency is raised to `pi-subagents >=0.80.0` and the

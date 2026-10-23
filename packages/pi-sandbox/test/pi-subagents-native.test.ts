@@ -91,6 +91,15 @@ test("package layout resolution accepts the source and compiled module layouts",
     }),
     ".js",
   );
+  assert.equal(
+    resolvePiSubagentsModuleExtension({
+      "./capability-ceiling": {
+        types: "./src/api/capability-ceiling.d.ts",
+        default: "./bundle/capability-ceiling.js",
+      },
+    }),
+    ".js",
+  );
   assert.equal(piSubagentsInternalModulePath("src/agents/agents", ".js"), "src/agents/agents.js");
   assert.equal(piSubagentsInternalModulePath("src/agents/agents.ts", ".ts"), "src/agents/agents.ts");
   for (const drift of [
@@ -99,6 +108,7 @@ test("package layout resolution accepts the source and compiled module layouts",
     { "./capability-ceiling": 42 },
     { "./capability-ceiling": "./dist/api/capability-ceiling.js" },
     { "./capability-ceiling": "./src/api/ceiling.ts" },
+    { "./capability-ceiling": "./bundle/ceiling.js" },
     { "./capability-ceiling": { default: "./src/api/capability-ceiling.mjs" } },
   ]) {
     assert.throws(

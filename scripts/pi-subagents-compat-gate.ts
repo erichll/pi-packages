@@ -10,6 +10,7 @@ import {
   nativeSteeringStatusBlockReason,
   NATIVE_CHILD_TOOLS,
   PI_SANDBOX_ACKNOWLEDGEMENT,
+  findPiSubagentsPackageRoot,
   isCompatiblePiSubagentsVersion,
   PI_SUBAGENTS_COMPAT_RANGE,
   piSubagentsInternalModulePath,
@@ -291,7 +292,7 @@ async function runModelProbe(options: {
 
 const packageRoot = resolve("node_modules/pi-subagents");
 const entry = fileURLToPath(import.meta.resolve("pi-subagents"));
-assert.equal(dirname(entry), packageRoot, "pi-subagents must resolve from the workspace pin");
+assert.equal(await findPiSubagentsPackageRoot(entry), packageRoot, "pi-subagents must resolve from the workspace pin");
 const packageJson = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8")) as {
   version?: string;
   exports?: Record<string, unknown>;

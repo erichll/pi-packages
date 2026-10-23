@@ -12,6 +12,7 @@ import {
   nativeSubagentCallBlockReason,
   NATIVE_CHILD_TOOLS,
   PI_SANDBOX_ACKNOWLEDGEMENT,
+  findPiSubagentsPackageRoot,
 } from "../src/pi-subagents-native.ts";
 
 function protectedStatus(runId = "protected-run", sessionId = "old-session") {
@@ -97,7 +98,7 @@ test("real in-process succession permits protected steering only; host files and
     writeFileSync(join(asyncRoot, id, "status.json"), JSON.stringify(status));
   };
   try {
-    const packageRoot = dirname(fileURLToPath(import.meta.resolve("pi-subagents")));
+    const packageRoot = await findPiSubagentsPackageRoot(fileURLToPath(import.meta.resolve("pi-subagents")));
     const succession = await import(pathToFileURL(join(packageRoot, "src/shared/session-succession.js")).href);
     succession.recordSessionReplacement("successor-session", "old-session");
     const runtime = await loadPiSubagentsNativeRuntime(["worker"]);

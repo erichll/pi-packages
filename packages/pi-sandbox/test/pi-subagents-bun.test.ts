@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { findPiSubagentsPackageRoot } from "../src/pi-subagents-native.ts";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,7 +16,7 @@ test("Pi supplies missing host peers to the protected loader on Node, Bun, and c
 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "pi-subagents-host-modules-"));
   const modules = join(root, "node_modules");
-  const peerRoot = dirname(fileURLToPath(import.meta.resolve("pi-subagents")));
+  const peerRoot = await findPiSubagentsPackageRoot(fileURLToPath(import.meta.resolve("pi-subagents")));
   const piDist = dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")));
   const agentDir = join(root, "agent");
   const configPath = join(agentDir, "extensions/subagent/config.json");
