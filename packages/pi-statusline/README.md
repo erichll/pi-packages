@@ -23,7 +23,7 @@ spaces set each label off from the row contents (one in ASCII mode).
 pi install npm:@erichll/pi-statusline
 ```
 
-Requires Node.js >=22.19 and Pi >=1.1.0; subscription Usage requires Pi >=1.2.0.
+Requires Node.js >=22.19 and Pi >=1.4.0.
 Git is optional. The default Powerline layout requires a Nerd Font; choose
 ASCII icons and plain separators for a font-independent layout.
 Disable other footer extensions in `pi config`: only one should own the footer.

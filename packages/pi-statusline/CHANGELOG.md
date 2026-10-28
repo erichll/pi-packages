@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.0 - 2026-10-28
+
+- Raise the development and peer baseline to Pi 1.4.0. Older Pi peer versions
+  are no longer supported by this release.
+- Verify the type check and the full statusline test suite against Pi 1.4.0.
+
 ## 0.8.0 - 2026-10-18
 
 ### Added

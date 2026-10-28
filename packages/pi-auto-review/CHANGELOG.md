@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.28.0 - 2026-10-28
+
+- Raise the development and peer baselines to Pi 1.4.0 and
+  pi-permission-system 42.0.0. Older peer versions are no longer supported
+  by this release.
+- Verify the type check and the full auto-review test suite against the new
+  permission-system baseline.
+
 ## 0.27.2 - 2026-10-20
 
 - Apply Pi's credential `baseUrl` to reviewer requests. GitHub Copilot

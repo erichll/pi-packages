@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.29.0 - 2026-10-28
+
+- Raise the development and peer baselines to Pi 1.4.0, pi-subagents 0.83.0
+  and typebox 1.4.3. pi-subagents remains an optional peer. Older peer
+  versions are no longer supported by this release.
+- Update the pi-auto-review runtime dependency to ^0.28.0.
+- Verify the type check, sandbox test suite and both deterministic and
+  model-backed pi-subagents compatibility gate phases, including the native
+  baseline and protected native-background whitelist.
+
 ## 0.28.1 - 2026-10-23
 
 - Support the pi-subagents 0.81.0 bundle layout: the `./capability-ceiling`
