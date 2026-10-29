@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.29.1 - 2026-10-29
+
+- Keep the protected pi-subagents capability ceiling active in saved sessions
+  on pi-subagents 0.83.1, which looks ceilings up by Pi session id only. The
+  ceiling is now registered under both the session id and the session file
+  path (used by 0.83.0 background launches), so background children keep the
+  five-tool restriction and agent whitelist on either version. Protected
+  steering still checks run ownership by session file path, which 0.83.1 did
+  not change.
+- Raise the development pin to `pi-subagents ^0.83.1`; the peer stays
+  `>=0.83.0`.
+- Verify the type check, full test suite and both deterministic and
+  model-backed pi-subagents compatibility gate phases on 0.83.1, plus the
+  pi-subagents tests and deterministic gate on 0.83.0.
+
 ## 0.29.0 - 2026-10-28
 
 - Raise the development and peer baselines to Pi 1.4.0, pi-subagents 0.83.0

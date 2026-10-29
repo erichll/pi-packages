@@ -71,6 +71,8 @@ default `builtin` provider for complete worker-process-tree isolation.
 | `src/extension/config.<ext>` | internal config loader | runtime loader + tests |
 | `src/runs/shared/run-ownership.<ext>` | `ownsRun` includes in-process predecessor sessions | runtime loader + real succession tests |
 | `src/shared/types.<ext>` | `DIRS.async` supplies the host-owned run root | runtime loader + path/symlink/malformed-status tests |
+| capability ceiling session key | 0.83.1+ resolves every ceiling lookup by `ctx.sessionManager.getSessionId()`; 0.83.0 background launches resolved by session file path. pi-sandbox registers under both | saved-session test + deterministic gate |
+| run ownership identity | `status.sessionId` and `ownsRun` use the session file path (falling back to the id); unchanged in 0.83.1 | saved-session test + model gate |
 | child acknowledgement | event `subagent:acknowledge-extension` | unit/model gate |
 | `bg_wait` completion details | must carry runtime acknowledgement | result guard/model gate |
 
@@ -179,6 +181,36 @@ Pi's own `@earendil-works/pi-ai`. The current sandbox peer floor is
 `typebox >=1.4.2`; install that version separately when the host's embedded
 or hoisted copy is older. The development workspace uses 1.4.2 and Pi 1.3.0.
 The isolated host-peer tests cover Node, Bun and compiled-Bun loading.
+
+## 2026-10-29 pi-subagents 0.83.1 verification
+
+Upstream 0.83.1 (#3087) changed every capability ceiling lookup, including
+background launches, workflow children and `list`, to the Pi session id from
+`ctx.sessionManager.getSessionId()`. A ceiling registered by session file path
+no longer applies. pi-sandbox registered by file path whenever a session file
+existed, so on 0.83.1 a saved session's protected background child would have
+started with no pi-sandbox ceiling: no five-tool restriction and no agent
+whitelist from upstream (session start and launch validation still ran, and
+steering failed closed because the status record lacked the ceiling). The
+0.83.0 background path read the file path instead, so pi-sandbox now registers
+the same ceiling under both keys. An extra registration only narrows
+intersected lookups, and a failed key rolls back the others and blocks the
+launch.
+
+Run ownership did not move: 0.83.1 still writes `status.sessionId` and checks
+`ownsRun` with `resolveCurrentSessionId` (session file path, else id), and
+session succession is still keyed by file path. Protected steering keeps
+passing that identity. The child acknowledgement event and
+`runtimeAcknowledgedExtensions` shape are unchanged.
+
+The development pin is `^0.83.1`; the npm peer stays `>=0.83.0`.
+`npm run check` and `npm test` pass, and both gate phases pass on 0.83.1 with
+parent `cliproxyapi/codex-auto-review` and child `cliproxyapi/gpt-5.6-luna`.
+The model phase runs the parent with a session file, so it covers background
+child tool restriction, sandbox acknowledgement and file-path run ownership
+in a saved session. The pi-subagents tests and deterministic gate also pass
+with 0.83.0 temporarily swapped in. The new saved-session test fails on the previous
+registration code against 0.83.1.
 
 ## 2026-10-23 pi-subagents 0.81.0 verification
 

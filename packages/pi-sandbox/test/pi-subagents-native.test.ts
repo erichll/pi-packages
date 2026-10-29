@@ -197,15 +197,28 @@ test("the installed pi-subagents runtime validates native agents and registers t
     ].join("\n"));
     const runtime = await loadPiSubagentsNativeRuntime(["worker", "reviewer", "scout"]);
     assert.deepEqual(runtime.validateAllowedAgents(process.cwd()), ["worker", "reviewer", "scout"]);
-    const handle = runtime.registerCeiling("native-test-session", ["worker"]);
+    const sessionFile = join(root, "sessions", "native-test-session.jsonl");
+    const handle = runtime.registerCeiling(["native-test-session", sessionFile, "native-test-session"], ["worker"]);
     const key = Symbol.for("pi-subagents.capability-ceiling.v1");
-    const registry = (globalThis as unknown as Record<symbol, Map<string, Map<symbol, { ceiling: { allowedAgents: string[]; allowedTools: string[] } }>>>)[key];
+    type Registration = { ceiling: { allowedAgents: string[]; allowedTools: string[] } };
+    const registry = (globalThis as unknown as Record<symbol, Map<string, Map<symbol, Registration>>>)[key];
     assert.ok(registry, "capability ceiling registry must be registered on globalThis");
-    const registration = [...registry.get("native-test-session")!.values()][0]!;
-    assert.deepEqual(registration.ceiling.allowedAgents, ["worker"]);
-    assert.deepEqual(registration.ceiling.allowedTools, [...NATIVE_CHILD_TOOLS].sort());
+    for (const sessionKey of ["native-test-session", sessionFile]) {
+      const registrations: Registration[] = [...registry.get(sessionKey)!.values()];
+      assert.equal(registrations.length, 1, "duplicate keys register once");
+      assert.deepEqual(registrations[0]!.ceiling.allowedAgents, ["worker"]);
+      assert.deepEqual(registrations[0]!.ceiling.allowedTools, [...NATIVE_CHILD_TOOLS].sort());
+    }
     handle.dispose();
     assert.equal(registry.has("native-test-session"), false);
+    assert.equal(registry.has(sessionFile), false);
+    assert.throws(() => runtime.registerCeiling([], ["worker"]), /at least one ceiling session key/);
+    assert.throws(
+      () => runtime.registerCeiling("native-test-session" as unknown as string[], ["worker"]),
+      /at least one ceiling session key/,
+    );
+    assert.throws(() => runtime.registerCeiling(["partial-session", ""], ["worker"]), /sessionId/);
+    assert.equal(registry.has("partial-session"), false, "a failed key rolls back earlier registrations");
 
     await assert.rejects(
       loadPiSubagentsNativeRuntime(["developer"]).then((candidate) => candidate.validateAllowedAgents(process.cwd())),

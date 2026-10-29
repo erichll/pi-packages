@@ -60,9 +60,27 @@ function sessionId(ctx: ExtensionContext): string {
   return ctx.sessionManager.getSessionId();
 }
 
-function piSubagentsSessionId(ctx: ExtensionContext): string {
+function piSessionFile(ctx: ExtensionContext): string | undefined {
   const getSessionFile = (ctx.sessionManager as { getSessionFile?: () => string | null | undefined }).getSessionFile;
-  return getSessionFile?.call(ctx.sessionManager) ?? ctx.sessionManager.getSessionId();
+  return getSessionFile?.call(ctx.sessionManager) ?? undefined;
+}
+
+/**
+ * Run ownership identity: pi-subagents records `status.sessionId` and checks
+ * `ownsRun` against the session file path, falling back to the session id.
+ */
+function piSubagentsRunOwnerId(ctx: ExtensionContext): string {
+  return piSessionFile(ctx) ?? ctx.sessionManager.getSessionId();
+}
+
+/**
+ * pi-subagents 0.83.1+ resolves capability ceilings by Pi session id only;
+ * 0.83.0 resolved background launches by session file path. Register under
+ * both so a saved session stays restricted on either version.
+ */
+function piSubagentsCeilingKeys(ctx: ExtensionContext): string[] {
+  const sessionFile = piSessionFile(ctx);
+  return [ctx.sessionManager.getSessionId(), ...(sessionFile ? [sessionFile] : [])];
 }
 
 function isPiSubagentsSource(
@@ -543,12 +561,12 @@ async function performRegistration(
           );
           capabilityCeiling?.dispose();
           capabilityCeiling = nativeRuntime!.registerCeiling(
-            piSubagentsSessionId(ctx),
+            piSubagentsCeilingKeys(ctx),
             validatedNativeAgents,
           );
           if (action === "steer") {
             const targetReason = await nativeRuntime!.steeringTargetBlockReason(
-              piSubagentsSessionId(ctx),
+              piSubagentsRunOwnerId(ctx),
               String(event.input.id ?? event.input.runId),
               validatedNativeAgents,
             );
@@ -598,7 +616,7 @@ async function performRegistration(
         ctx.model?.provider,
       );
       capabilityCeiling = nativeRuntime!.registerCeiling(
-        piSubagentsSessionId(ctx),
+        piSubagentsCeilingKeys(ctx),
         validatedNativeAgents,
       );
       const ownership = externalSubagentDiagnostic(pi);

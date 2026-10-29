@@ -249,7 +249,14 @@ async function runModelProbe(options: {
           steps: status.steps?.map((step) => ({ ...step, status: "running" })),
         };
         const runId = basename(asyncDir);
-        const reason = nativeSteeringStatusBlockReason(steeringShape, runId, ["gate-probe"], () => true);
+        // The parent runs with --session-dir, so this covers a saved session:
+        // pi-subagents must still own the run by its session file path, which
+        // protected steering passes to ownsRun.
+        const owner = (status as { sessionId?: unknown }).sessionId;
+        if (typeof owner !== "string" || !owner.startsWith(`${sessionDir}/`) || !owner.endsWith(".jsonl")) {
+          throw new Error(`protected child run ownership is no longer the parent session file: ${JSON.stringify(owner)}`);
+        }
+        const reason = nativeSteeringStatusBlockReason(steeringShape, runId, ["gate-probe"], (id) => id === owner);
         if (reason) throw new Error(`protected child steering-proof shape changed: ${reason}`);
       }
       if (status.state !== "complete" || status.steps?.some((step) => step.status !== "complete")) {
@@ -332,12 +339,20 @@ try {
   const runtime = await loadPiSubagentsNativeRuntime(["worker", "reviewer", "scout"]);
   const allowed = runtime.validateAllowedAgents(process.cwd());
   assert.deepEqual(allowed, ["worker", "reviewer", "scout"]);
-  const handle = runtime.registerCeiling("compat-gate", allowed);
-  const registry = (globalThis as unknown as Record<symbol, Map<string, Map<symbol, { ceiling: { allowedAgents: string[]; allowedTools: string[] } }>>>)[Symbol.for("pi-subagents.capability-ceiling.v1")];
-  const ceiling = [...registry.get("compat-gate")!.values()][0]!.ceiling;
-  assert.deepEqual(ceiling.allowedAgents, allowed.slice().sort());
-  assert.deepEqual(ceiling.allowedTools, [...NATIVE_CHILD_TOOLS].sort());
+  // pi-sandbox registers by Pi session id (0.83.1+) and session file path
+  // (0.83.0 background launches); read both back through the public API.
+  const ceilingKeys = ["compat-gate", join(agentDir, "sessions", "compat-gate.jsonl")];
+  const handle = runtime.registerCeiling(ceilingKeys, allowed);
+  const { resolveCurrentSubagentCapabilityCeiling } = await import("pi-subagents/capability-ceiling") as {
+    resolveCurrentSubagentCapabilityCeiling(id: string | undefined): { allowedAgents?: string[]; allowedTools?: string[] } | undefined;
+  };
+  for (const key of ceilingKeys) {
+    const ceiling = resolveCurrentSubagentCapabilityCeiling(key);
+    assert.deepEqual(ceiling?.allowedAgents, allowed.slice().sort());
+    assert.deepEqual(ceiling?.allowedTools, [...NATIVE_CHILD_TOOLS].sort());
+  }
   handle.dispose();
+  for (const key of ceilingKeys) assert.equal(resolveCurrentSubagentCapabilityCeiling(key), undefined);
 
   assert.equal(nativeSubagentCallBlockReason({ agent: "worker", task: "probe", async: true }), undefined);
   assert.match(nativeSubagentCallBlockReason({ workflowScript: "return runs.run('x', {agent:'worker'})", async: true }) ?? "", /disabled because.*ambient extensions/);

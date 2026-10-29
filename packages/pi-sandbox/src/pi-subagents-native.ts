@@ -7,7 +7,7 @@ import * as hostPiTui from "@earendil-works/pi-tui";
 import * as hostTypebox from "typebox";
 
 /**
- * Tested on pi-subagents 0.79.0, 0.80.0 and 0.81.0 / Pi 1.3.0. Accept newer 0.x minors only
+ * Tested on pi-subagents 0.83.0 and 0.83.1 / Pi 1.4.0. Accept newer 0.x minors only
  * after validating the ceiling API, discovery, config, ownership and runtime
  * paths exports below. The ownership seam includes same-process session
  * succession; ownership alone is never proof that a worker was protected.
@@ -77,10 +77,15 @@ export type PiSubagentsNativeRuntime = {
     cwd: string,
     preferredProvider?: string,
   ): string[];
-  registerCeiling(sessionId: string, allowedAgents: readonly string[]): CapabilityCeilingHandle;
+  /**
+   * Register the same ceiling under every key upstream may resolve it by.
+   * Extra registrations only narrow other lookups, so registering more keys
+   * than a given version reads is safe; a failed registration fails closed.
+   */
+  registerCeiling(sessionKeys: readonly string[], allowedAgents: readonly string[]): CapabilityCeilingHandle;
   /** Inspect runtime files, not model text; assumes their directory is trusted. */
   steeringTargetBlockReason(
-    sessionId: string,
+    ownerSessionId: string,
     runId: string,
     allowedAgents: readonly string[],
   ): Promise<string | undefined>;
@@ -366,14 +371,29 @@ export async function loadPiSubagentsNativeRuntime(
   }
   return {
     validateAllowedAgents,
-    registerCeiling(sessionId, allowedAgents) {
-      return ceiling.registerSubagentCapabilityCeiling({
-        sessionId,
-        source: PI_SANDBOX_ACKNOWLEDGEMENT,
-        ceiling: { allowedAgents, allowedTools: NATIVE_CHILD_TOOLS },
-      });
+    registerCeiling(sessionKeys, allowedAgents) {
+      if (!Array.isArray(sessionKeys) || sessionKeys.length === 0) {
+        throw new Error("pi-subagents protected mode requires at least one ceiling session key");
+      }
+      const handles: CapabilityCeilingHandle[] = [];
+      const dispose = () => {
+        for (const handle of handles.splice(0)) handle.dispose();
+      };
+      try {
+        for (const sessionId of new Set(sessionKeys)) {
+          handles.push(ceiling.registerSubagentCapabilityCeiling({
+            sessionId,
+            source: PI_SANDBOX_ACKNOWLEDGEMENT,
+            ceiling: { allowedAgents, allowedTools: NATIVE_CHILD_TOOLS },
+          }));
+        }
+      } catch (error) {
+        dispose();
+        throw error;
+      }
+      return { dispose };
     },
-    async steeringTargetBlockReason(sessionId, runId, allowedAgents) {
+    async steeringTargetBlockReason(ownerSessionId, runId, allowedAgents) {
       try {
         // A complete id only: never accept prefixes, caller-selected directories,
         // symlinks, or a path outside the upstream runtime's async root.
@@ -391,7 +411,7 @@ export async function loadPiSubagentsNativeRuntime(
         }
         const status: unknown = JSON.parse(await readFile(statusPath, "utf8"));
         return nativeSteeringStatusBlockReason(status, runId, allowedAgents, (owner) =>
-          ownership.ownsRun(sessionId, owner),
+          ownership.ownsRun(ownerSessionId, owner),
         );
       } catch {
         return "protected steering cannot verify the target's sandbox runtime proof; inspect or stop it instead";

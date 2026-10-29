@@ -77,7 +77,7 @@ test("Pi supplies missing host peers to the protected loader on Node, Bun, and c
             }
             const allowed = runtime.validateAllowedAgents(ctx.cwd);
             assert.deepEqual(allowed, ['worker', 'reviewer', 'scout']);
-            const handle = runtime.registerCeiling('host-module-test', allowed);
+            const handle = runtime.registerCeiling(['host-module-test'], allowed);
             // Read through the host-loaded public API to verify that the inner
             // loader's registration reaches the upstream registry.
             const ceiling = resolveCurrentSubagentCapabilityCeiling('host-module-test');
