@@ -7,7 +7,7 @@ import * as hostPiTui from "@earendil-works/pi-tui";
 import * as hostTypebox from "typebox";
 
 /**
- * Tested on pi-subagents 0.83.0 and 0.83.1 / Pi 1.4.0. Accept newer 0.x minors only
+ * Tested on pi-subagents 0.83.0 and 0.83.1 / Pi 1.4.0 and 1.5.0. Accept newer 0.x minors only
  * after validating the ceiling API, discovery, config, ownership and runtime
  * paths exports below. The ownership seam includes same-process session
  * succession; ownership alone is never proof that a worker was protected.

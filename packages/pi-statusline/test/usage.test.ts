@@ -43,10 +43,28 @@ test("all recorded usage categories survive compaction and navigation, but priva
 });
 
 test("invalid provider counters are ignored and amended trailing entries replace old totals", () => {
-  assert.deepEqual(readUsage({ input: NaN, output: -1, cacheRead: Infinity, cost: { total: "1" } }), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 });
+  assert.deepEqual(readUsage({ input: NaN, output: -1, cacheRead: Infinity, cost: { total: "1" } }), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, costProvenance: "unknown" });
   const cache = new UsageCache();
   cache.update([messageEntry("1")]);
   cache.update([messageEntry("1", assistant(1, usage(300, 50, 0.5)))]);
   assert.equal(cache.snapshot().input, 300);
   assert.equal(cache.snapshot().cost, 0.5);
+  assert.equal(cache.snapshot().costProvenance, "unknown");
+});
+
+test("provider bills stay unmarked, catalog estimates and mixtures are marked", () => {
+  const billed = usage(10, 1, 0.2, true);
+  const estimated = usage(10, 1, 0.3, false);
+  assert.equal(readUsage(billed).costProvenance, "provider");
+  assert.equal(readUsage(estimated).costProvenance, "estimated");
+  assert.equal(readUsage(usage()).costProvenance, "unknown");
+
+  const cache = new UsageCache();
+  cache.update([messageEntry("1", assistant(1, billed))]);
+  assert.equal(cache.snapshot().costProvenance, "provider");
+  cache.update([messageEntry("1", assistant(1, billed)), messageEntry("2", assistant(2, estimated))]);
+  assert.equal(cache.snapshot().cost, 0.5);
+  assert.equal(cache.snapshot().costProvenance, "mixed");
+  cache.update([messageEntry("1", assistant(1, usage())), messageEntry("2", assistant(2, billed))]);
+  assert.equal(cache.snapshot().costProvenance, "provider");
 });

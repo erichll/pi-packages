@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.0 - 2026-11-03
+
+- Mark the cost segment when the summed USD total is a catalog estimate or
+  mixes an estimate with a provider-reported bill (`0.012~`). Totals Pi
+  reports as billed, and totals recorded before `totalFromProvider` existed,
+  stay unmarked.
+- Verify the type check and the full statusline test suite against Pi 1.5.0.
+  The peer floor stays `>=1.4.0`.
+
 ## 0.9.0 - 2026-10-28
 
 - Raise the development and peer baseline to Pi 1.4.0. Older Pi peer versions

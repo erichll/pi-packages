@@ -29,6 +29,20 @@ test("all themes and icon modes fit every width including wide Unicode and escap
   }
 });
 
+test("cost marks catalog estimates and mixed totals only", () => {
+  const config = presetConfig();
+  config.segments.find((segment) => segment.id === "cost")!.enabled = true;
+  const line = (provenance: "provider" | "estimated" | "mixed" | "unknown") => {
+    const data = sampleSnapshot();
+    data.usage = { ...data.usage, cost: 0.012, costProvenance: provenance };
+    return stripTerminalSequences(renderFooter(200, data, config, testTheme()).join("\n"));
+  };
+  assert.match(line("unknown"), /0\.012(?!~)/);
+  assert.match(line("provider"), /0\.012(?!~)/);
+  assert.match(line("estimated"), /0\.012~/);
+  assert.match(line("mixed"), /0\.012~/);
+});
+
 test("narrow layouts keep model and context ahead of cost and directory", () => {
   const config = presetConfig();
   config.segments.find((segment) => segment.id === "cost")!.enabled = true;

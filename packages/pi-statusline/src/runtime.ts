@@ -3,7 +3,7 @@ import type { AssistantMessage, AssistantMessageEvent } from "@earendil-works/pi
 import type { AgentActivityOutcome } from "@earendil-works/pi-coding-agent";
 import { cleanText } from "./text.ts";
 import { toolTarget } from "./tools.ts";
-import { emptyUsage, readUsage } from "./usage.ts";
+import { emptyUsage, mergeCostProvenance, readUsage } from "./usage.ts";
 import type { UsageTotals } from "./types.ts";
 
 export type Clock = () => number;
@@ -131,7 +131,13 @@ export class RuntimeState {
     const hidden = !retainSummary && !this.running;
     const elapsedMs = hidden || !this.runId ? 0 : Math.max(0, (this.running ? now : this.endMs) - this.startMs);
     const usage = !hidden && this.messages.size ? emptyUsage() : null;
-    if (usage) for (const contribution of this.messages.values()) for (const key of Object.keys(usage) as (keyof UsageTotals)[]) usage[key] += contribution[key];
+    if (usage) {
+      for (const contribution of this.messages.values()) {
+        usage.input += contribution.input; usage.output += contribution.output;
+        usage.cacheRead += contribution.cacheRead; usage.cacheWrite += contribution.cacheWrite; usage.cost += contribution.cost;
+        usage.costProvenance = mergeCostProvenance(usage.costProvenance, contribution.costProvenance);
+      }
+    }
     const denominator = usage ? usage.input + usage.cacheRead + usage.cacheWrite : 0;
     return {
       runId: hidden ? null : this.runId, status: hidden ? "Idle" : this.state, elapsedMs,

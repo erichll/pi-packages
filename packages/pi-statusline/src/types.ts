@@ -44,12 +44,20 @@ export interface StatuslineConfig {
   segments: SegmentConfig[];
   runtime: RuntimeConfig;
 }
+/** Where a summed USD total came from. `unknown` is Pi before 1.5, or a cost with no flag. */
+export type CostProvenance = "provider" | "estimated" | "mixed" | "unknown";
 export interface UsageTotals {
   input: number;
   output: number;
   cacheRead: number;
   cacheWrite: number;
   cost: number;
+  /**
+   * `unknown` keeps the historical unmarked display. It does not combine with
+   * a later flag: only a real estimate, or both an estimate and a provider bill,
+   * mark the total.
+   */
+  costProvenance: CostProvenance;
 }
 export interface GitState {
   kind: "repository" | "none" | "unknown";

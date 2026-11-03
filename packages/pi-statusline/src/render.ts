@@ -80,7 +80,10 @@ function segmentText(id: SegmentId, data: StatuslineSnapshot, config: Statusline
     case "quota": return renderQuota(data.quota, config.icons === "ascii");
     case "session": return data.sessionMinutes === null ? undefined : formatSessionAge(data.sessionMinutes);
     case "toolTotal": return data.toolCalls > 0 ? String(data.toolCalls) : undefined;
-    case "cost": return usage.cost.toFixed(3);
+    case "cost": {
+      const amount = usage.cost.toFixed(3);
+      return usage.costProvenance === "estimated" || usage.costProvenance === "mixed" ? `${amount}~` : amount;
+    }
     case "input": return formatTokens(usage.input);
     case "output": return formatTokens(usage.output);
     case "tokens": return formatTokens(usage.input + usage.output + usage.cacheRead + usage.cacheWrite);

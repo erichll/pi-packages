@@ -88,7 +88,7 @@ Available segments:
 | `session` | Time since the session was created, on the bottom row | On |
 | `toolTotal` | Tool calls recorded in the whole session (`󱁤 128`), on the bottom row; hidden at zero | On |
 | `tokens` | Cumulative session tokens, on the bottom row | On |
-| `cost` | Pi-recorded cumulative USD cost | Off |
+| `cost` | Pi-recorded cumulative USD cost. A trailing `~` means the total is a catalog estimate, or mixes an estimate with a provider-reported bill | Off |
 | `input`, `output`, `cacheRead`, `cacheWrite` | Individual session token counters | Off |
 | `statuses` | Other extensions' text, at the end of the bottom row | On |
 
