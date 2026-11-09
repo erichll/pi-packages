@@ -395,20 +395,30 @@ tmuxTest("preflight host backend reaches an isolated tmux socket", async () => {
   };
 
   try {
+    // Give the pane command time to write before this client returns.
+    // Ubuntu 26.04's tmux 3.6a can still present a blank pane immediately
+    // after new-session -d, so capture is retried below.
     await execute(
-      `tmux -L ${socket} new-session -d -s smoke 'printf host-ipc-ok; sleep 30'`,
+      `tmux -L ${socket} new-session -d -s smoke 'printf host-ipc-ok; sleep 30' \\; run-shell 'sleep 0.2'`,
     );
     assert.match(
       await execute(`tmux -L ${socket} list-sessions`),
       /smoke:/,
     );
-    assert.match(
-      await execute(`tmux -L ${socket} capture-pane -p -t smoke:0.0`),
-      /host-ipc-ok/,
-    );
-    assert.equal(approvals, 3);
+    let pane = "";
+    for (let attempt = 0; attempt < 20 && !pane.includes("host-ipc-ok"); attempt += 1) {
+      pane = await execute(`tmux -L ${socket} capture-pane -p -t smoke:0.0`);
+      if (!pane.includes("host-ipc-ok")) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
+    assert.match(pane, /host-ipc-ok/);
+    assert.match(approvalPrompts[0] ?? "", /tmux .* new-session/);
     assert.match(approvalPrompts[1] ?? "", /tmux .* list-sessions/);
-    assert.match(approvalPrompts[2] ?? "", /tmux .* capture-pane/);
+    assert.ok(approvalPrompts.slice(2).length > 0);
+    assert.ok(
+      approvalPrompts.slice(2).every((prompt) => /tmux .* capture-pane/.test(prompt)),
+    );
   } finally {
     spawnSync("tmux", ["-L", socket, "kill-server"]);
     rmSync(cwd, { recursive: true, force: true });

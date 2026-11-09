@@ -182,6 +182,29 @@ Pi's own `@earendil-works/pi-ai`. The current sandbox peer floor is
 or hoisted copy is older. The development workspace uses 1.4.2 and Pi 1.3.0.
 The isolated host-peer tests cover Node, Bun and compiled-Bun loading.
 
+## 2026-11-09 pi-subagents 0.87.0 verification
+
+The development pin is `^0.87.0`; the npm peer stays `>=0.83.0` and the
+structural loader floor stays `>=0.79.0`. The loader seams pi-sandbox imports
+are unchanged from 0.86.0: `src/api/capability-ceiling.js`,
+`src/extension/config.js`, `src/runs/shared/run-ownership.js` and
+`src/shared/types.js` are byte-identical, and `src/agents/agents.js` only adds
+the default-off `defaultInheritGlobalContext` setting. `discoverAgents`,
+`resolveAgentName`, `ownsRun`, `DIRS.async` and capability ceiling version 1
+are unchanged. Package exports and dependency ranges are unchanged.
+
+`stop` gained an optional `drain` flag. It applies only to a live async
+workflow, which protected mode already rejects, so direct `stop` behavior is
+unchanged. Explicit `provider/id` model resolution now fails instead of
+selecting another provider's copy; pi-sandbox does not call that resolver.
+Nested artifact cleanup does not touch the async run directory used for
+protected steering.
+
+Both gate phases pass on 0.87.0 with Pi 1.5.0, parent
+`cliproxyapi/codex-auto-review` and child `cliproxyapi/gpt-5.6-luna`:
+`baseline: native-host-readable`, `protected: sandboxed-bash-blocked-host-read`,
+and `acknowledgement: @erichll:pi-sandbox`.
+
 ## 2026-10-29 pi-subagents 0.83.1 verification
 
 Upstream 0.83.1 (#3087) changed every capability ceiling lookup, including

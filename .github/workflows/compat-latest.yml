@@ -32,7 +32,15 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Install sandbox runtime host dependencies
-        run: sudo apt-get update && sudo apt-get install -y ripgrep bubblewrap socat
+        run: |
+          sudo apt-get update && sudo apt-get install -y ripgrep bubblewrap socat
+          # Ubuntu 24.04+ strips capabilities from unprivileged user namespaces.
+          # ubuntu-latest moved to 26.04, where that makes apply-seccomp fail
+          # writing /proc/self/setgroups. sandbox-runtime needs the namespace
+          # to keep its capabilities.
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
       - name: Type check + tests (pinned)
         run: |
           echo "Pinned pi-subagents: $(node -p "require('./node_modules/pi-subagents/package.json').version")"
@@ -70,7 +78,12 @@ jobs:
           cache: npm
       - name: Install tmux + sandbox runtime host dependencies
         if: env.PI_SUBAGENTS_GATE_MODEL != ''
-        run: sudo apt-get update && sudo apt-get install -y tmux ripgrep bubblewrap socat
+        run: |
+          sudo apt-get update && sudo apt-get install -y tmux ripgrep bubblewrap socat
+          # Same user-namespace capability requirement as the pinned suite.
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
       - run: npm ci
         if: env.PI_SUBAGENTS_GATE_MODEL != ''
       - name: Install pi binary (PI_SUBAGENTS_GATE_PI_BINARY)

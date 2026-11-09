@@ -63,9 +63,14 @@ Install the native helpers before loading the extension:
 sudo apt-get install bubblewrap socat ripgrep
 ```
 
-Unprivileged user namespaces must be available. On Ubuntu 24.04+, either
-configure an AppArmor profile for bubblewrap or disable
-`kernel.apparmor_restrict_unprivileged_userns`.
+Unprivileged user namespaces must be available. On Ubuntu 24.04+ (including
+26.04), AppArmor strips capabilities from those namespaces and `apply-seccomp`
+cannot write `/proc/self/setgroups`. Either configure an AppArmor profile for
+bubblewrap or disable the restriction:
+
+```bash
+sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+```
 
 macOS uses built-in Seatbelt support but still requires `ripgrep`.
 
@@ -98,7 +103,9 @@ Supported modes:
 ### `pi-subagents` native-background tool boundary
 
 This provider requires Pi 1.4.0, `typebox >=1.4.3` and
-`pi-subagents >=0.83.0` (deterministically validated on 0.83.0 and 0.83.1), and
+`pi-subagents >=0.83.0` (deterministically validated on 0.83.0, 0.83.1,
+0.85.0, 0.86.0 and 0.87.0; the model-backed gate also passed on 0.85.0,
+0.86.0 and 0.87.0 with Pi 1.5.0), and
 fails closed
 if its public ceiling API, module layout, discovery, ownership or runtime-path
 seams drift. The peer dependency is a floor with no upper pin; the
@@ -362,7 +369,7 @@ directory. It never reads or updates production Pi configuration. Model-backed
 acceptance requires `PI_SUBAGENTS_GATE_MODEL` and an already-exported matching
 credential; missing prerequisites are reported as `SKIP`. The current peer
 floor is Pi 1.4.0 with pi-subagents 0.83.0, the development baseline is
-pi-subagents 0.83.1, and both use
+pi-subagents 0.87.0, and both use
 `typebox >=1.4.3`. `pi-tui >=1.4.0` is an explicit host peer, not a bundled
 runtime dependency. See `docs/compat-notes.md` for the recorded deterministic
 and model-backed validation results.
