@@ -63,13 +63,20 @@ Install the native helpers before loading the extension:
 sudo apt-get install bubblewrap socat ripgrep
 ```
 
-Unprivileged user namespaces must be available. On Ubuntu 24.04+ (including
-26.04), AppArmor strips capabilities from those namespaces and `apply-seccomp`
-cannot write `/proc/self/setgroups`. Either configure an AppArmor profile for
-bubblewrap or disable the restriction:
+Unprivileged user namespaces must be available. On Ubuntu 24.04+, AppArmor
+strips capabilities from those namespaces and `apply-seccomp` cannot write
+`/proc/self/setgroups`. Disable that restriction:
 
 ```bash
 sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+```
+
+Ubuntu 26.04 also installs the `bwrap-userns-restrict` profile, which denies
+every capability to processes inside bubblewrap even after the sysctl above.
+The sandbox cannot start until that profile is removed:
+
+```bash
+sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict
 ```
 
 macOS uses built-in Seatbelt support but still requires `ripgrep`.

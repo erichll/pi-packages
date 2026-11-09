@@ -5,9 +5,11 @@
 - Raise the development pin to `pi-subagents ^0.87.0`; the peer stays
   `>=0.83.0`.
 - Let the compatibility workflow create capability-bearing user namespaces on
-  Ubuntu 26.04 (`kernel.apparmor_restrict_unprivileged_userns=0`). Retry the
-  host-IPC tmux pane capture, because tmux 3.6a can still show a blank pane
-  immediately after `new-session -d`.
+  Ubuntu 26.04. Setting `kernel.apparmor_restrict_unprivileged_userns=0` is not
+  enough: the default `bwrap-userns-restrict` profile denies every capability
+  inside bubblewrap, so the job unloads it. Retry the host-IPC tmux pane
+  capture, because tmux 3.6a can still show a blank pane immediately after
+  `new-session -d`.
 - Verify the deterministic and model-backed pi-subagents compatibility gate
   against pi-subagents 0.87.0 with Pi 1.5.0. The same gate previously passed
   on 0.85.0 and 0.86.0.

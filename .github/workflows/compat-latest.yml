@@ -35,11 +35,14 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y ripgrep bubblewrap socat
           # Ubuntu 24.04+ strips capabilities from unprivileged user namespaces.
-          # ubuntu-latest moved to 26.04, where that makes apply-seccomp fail
-          # writing /proc/self/setgroups. sandbox-runtime needs the namespace
-          # to keep its capabilities.
           if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          # Ubuntu 26.04 ships bwrap-userns-restrict, which denies every
+          # capability to processes inside bubblewrap. apply-seccomp then
+          # cannot write /proc/self/setgroups. Unload it for this job.
+          if [ -f /etc/apparmor.d/bwrap-userns-restrict ]; then
+            sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict
           fi
       - name: Type check + tests (pinned)
         run: |
@@ -83,6 +86,9 @@ jobs:
           # Same user-namespace capability requirement as the pinned suite.
           if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          if [ -f /etc/apparmor.d/bwrap-userns-restrict ]; then
+            sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict
           fi
       - run: npm ci
         if: env.PI_SUBAGENTS_GATE_MODEL != ''
