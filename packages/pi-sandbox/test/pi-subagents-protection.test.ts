@@ -56,6 +56,18 @@ test("a run's ownership, ceiling and own acknowledgement are separate requiremen
   const check = (value: unknown, agents = ["worker"]) =>
     nativeSteeringStatusBlockReason(value, "protected-run", agents, (id) => id === "old-session");
   assert.equal(check(valid), undefined);
+  assert.equal(check({
+    ...valid,
+    steering: {
+      requested: 1,
+      recent: [{ id: "steer-1", targets: [{ index: 0, state: "failed", failureKind: "rejected" }] }],
+    },
+    steps: [{
+      ...valid.steps[0],
+      progressText: "halfway done",
+      progressUpdatedAt: 1_700_000_000_000,
+    }],
+  }), undefined);
   for (const invalid of [
     null, {}, { ...valid, runId: "wrong" }, { ...valid, sessionId: "foreign" },
     { ...valid, mode: "workflow" }, { ...valid, state: "completed" },

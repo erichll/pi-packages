@@ -182,6 +182,53 @@ Pi's own `@earendil-works/pi-ai`. The current sandbox peer floor is
 or hoisted copy is older. The development workspace uses 1.4.2 and Pi 1.3.0.
 The isolated host-peer tests cover Node, Bun and compiled-Bun loading.
 
+## 2026-11-16 pi-subagents 0.88.1 verification
+
+The development pin is raised to `^0.88.1`; the npm peer stays `>=0.83.0` and
+the structural loader floor stays `>=0.79.0`. The core loader and ceiling modules
+(`src/api/capability-ceiling.js`, `src/runs/shared/capability-ceiling.js`,
+`src/runs/shared/run-ownership.js`, `src/shared/types.js`, and
+`src/runs/shared/child-tool-plan.js`) are byte-identical to 0.87.0.
+`src/agents/agents.js` exports `MAX_LISTED_AGENTS` and updates the overflow
+hint for `{ action: "list", options: { search } }`; `discoverAgents` and
+`resolveAgentName` are unchanged, and `list` still filters visible agents
+through `resolveCurrentSubagentCapabilityCeiling(ctx.piSessionId)`.
+`src/extension/config.js` moves `resolveConfigDefaultTimeoutMs` from
+`subagent-executor.js`; `loadConfig` and `scheduledRuns.enabled` are unchanged.
+Package exports are unchanged and bundled `undici` moves to `8.12.4`.
+
+Upstream 0.88.1 (#3259) lets background children whose agent omits `tools` (or
+sets only `excludeTools`) keep `MCP_DIRECT_TOOLS` unset so `pi-mcp-adapter`
+exposes configured direct MCP tools, but `src/runs/shared/child-launch.js`
+applies that branch only when `!toolPlan.capabilityCeiling`. With pi-sandbox's
+ceiling registered, `explicitToolAllowlist` stays `true`, `session.tools` stays
+restricted to `bash`, `read`, `grep`, `find`, and `ls` (minus any
+`excludeTools`), `builtinMcpTools` outside that set are dropped, and
+`MCP_DIRECT_TOOLS` remains `"__none__"`. Required-extension startup in
+`src/runs/shared/child-session.js` ignores `register_mcp_server` bind errors
+when MCP tools are outside the child's tool contract while still failing closed
+on other required startup errors; pi-sandbox relies on ambient extension loading
+plus the child's `@erichll:pi-sandbox` acknowledgement.
+
+In `src/runs/background/stale-run-reconciler.js` (#3258), `status` and `stop`
+keep a background single-child run in `state: "running"` while its same-namespace
+runner PID is still alive between writing its result file and writing its final
+status, preventing a transient `unknown` (`observer-unavailable`) repair from
+replacing terminal exit and acknowledgement proof. Workflow `subagent_launch`
+task rewriting in 0.88.1 applies only to workflow launches, which protected
+mode already blocks. In 0.88.0 (#3227, #3230), step status adds optional
+`progressText`/`progressUpdatedAt` and steering targets record
+`failureKind: "rejected" | "unconsumed"` without auto-recovering rejected
+guidance; protected steering already requires `steeringRecovery: false` and
+accepts the new status metadata only when ownership, ceiling, and child-runtime
+acknowledgement are present.
+
+`npm run check`, `npm test`, and both phases of `npm run gate:pi-subagents`
+(deterministic and model-backed) pass on 0.88.1 with Pi 1.5.0, parent
+`cliproxyapi/codex-auto-review` and child `cliproxyapi/gpt-5.6-luna`:
+`baseline: native-host-readable`, `protected: sandboxed-bash-blocked-host-read`,
+and `acknowledgement: @erichll:pi-sandbox`.
+
 ## 2026-11-09 pi-subagents 0.87.0 verification
 
 The development pin is `^0.87.0`; the npm peer stays `>=0.83.0` and the

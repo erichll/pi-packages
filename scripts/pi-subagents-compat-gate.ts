@@ -3,7 +3,7 @@ import { copyFile, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } f
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   loadPiSubagentsNativeRuntime,
   nativeSubagentCallBlockReason,
@@ -318,12 +318,15 @@ for (const relative of [
   "src/runs/shared/run-ownership",
   "src/shared/types",
   "src/runs/shared/child-tool-plan",
+  "src/runs/shared/child-launch",
   "src/runs/foreground/subagent-executor",
 ]) await readFile(internal(relative), "utf8");
 
 const childToolPlan = await readFile(internal("src/runs/shared/child-tool-plan"), "utf8");
 assert.match(childToolPlan, /capabilityCeiling\?\.denyExtensions/);
 assert.match(childToolPlan, /allowedTools/);
+const childLaunch = await readFile(internal("src/runs/shared/child-launch"), "utf8");
+assert.match(childLaunch, /!toolPlan\.capabilityCeiling/);
 const executor = await readFile(internal("src/runs/foreground/subagent-executor"), "utf8");
 assert.match(executor, /publicExecutions = new WeakSet/);
 assert.match(executor, /publicExecution \? undefined : runHostCommand/);
@@ -351,6 +354,36 @@ try {
     assert.deepEqual(ceiling?.allowedAgents, allowed.slice().sort());
     assert.deepEqual(ceiling?.allowedTools, [...NATIVE_CHILD_TOOLS].sort());
   }
+  const { buildInProcessChildLaunch } = await import(
+    pathToFileURL(internal("src/runs/shared/child-launch")).href
+  ) as {
+    buildInProcessChildLaunch(input: Record<string, unknown>): {
+      toolPlan: { explicitToolAllowlist: boolean; effectiveToolAllowlist: string[] };
+      session: {
+        tools?: string[];
+        excludeTools?: string[];
+        builtinMcpTools?: unknown[];
+        ambientExtensions: boolean;
+        processEnv?: Record<string, string | undefined>;
+      };
+    };
+  };
+  const protectedLaunch = buildInProcessChildLaunch({
+    cwd: process.cwd(),
+    childAgentName: "worker",
+    childIndex: 0,
+    host: "runner",
+    tools: undefined,
+    excludeTools: ["grep", "write"],
+    builtinMcpTools: [{ name: "mcp_demo_write", selector: "demo/write" }],
+    capabilityCeiling: resolveCurrentSubagentCapabilityCeiling(ceilingKeys[0]),
+  });
+  assert.equal(protectedLaunch.toolPlan.explicitToolAllowlist, true);
+  assert.deepEqual(protectedLaunch.session.tools, ["bash", "find", "ls", "read"]);
+  assert.equal(protectedLaunch.session.excludeTools, undefined);
+  assert.equal(protectedLaunch.session.builtinMcpTools, undefined);
+  assert.equal(protectedLaunch.session.ambientExtensions, true);
+  assert.equal(protectedLaunch.session.processEnv?.MCP_DIRECT_TOOLS, "__none__");
   handle.dispose();
   for (const key of ceilingKeys) assert.equal(resolveCurrentSubagentCapabilityCeiling(key), undefined);
 

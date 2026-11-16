@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.29.3 - 2026-11-16
 
-- Raise the development pin to `pi-subagents ^0.87.0`; the peer stays
+- Raise the development pin to `pi-subagents ^0.88.1`; the peer stays
   `>=0.83.0`.
 - Let the compatibility workflow create capability-bearing user namespaces on
   Ubuntu 26.04. Setting `kernel.apparmor_restrict_unprivileged_userns=0` is not
@@ -10,9 +10,11 @@
   inside bubblewrap, so the job unloads it. Retry the host-IPC tmux pane
   capture, because tmux 3.6a can still show a blank pane immediately after
   `new-session -d`.
-- Verify the deterministic and model-backed pi-subagents compatibility gate
-  against pi-subagents 0.87.0 with Pi 1.5.0. The same gate previously passed
-  on 0.85.0 and 0.86.0.
+- Verify the deterministic and model-backed pi-subagents compatibility gate,
+  workspace type checks, full test suite, and background child tool-ceiling
+  boundaries (including agents that omit `tools` or set `excludeTools` in
+  0.88.1) against pi-subagents 0.88.1 with Pi 1.5.0. Both gate phases
+  previously passed on 0.85.0, 0.86.0 and 0.87.0 with Pi 1.5.0.
 
 ## 0.29.2 - 2026-11-03
 

@@ -9,6 +9,7 @@ import test from "node:test";
 import { createJiti } from "jiti";
 import {
   findPiPackageRootFromEntry,
+  findPiSubagentsPackageRoot,
   hasSandboxAcknowledgement,
   isCompatiblePiSubagentsVersion,
   loadPiSubagentsNativeRuntime,
@@ -41,6 +42,7 @@ test("protected call guard admits only explicit async direct launches", () => {
   for (const action of ["list", "get", "status", "debug.run", "models", "guide", "stop", "interrupt", "dismiss", "validate"]) {
     assert.equal(nativeSubagentCallBlockReason({ action }), undefined, action);
   }
+  assert.equal(nativeSubagentCallBlockReason({ action: "list", search: "worker", options: { search: "worker" } }), undefined);
 });
 
 test("acknowledgement proof is found in nested child results", () => {
@@ -209,6 +211,40 @@ test("the installed pi-subagents runtime validates native agents and registers t
       assert.deepEqual(registrations[0]!.ceiling.allowedAgents, ["worker"]);
       assert.deepEqual(registrations[0]!.ceiling.allowedTools, [...NATIVE_CHILD_TOOLS].sort());
     }
+    const packageRoot = await findPiSubagentsPackageRoot(fileURLToPath(import.meta.resolve("pi-subagents")));
+    const { buildInProcessChildLaunch } = await import(
+      pathToFileURL(join(packageRoot, "src/runs/shared/child-launch.js")).href
+    ) as {
+      buildInProcessChildLaunch(input: Record<string, unknown>): {
+        toolPlan: { explicitToolAllowlist: boolean };
+        session: {
+          tools?: string[];
+          excludeTools?: string[];
+          builtinMcpTools?: unknown[];
+          ambientExtensions: boolean;
+          processEnv?: Record<string, string | undefined>;
+        };
+      };
+    };
+    const { resolveCurrentSubagentCapabilityCeiling } = await import("pi-subagents/capability-ceiling") as {
+      resolveCurrentSubagentCapabilityCeiling(id: string | undefined): unknown;
+    };
+    const protectedLaunch = buildInProcessChildLaunch({
+      cwd: process.cwd(),
+      childAgentName: "worker",
+      childIndex: 0,
+      host: "runner",
+      tools: undefined,
+      excludeTools: ["grep", "write"],
+      builtinMcpTools: [{ name: "mcp_demo_write", selector: "demo/write" }],
+      capabilityCeiling: resolveCurrentSubagentCapabilityCeiling("native-test-session"),
+    });
+    assert.equal(protectedLaunch.toolPlan.explicitToolAllowlist, true);
+    assert.deepEqual(protectedLaunch.session.tools, ["bash", "find", "ls", "read"]);
+    assert.equal(protectedLaunch.session.excludeTools, undefined);
+    assert.equal(protectedLaunch.session.builtinMcpTools, undefined);
+    assert.equal(protectedLaunch.session.ambientExtensions, true);
+    assert.equal(protectedLaunch.session.processEnv?.MCP_DIRECT_TOOLS, "__none__");
     handle.dispose();
     assert.equal(registry.has("native-test-session"), false);
     assert.equal(registry.has(sessionFile), false);
