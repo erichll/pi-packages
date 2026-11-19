@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -364,6 +364,7 @@ function harness(
     async authorize(
       surface: string,
       overrides: Record<string, unknown> = {},
+      precedingLinks: Array<{ name: string; authorize: (details: any) => Promise<any> }> = [],
     ) {
       if (!registry.get("pi-auto-review")) {
         await new Promise<void>((resolve) => setImmediate(resolve));
@@ -372,7 +373,7 @@ function harness(
       assert.ok(registered, "pi-auto-review registered through the service");
       let terminalCalls = 0;
       const chain = composeAuthorizerChain(
-        [{ authorize: encloseInDelegationEnvelope("pi-auto-review", registered) }],
+        [...precedingLinks, { authorize: encloseInDelegationEnvelope("pi-auto-review", registered) }],
         {
           async authorize(details) {
             terminalCalls++;
@@ -775,6 +776,54 @@ test("automatic authorizer spellings reach policy audit without a UI prompt", as
     else process.env.HOME = previousHome;
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("permission-system partial chain allows preserve full-command hard denies", {
+  skip: !existsSync(new URL("../../../node_modules/@gotgenes/pi-permission-system/src/authority/ask-narrowing.ts", import.meta.url)),
+}, async () => {
+  const instance = harness(allow);
+  const command = "rm -rf / && echo remaining";
+  try {
+    const result = await instance.authorize("bash", {
+      command: "rm -rf /",
+      toolName: "bash",
+      payload: promptPayload("bash", "bash", "rm -rf /", command),
+      accessIntent: {
+        surface: "bash", matchValues: ["rm -rf /"],
+        askingUnits: [{ command: "rm -rf /" }, { command: "echo remaining" }],
+      },
+    }, [{ name: "partial", async authorize() { return { kind: "allow_units", units: ["rm -rf /"] }; } }]);
+    assert.equal(result.decision.approved, false);
+    assert.equal(result.terminalCalls, 0);
+    assert.equal(instance.modelContexts.length, 0);
+    assert.ok(instance.reviews.some((entry) => entry.event === "authorizer_units_allowed"));
+  } finally {
+    instance.dispose();
+  }
+});
+
+test("partial chain session grants cover only the remaining ask", {
+  skip: !existsSync(new URL("../../../node_modules/@gotgenes/pi-permission-system/src/authority/ask-narrowing.ts", import.meta.url)),
+}, async () => {
+  const first = "git status";
+  const second = "git push origin main";
+  let seen: any;
+  const chain = composeAuthorizerChain(
+    [{ name: "partial", async authorize() { return { kind: "allow_units", units: [first] }; } }],
+    { async authorize(details) { seen = details; return { approved: true, state: "approved_for_session", decidedBy: { kind: "user" } }; } },
+    {} as never, { review() {} } as never,
+  );
+  const result = await chain.authorize({
+    requestId: "partial-session", source: "tool_call", toolName: "bash", command: first,
+    payload: promptPayload("bash", "bash", first, `${first} && ${second}`),
+    accessIntent: { surface: "bash", matchValues: [first], askingUnits: [{ command: first }, { command: second }] },
+    sessionApproval: { grants: [{ surface: "bash", pattern: first }, { surface: "bash", pattern: second }] },
+  } as never);
+  assert.equal(seen.command, second);
+  assert.deepEqual(seen.accessIntent.askingUnits.map((unit: any) => unit.command), [second]);
+  assert.deepEqual(result.narrowedGrants, seen.sessionApproval.grants);
+  assert.ok(result.narrowedGrants?.length);
+  assert.ok(result.narrowedGrants.every((grant: any) => !grant.pattern.includes(first)));
 });
 
 test("real permission-system authorizer chain integration", async (t) => {

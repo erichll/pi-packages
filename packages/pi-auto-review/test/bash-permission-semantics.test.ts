@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import test from "node:test";
 // These real permission-system internals are verified against 41.0.0. Like
 // authorizer-integration.test.ts, this file is excluded from tsc and loaded
@@ -45,6 +46,23 @@ function descriptor(command: string, check: ReturnType<typeof resolveBashCommand
     decision: { surface: "bash", value: check.command ?? command },
   };
 }
+
+test("chain prompt names every other asking unit and retains the full command", {
+  skip: !existsSync(new URL("../../../node_modules/@gotgenes/pi-permission-system/src/authority/ask-narrowing.ts", import.meta.url)),
+}, async () => {
+  const command = "git push origin main && git push origin dev";
+  const { resolver } = policy({ "*": "allow", "git push *": "ask" });
+  const program = await BashProgram.parse(command, normalizer);
+  const check = resolveBashCommandCheck(command, program.commands(), undefined, resolver);
+  const payload = descriptor(command, check).payload;
+  assert.equal(check.state, "ask");
+  assert.equal(payload.request.value, "git push origin main");
+  assert.deepEqual(payload.request.otherAskingUnits, ["git push origin dev"]);
+  const request = boundaryRequest({ cwd } as never, {
+    requestId: "chain", source: "tool_call", agentName: null, toolName: "bash", command, payload,
+  }, resolver);
+  assert.equal(request.fullCommand ?? request.command, command);
+});
 
 test("absolute bash rules match relative spelling and preserve the actual command", async () => {
   const command = "cat ./notes.txt";
@@ -121,7 +139,7 @@ test("a wrapper unit's session grant cannot approve an asking or denied sibling"
     assert.equal(check.state, "ask");
     assert.notEqual(check.source, "session");
     assert.equal(check.command, "git push origin main");
-    assert.deepEqual(check.askingUnits, [{ command: "git push origin main" }]);
+    assert.deepEqual(check.askingUnits?.map((unit) => unit.command), ["git push origin main"]);
     assert.equal((await runner.run(descriptor(command, check), null)).action, "block");
     assert.equal(prompts, 1);
     assert.equal(decisions.at(-1)?.result, "deny");
@@ -147,7 +165,7 @@ test("an unresolved session-granted unit stays allow rather than winning a sibli
   assert.equal(check.state, "ask");
   assert.notEqual(check.source, "session");
   assert.equal(check.command, "git push origin main");
-  assert.deepEqual(check.askingUnits, [{ command: "git push origin main" }]);
+  assert.deepEqual(check.askingUnits?.map((unit) => unit.command), ["git push origin main"]);
 });
 
 test("GateRunner cannot fast-path a session-sourced check clamped to ask", async () => {
