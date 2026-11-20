@@ -81,6 +81,7 @@ Available segments:
 | ID | Data | Default |
 | --- | --- | --- |
 | `model`, `thinking` | Model and colored `(level)` suffix | On |
+| `speed` | Service tier of the latest provider request: `fast` (`priority`), `Ultra Fast` (`ultrafast`) or `flex`; hidden when the request carried none or before the first request after a model switch | On |
 | `context` | Current context usage | On |
 | `quota` | Subscription Usage and reset countdowns; hidden without data | On |
 | `directory` | Current directory | On |
@@ -94,8 +95,8 @@ Available segments:
 
 `segments` is an ordered array of
 `{ id, enabled, icon?, color?, iconColor?, background? }`. Omitted segments are
-disabled, **except `quota`, `session` and `toolTotal`**: old configurations automatically
-gain `quota` after `context`, and `session` and `toolTotal` before `tokens` (or at the end when
+disabled, **except `quota`, `speed`, `session` and `toolTotal`**: old configurations automatically
+gain `quota` after `context`, `speed` before `context`, and `session` and `toolTotal` before `tokens` (or at the end when
 the anchor is absent). To keep one off, include it with `"enabled": false`.
 
 Colors accept `#RRGGBB` or supported Pi theme tokens such as `accent`, `muted`,

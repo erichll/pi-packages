@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.0 - 2026-11-20
+
+- Add a `speed` segment, enabled by default, that shows the `service_tier` of
+  the latest provider request (`fast` for `priority`, `Ultra Fast` for
+  `ultrafast`, `flex`). It is read from the outgoing payload, so it shows what
+  was actually requested; it works with CLIProxyAPI's `/fast` and `/ultrafast`
+  modes, which the replaced built-in footer could no longer label. It is hidden
+  until a request carries a tier, and cleared on a model switch. Existing
+  segment lists gain it before `context` unless they list it explicitly.
+
 ## 0.10.0 - 2026-11-03
 
 - Mark the cost segment when the summed USD total is a catalog estimate or

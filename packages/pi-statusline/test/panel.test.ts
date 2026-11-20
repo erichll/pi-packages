@@ -45,6 +45,7 @@ test("keyboard editing, validation, ordering and save produce a usable configura
   panel.handleInput(" ");
   panel.handleInput("\x1b[1;3A"); // Move past quota.
   panel.handleInput("\x1b[1;3A"); // Move past context and the hidden thinking entry.
+  panel.handleInput("\x1b[1;3A"); // Move past speed.
   panel.handleInput("\x1b[1;3A"); // Move past model.
   select(panel, "[x] model"); panel.handleInput(enter);
   select(panel, "Thinking level:"); panel.handleInput(enter);

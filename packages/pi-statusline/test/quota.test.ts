@@ -183,8 +183,8 @@ test("quota renders labeled primary then secondary with compact reset countdowns
 
 test("quota is auto-inserted after context in old configs; explicit disable/order survives saving", () => {
   const config = parseConfig({ segments: [{ id: "model" }, { id: "context" }, { id: "directory" }] });
-  assert.deepEqual(config.segments.slice(0, 4).map((item) => item.id), ["model", "context", "quota", "directory"]);
-  assert.equal(config.segments[2]!.enabled, true);
+  assert.deepEqual(config.segments.slice(0, 5).map((item) => item.id), ["model", "speed", "context", "quota", "directory"]);
+  assert.equal(config.segments[3]!.enabled, true);
   assert.deepEqual(parseConfig(config), config, "migration is idempotent");
   const disabled = parseConfig({ segments: [{ id: "quota", enabled: false }, { id: "context" }] });
   assert.equal(disabled.segments[0]!.enabled, false);

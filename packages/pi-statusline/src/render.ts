@@ -13,11 +13,11 @@ export type RenderTheme = Pick<Theme, "style" | "colors" | "appearance">;
 // Keep rainbow hues independent of semantic theme colors, which can repeat.
 const THINKING_RAINBOW = ["#c084fc", "#f472b6", "#fb923c", "#facc15", "#4ade80", "#22d3ee", "#60a5fa"].map((value) => parseColor(value));
 const ICONS: Record<StatuslineConfig["icons"], Partial<Record<SegmentId, string>>> = {
-  unicode: { model: "", directory: "▸", git: "⑂", context: "◉", cost: "$", input: "↑", output: "↓", session: "◷", toolTotal: "⚒", tokens: "Σ", cacheRead: "R", cacheWrite: "W" },
-  nerd: { model: "", directory: "󰉋", git: "", context: "󰆼", quota: "󰦖", cost: "$", input: "↑", output: "↓", session: "󰥔", toolTotal: "󱁤", tokens: "󰊄", cacheRead: "R", cacheWrite: "W" },
-  ascii: { model: "", directory: "", git: "git:", context: "ctx:", cost: "$", input: "in:", output: "out:", session: "ses:", toolTotal: "tool:", tokens: "tok:", cacheRead: "R:", cacheWrite: "W:" },
+  unicode: { speed: "⚡", model: "", directory: "▸", git: "⑂", context: "◉", cost: "$", input: "↑", output: "↓", session: "◷", toolTotal: "⚒", tokens: "Σ", cacheRead: "R", cacheWrite: "W" },
+  nerd: { speed: "\uf0e7", model: "", directory: "󰉋", git: "", context: "󰆼", quota: "󰦖", cost: "$", input: "↑", output: "↓", session: "󰥔", toolTotal: "󱁤", tokens: "󰊄", cacheRead: "R", cacheWrite: "W" },
+  ascii: { speed: "", model: "", directory: "", git: "git:", context: "ctx:", cost: "$", input: "in:", output: "out:", session: "ses:", toolTotal: "tool:", tokens: "tok:", cacheRead: "R:", cacheWrite: "W:" },
 };
-const DROP_ORDER: SegmentId[] = ["cost", "cacheWrite", "cacheRead", "output", "input", "thinking", "git", "directory"];
+const DROP_ORDER: SegmentId[] = ["cost", "speed", "cacheWrite", "cacheRead", "output", "input", "thinking", "git", "directory"];
 export function formatTokens(value: number): string {
   if (value < 1000) return String(Math.round(value));
   const divisor = value >= 1e6 ? 1e6 : 1000;
@@ -64,11 +64,16 @@ function gitText(data: StatuslineSnapshot, ascii: boolean): string | undefined {
   if (git.behind) bits.push(`${ascii ? "v" : "↓"}${git.behind}`);
   return bits.join(" ");
 }
+/** Service tiers worth showing; `default`, `auto` and unknown values stay hidden. */
+function speedLabel(tier: string | undefined): string | undefined {
+  return tier === "priority" ? "fast" : tier === "ultrafast" ? "Ultra Fast" : tier === "flex" ? "flex" : undefined;
+}
 function segmentText(id: SegmentId, data: StatuslineSnapshot, config: StatuslineConfig): string | undefined {
   const usage = data.usage;
   switch (id) {
     case "model": return (config.modelDisplay === "last" ? data.modelId.split("/").filter(Boolean).at(-1) : undefined) || data.model || "No model";
     case "thinking": return undefined; // Its settings now control the model's suffix.
+    case "speed": return speedLabel(data.serviceTier);
     case "directory": return displayPath(data, config.pathMode);
     case "git": return gitText(data, config.icons === "ascii");
     case "context": {
@@ -110,6 +115,7 @@ function defaultColor(id: SegmentId, data: StatuslineSnapshot): ColorValue {
     const colors: Record<string, ColorValue> = { off: "thinkingOff", minimal: "thinkingMinimal", low: "thinkingLow", medium: "thinkingMedium", high: "thinkingHigh", xhigh: "thinkingXhigh", max: "thinkingMax" };
     return colors[data.thinking] ?? "muted";
   }
+  if (id === "speed") return "warning";
   if (id === "model") return "accent";
   if (id === "directory") return "success";
   if (id === "context") return "#c678dd";

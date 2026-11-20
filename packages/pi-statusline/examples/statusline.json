@@ -18,6 +18,10 @@
       "enabled": true
     },
     {
+      "id": "speed",
+      "enabled": true
+    },
+    {
       "id": "context",
       "enabled": true
     },

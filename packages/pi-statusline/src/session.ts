@@ -17,6 +17,13 @@ export function sessionStart(timestamp: string | undefined, now = Date.now()): n
   return Number.isFinite(ms) && ms <= now + 60000 ? ms : null;
 }
 
+/** The request's `service_tier`, when it is a short plain token. */
+export function serviceTierOf(payload: unknown): string | undefined {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return undefined;
+  const tier = (payload as { service_tier?: unknown }).service_tier;
+  return typeof tier === "string" && /^[\w.-]{1,32}$/.test(tier) ? tier.toLowerCase() : undefined;
+}
+
 export class FooterSession {
   readonly runtime = new RuntimeState();
   readonly compaction = new CompactionState();
@@ -39,6 +46,7 @@ export class FooterSession {
   private sessionStartMs: number | null = null;
   private toolCalls = 0;
   private skills: string[] = [];
+  private serviceTier: string | undefined;
   private readonly gitReader: GitReader | undefined;
   private readonly commands: () => readonly SlashCommandInfo[];
   private signal: AbortSignal | undefined;
@@ -49,7 +57,18 @@ export class FooterSession {
   }
   get active(): boolean { return this.ownsFooter && !this.closed; }
   setContext(ctx: ExtensionContext): void { this.ctx = ctx; this.quota.select(ctx.model); this.watchSignal(); }
-  beginProviderRequest(): void { if (this.active) this.quota.beginRequest(this.ctx.model); }
+  beginProviderRequest(payload?: unknown): void {
+    if (!this.active) return;
+    this.quota.beginRequest(this.ctx.model);
+    // The tier is read from the outgoing payload, so it reflects what was actually requested.
+    this.setServiceTier(serviceTierOf(payload));
+  }
+  /** Forget the observed tier, e.g. after a model switch, until the next request reports it. */
+  clearServiceTier(): void { this.setServiceTier(undefined); }
+  private setServiceTier(tier: string | undefined): void {
+    if (tier === this.serviceTier) return;
+    this.serviceTier = tier; this.schedule(true);
+  }
   observeProviderResponse(headers: Record<string, string>): void {
     if (!this.active) return;
     this.quota.response(headers, this.ctx.model); this.schedule(true);
@@ -156,6 +175,7 @@ export class FooterSession {
       thinking: this.ctx.thinkingLevel ?? "off", cwd: this.ctx.cwd, home: homedir(),
       context: this.context, usage: this.usage.snapshot(), quota: this.quota.snapshot(this.ctx.model), git: this.git,
       statuses: this.provider?.getExtensionStatuses() ?? new Map(),
+      ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
       // Minute resolution keeps an idle footer from repainting every second.
       sessionMinutes: this.sessionStartMs === null ? null : Math.floor(Math.max(0, Date.now() - this.sessionStartMs) / 60000),
       toolCalls: this.toolCalls, skills: this.skills,

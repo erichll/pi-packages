@@ -6,7 +6,7 @@ import type { Component, TUI } from "@earendil-works/pi-tui";
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import { presetConfig } from "../src/config.ts";
 import { emptyGit } from "../src/git.ts";
-import { FooterSession, sessionStart } from "../src/session.ts";
+import { FooterSession, serviceTierOf, sessionStart } from "../src/session.ts";
 import { assistant, messageEntry, testTheme, usage } from "./helpers.ts";
 
 function fixture() {
@@ -234,4 +234,34 @@ test("session skills come from recorded reads of loaded skill files and survive 
     session.runtime.reset(); session.refresh();
     assert.deepEqual(session.snapshot().skills, ["docx"]);
   } finally { session.dispose(); }
+});
+
+test("speed segment follows the latest request's service tier and resets on model switch", () => {
+  const f = fixture();
+  const session = new FooterSession(f.ctx, { ...presetConfig(), icons: "ascii" }, async () => emptyGit("none"));
+  const text = () => f.footer!.render(300).map(stripTerminalSequences).join("\n");
+  try {
+    session.install();
+    assert.equal(session.snapshot().serviceTier, undefined);
+    assert.doesNotMatch(text(), /Ultra Fast|fast/);
+    session.beginProviderRequest({ service_tier: "priority" });
+    assert.match(text(), /Test model.*fast/);
+    session.beginProviderRequest({ service_tier: "ultrafast" });
+    assert.match(text(), /Ultra Fast/);
+    session.beginProviderRequest({ service_tier: "default" });
+    assert.doesNotMatch(text(), /Ultra Fast|fast/);
+    session.beginProviderRequest({ service_tier: "priority" });
+    session.clearServiceTier();
+    assert.equal(session.snapshot().serviceTier, undefined);
+    session.beginProviderRequest({ input: [] });
+    assert.equal(session.snapshot().serviceTier, undefined);
+    session.beginProviderRequest(undefined);
+    session.beginProviderRequest([{ service_tier: "priority" }]);
+    assert.equal(session.snapshot().serviceTier, undefined);
+  } finally { session.dispose(); }
+});
+
+test("serviceTierOf accepts only short plain string tiers", () => {
+  assert.equal(serviceTierOf({ service_tier: "Priority" }), "priority");
+  for (const bad of [{ service_tier: 1 }, { service_tier: "x".repeat(40) }, { service_tier: "a\x1b[31m" }, null, "priority", []]) assert.equal(serviceTierOf(bad), undefined);
 });
